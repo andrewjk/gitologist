@@ -112,17 +112,76 @@ async function updateBranch(gitDir: string, commitSha: string): Promise<void> {
 }
 
 async function createTree(gitDir: string, index: Map<string, IndexEntry>): Promise<string> {
-	const paths = Array.from(index.keys()).sort();
+	return createTreeRecursive(gitDir, index, "");
+}
+
+async function createTreeRecursive(
+	gitDir: string,
+	index: Map<string, IndexEntry>,
+	prefix: string,
+): Promise<string> {
+	const paths = Array.from(index.keys())
+		.filter((path) => {
+			if (prefix === "") {
+				return !path.includes("/");
+			}
+			if (path.startsWith(prefix + "/")) {
+				const remaining = path.slice(prefix.length + 1);
+				return !remaining.includes("/");
+			}
+			return false;
+		})
+		.sort();
 
 	const treeEntries: TreeEntry[] = [];
 
 	for (const path of paths) {
 		const entry = index.get(path)!;
+		const content = await readFile(join(gitDir, "..", path), "utf-8");
+		const blobSha = await hashObject(gitDir, content, "blob");
 		treeEntries.push({
-			path: entry.path,
-			sha: entry.sha,
+			path: prefix === "" ? path : path.slice(prefix.length + 1),
+			sha: blobSha,
 			mode: entry.mode,
 			type: "blob",
+		});
+	}
+
+	const subdirs = new Map<string, string[]>();
+	for (const path of index.keys()) {
+		if (path.includes("/")) {
+			const parts = path.split("/");
+			if (prefix === "") {
+				const dir = parts[0];
+				if (!subdirs.has(dir)) {
+					subdirs.set(dir, []);
+				}
+				subdirs.get(dir)!.push(path);
+			} else if (path.startsWith(prefix + "/")) {
+				const remaining = path.slice(prefix.length + 1);
+				if (remaining.includes("/")) {
+					const parts2 = remaining.split("/");
+					const dir = parts2[0];
+					if (!subdirs.has(dir)) {
+						subdirs.set(dir, []);
+					}
+					subdirs.get(dir)!.push(path);
+				}
+			}
+		}
+	}
+
+	for (const [dir] of subdirs) {
+		const dirSha = await createTreeRecursive(
+			gitDir,
+			index,
+			prefix === "" ? dir : `${prefix}/${dir}`,
+		);
+		treeEntries.push({
+			path: dir,
+			sha: dirSha,
+			mode: "040000",
+			type: "tree",
 		});
 	}
 
