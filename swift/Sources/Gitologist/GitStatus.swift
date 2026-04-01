@@ -4,6 +4,7 @@ enum GitError: Error, LocalizedError {
 	case notAGitRepository
 	case invalidIndexFile(String)
 	case fileReadError(String)
+	case notOnABranch
 
 	var errorDescription: String? {
 		switch self {
@@ -13,6 +14,8 @@ enum GitError: Error, LocalizedError {
 			return "Invalid index file: \(message)"
 		case .fileReadError(let message):
 			return "File read error: \(message)"
+		case .notOnABranch:
+			return "Not on a branch (detached HEAD)"
 		}
 	}
 }
