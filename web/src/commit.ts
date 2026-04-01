@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
 import { status } from "./status.js";
-import { getCurrentBranch, getCurrentCommit, getIndex } from "./utils.js";
+import { getCurrentBranch, getCurrentCommit, getIndex, hashObject } from "./utils.js";
 
 interface IndexEntry {
 	path: string;
@@ -167,29 +167,4 @@ async function createCommit(
 	commitContent += `\n${message}\n`;
 
 	return hashObject(gitDir, commitContent, "commit");
-}
-
-async function hashObject(
-	gitDir: string,
-	content: string,
-	type: "blob" | "tree" | "commit",
-): Promise<string> {
-	const crypto = await import("node:crypto");
-	const zlib = await import("node:zlib");
-
-	const header = `${type} ${content.length}\0${content}`;
-	const hash = crypto.createHash("sha1");
-	hash.update(header);
-	const sha = hash.digest("hex");
-
-	const objectDir = join(gitDir, "objects", sha.slice(0, 2));
-	const objectPath = join(objectDir, sha.slice(2));
-
-	if (!existsSync(objectPath)) {
-		await mkdir(objectDir, { recursive: true });
-		const compressed = zlib.deflateSync(Buffer.from(header));
-		await writeFile(objectPath, compressed);
-	}
-
-	return sha;
 }
