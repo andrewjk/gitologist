@@ -2,18 +2,14 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
+import { getIndex, hashFile } from "./utils.js";
+
 export interface Status {
 	branch: string;
 	upToDate: string;
 	staged: string[];
 	modified: string[];
 	untracked: string[];
-}
-
-interface IndexEntry {
-	path: string;
-	sha: string;
-	mode: string;
 }
 
 export async function status(path: string): Promise<Status> {
@@ -77,32 +73,6 @@ export async function status(path: string): Promise<Status> {
 	};
 }
 
-async function getIndex(indexPath: string): Promise<Map<string, IndexEntry>> {
-	const index = new Map<string, IndexEntry>();
-
-	if (!existsSync(indexPath)) {
-		return index;
-	}
-
-	try {
-		const content = await readFile(indexPath, "utf-8");
-		const lines = content.trim().split("\n");
-
-		for (const line of lines) {
-			if (!line) continue;
-			const parts = line.split(" ");
-			if (parts.length >= 2) {
-				const [path, sha, mode = "100644"] = parts;
-				index.set(path, { path, sha, mode });
-			}
-		}
-	} catch {
-		// If we can't read the index, return empty
-	}
-
-	return index;
-}
-
 function getWorkingFiles(path: string): string[] {
 	const files: string[] = [];
 
@@ -126,12 +96,4 @@ function getWorkingFiles(path: string): string[] {
 
 	scan(path);
 	return files;
-}
-
-async function hashFile(filePath: string): Promise<string> {
-	const crypto = await import("node:crypto");
-	const content = await readFile(filePath);
-	const hash = crypto.createHash("sha1");
-	hash.update(content);
-	return hash.digest("hex");
 }

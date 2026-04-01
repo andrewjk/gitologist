@@ -1,0 +1,94 @@
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
+export interface IndexEntry {
+	path: string;
+	sha: string;
+	mode: string;
+}
+
+export async function readObject(gitDir: string, sha: string): Promise<string> {
+	const zlib = await import("node:zlib");
+
+	const objectPath = join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
+	const compressed = await readFile(objectPath);
+	const decompressed = zlib.inflateSync(compressed).toString("utf-8");
+
+	const nullIndex = decompressed.indexOf("\0");
+	const header = decompressed.slice(0, nullIndex);
+	const content = decompressed.slice(nullIndex + 1);
+
+	return `${header}\n${content}`;
+}
+
+export async function getCurrentBranch(gitDir: string): Promise<string> {
+	const headPath = join(gitDir, "HEAD");
+	const headContent = (await readFile(headPath, "utf-8")).trim();
+
+	const match = headContent.match(/^ref: refs\/heads\/(.+)$/);
+	if (match) {
+		return match[1];
+	}
+
+	throw new Error("Not on a branch (detached HEAD)");
+}
+
+export async function getCurrentCommit(gitDir: string): Promise<string | null> {
+	try {
+		const branch = await getCurrentBranch(gitDir);
+		const branchPath = join(gitDir, "refs", "heads", branch);
+
+		if (!existsSync(branchPath)) {
+			return null;
+		}
+
+		return (await readFile(branchPath, "utf-8")).trim();
+	} catch {
+		return null;
+	}
+}
+
+export async function hashFile(filePath: string): Promise<string> {
+	const crypto = await import("node:crypto");
+	const content = await readFile(filePath);
+	const hash = crypto.createHash("sha1");
+	hash.update(content);
+	return hash.digest("hex");
+}
+
+export async function getIndex(indexPath: string): Promise<Map<string, IndexEntry>> {
+	const index = new Map<string, IndexEntry>();
+
+	if (!existsSync(indexPath)) {
+		return index;
+	}
+
+	try {
+		const content = await readFile(indexPath, "utf-8");
+		const lines = content.trim().split("\n");
+
+		for (const line of lines) {
+			if (!line) continue;
+			const parts = line.split(" ");
+			if (parts.length >= 2) {
+				const [path, sha, mode = "100644"] = parts;
+				index.set(path, { path, sha, mode });
+			}
+		}
+	} catch {
+		// If we can't read the index, return empty
+	}
+
+	return index;
+}
+
+export async function writeIndex(indexPath: string, index: Map<string, IndexEntry>): Promise<void> {
+	const lines: string[] = [];
+
+	for (const entry of index.values()) {
+		lines.push(`${entry.path} ${entry.sha} ${entry.mode}`);
+	}
+
+	await writeFile(indexPath, lines.join("\n") + "\n", "utf-8");
+}

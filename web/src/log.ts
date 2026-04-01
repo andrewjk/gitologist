@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { getCurrentBranch, readObject } from "./utils.js";
+
 export interface LogEntry {
 	sha: string;
 	abbreviatedSha: string;
@@ -52,18 +54,6 @@ export async function log(path: string, options?: LogOptions): Promise<LogEntry[
 	return entries;
 }
 
-async function getCurrentBranch(gitDir: string): Promise<string> {
-	const headPath = join(gitDir, "HEAD");
-	const headContent = (await readFile(headPath, "utf-8")).trim();
-
-	const match = headContent.match(/^ref: refs\/heads\/(.+)$/);
-	if (match) {
-		return match[1];
-	}
-
-	throw new Error("Not on a branch (detached HEAD)");
-}
-
 async function parseCommitEntry(gitDir: string, commitSha: string): Promise<LogEntry> {
 	const commitData = await readObject(gitDir, commitSha);
 
@@ -84,20 +74,6 @@ async function parseCommitEntry(gitDir: string, commitSha: string): Promise<LogE
 		date: timestamp,
 		message,
 	};
-}
-
-async function readObject(gitDir: string, sha: string): Promise<string> {
-	const zlib = await import("node:zlib");
-
-	const objectPath = join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
-	const compressed = await readFile(objectPath);
-	const decompressed = zlib.inflateSync(compressed).toString("utf-8");
-
-	const nullIndex = decompressed.indexOf("\0");
-	const header = decompressed.slice(0, nullIndex);
-	const content = decompressed.slice(nullIndex + 1);
-
-	return `${header}\n${content}`;
 }
 
 function extractField(commitData: string, fieldName: string): string | null {

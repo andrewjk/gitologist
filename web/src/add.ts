@@ -1,14 +1,8 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { status } from "./status.js";
-
-interface IndexEntry {
-	path: string;
-	sha: string;
-	mode: string;
-}
+import { getIndex, hashFile, writeIndex } from "./utils.js";
 
 export async function add(path: string, files: string[]): Promise<void> {
 	const gitDir = join(path, ".git");
@@ -54,48 +48,4 @@ export async function addAll(path: string): Promise<void> {
 	}
 
 	await add(path, filesToAdd);
-}
-
-async function getIndex(indexPath: string): Promise<Map<string, IndexEntry>> {
-	const index = new Map<string, IndexEntry>();
-
-	if (!existsSync(indexPath)) {
-		return index;
-	}
-
-	try {
-		const content = await readFile(indexPath, "utf-8");
-		const lines = content.trim().split("\n");
-
-		for (const line of lines) {
-			if (!line) continue;
-			const parts = line.split(" ");
-			if (parts.length >= 2) {
-				const [path, sha, mode = "100644"] = parts;
-				index.set(path, { path, sha, mode });
-			}
-		}
-	} catch {
-		// If we can't read the index, return empty
-	}
-
-	return index;
-}
-
-async function writeIndex(indexPath: string, index: Map<string, IndexEntry>): Promise<void> {
-	const lines: string[] = [];
-
-	for (const entry of index.values()) {
-		lines.push(`${entry.path} ${entry.sha} ${entry.mode}`);
-	}
-
-	await writeFile(indexPath, lines.join("\n") + "\n", "utf-8");
-}
-
-async function hashFile(filePath: string): Promise<string> {
-	const crypto = await import("node:crypto");
-	const content = await readFile(filePath);
-	const hash = crypto.createHash("sha1");
-	hash.update(content);
-	return hash.digest("hex");
 }
