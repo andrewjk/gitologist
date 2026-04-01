@@ -20,13 +20,24 @@ func getIndex(at path: String) async throws -> [String: IndexEntry] {
 	for line in lines where !line.isEmpty {
 		let parts = line.components(separatedBy: .whitespaces)
 		guard parts.count >= 2 else { continue }
-		
+
 		let filePath = parts[0]
 		let sha = parts[1]
 		let mode = parts.count >= 3 ? parts[2] : "100644"
-		
+
 		index[filePath] = IndexEntry(path: filePath, sha: sha, mode: mode)
 	}
 
 	return index
+}
+
+func writeIndex(at path: String, index: [String: IndexEntry]) async throws {
+	var lines: [String] = []
+
+	for entry in index.values {
+		lines.append("\(entry.path) \(entry.sha) \(entry.mode)")
+	}
+
+	let content = lines.joined(separator: "\n") + "\n"
+	try content.write(to: URL(fileURLWithPath: path), atomically: true, encoding: .utf8)
 }
