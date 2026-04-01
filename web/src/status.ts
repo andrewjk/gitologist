@@ -47,18 +47,21 @@ export async function status(path: string): Promise<Status> {
 
 	const workingFiles = getWorkingFiles(path);
 
+	for (const filePath of index.keys()) {
+		staged.push(filePath);
+	}
+
 	for (const file of workingFiles) {
 		if (!index.has(file)) {
 			untracked.push(file);
 		}
 	}
 
-	for (const [filePath] of index) {
+	for (const [filePath, entry] of index) {
 		if (!existsSync(join(path, filePath))) {
 			modified.push(filePath);
 		} else {
 			const currentHash = await hashFile(join(path, filePath));
-			const entry = index.get(filePath)!;
 			if (entry.sha !== currentHash) {
 				modified.push(filePath);
 			}
