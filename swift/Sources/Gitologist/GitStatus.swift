@@ -1,0 +1,115 @@
+import Foundation
+
+enum GitError: Error, LocalizedError {
+	case notAGitRepository
+	case invalidIndexFile(String)
+	case fileReadError(String)
+
+	var errorDescription: String? {
+		switch self {
+		case .notAGitRepository:
+			return "Not a git repository"
+		case .invalidIndexFile(let message):
+			return "Invalid index file: \(message)"
+		case .fileReadError(let message):
+			return "File read error: \(message)"
+		}
+	}
+}
+
+func status(at path: String) async throws -> StatusInfo {
+	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+
+	guard FileManager.default.fileExists(atPath: gitDir.path) else {
+		throw GitError.notAGitRepository
+	}
+
+	let headPath = gitDir.appendingPathComponent("HEAD")
+	var branch = ""
+
+	do {
+		let headContent = try String(contentsOf: headPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+		
+		let regex = /^ref: refs\/heads\/(.+)$/
+		if let match = headContent.firstMatch(of: regex) {
+			branch = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
+		} else {
+			branch = "(detached HEAD)"
+		}
+	} catch {
+		branch = "(detached HEAD)"
+	}
+
+	let indexPath = gitDir.appendingPathComponent("index")
+	let index = try await getIndex(at: indexPath.path)
+
+	var staged: [String] = []
+	var modified: [String] = []
+	var untracked: [String] = []
+
+	let workingFiles = getWorkingFiles(at: path)
+
+	for filePath in index.keys {
+		staged.append(filePath)
+	}
+
+	for file in workingFiles {
+		if !index.keys.contains(file) {
+			untracked.append(file)
+		}
+	}
+
+	for (filePath, entry) in index {
+		let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
+		
+		if !FileManager.default.fileExists(atPath: fullPath.path) {
+			modified.append(filePath)
+		} else {
+			let currentHash = try await hashFile(at: fullPath.path)
+			if entry.sha != currentHash {
+				modified.append(filePath)
+			}
+		}
+	}
+
+	return StatusInfo(
+		branch: branch,
+		upToDate: "Your branch is up to date with 'origin/\(branch)'.",
+		staged: staged,
+		modified: modified,
+		untracked: untracked
+	)
+}
+
+private func getWorkingFiles(at path: String) -> [String] {
+	var files: [String] = []
+	let baseURL = URL(fileURLWithPath: path).standardizedFileURL
+
+	func scan(_ dir: URL) {
+		let standardizedDir = dir.standardizedFileURL
+		guard let entries = try? FileManager.default.contentsOfDirectory(at: standardizedDir, includingPropertiesForKeys: nil) else {
+			return
+		}
+
+		for entry in entries {
+			if entry.lastPathComponent == ".git" { continue }
+
+			guard let resourceValues = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]),
+			      let isDirectory = resourceValues.isDirectory,
+			      let isFile = resourceValues.isRegularFile else {
+				continue
+			}
+
+			if isDirectory {
+				scan(entry)
+			} else if isFile {
+				let standardizedEntry = entry.standardizedFileURL
+				let relPath = standardizedEntry.pathComponents.dropFirst(baseURL.pathComponents.count).joined(separator: "/")
+				files.append(relPath)
+			}
+		}
+	}
+
+	scan(baseURL)
+	return files
+}
