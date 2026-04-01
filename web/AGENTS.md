@@ -85,4 +85,16 @@ For GitHub Actions, consider using [`voidzero-dev/setup-vp`](https://github.com/
 
 - [ ] Run `vp install` after pulling remote changes and before getting started.
 - [ ] Run `vp check` and `vp test` to validate changes.
+
+## Code Structure
+
+TypeScript files should follow this structure:
+
+1. Imports
+2. Interfaces (both exported and internal)
+3. Exported functions/classes (main public API)
+4. Helper functions in the order they are called
+
+This organization makes the code easier to read by placing the public API at the top and following the call chain for helper functions.
+
 <!--VITE PLUS END-->
