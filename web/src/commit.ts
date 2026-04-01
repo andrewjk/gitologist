@@ -1,22 +1,11 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { status } from "./status.js";
-import { getCurrentBranch, getCurrentCommit, getIndex, hashObject } from "./utils.js";
-
-interface IndexEntry {
-	path: string;
-	sha: string;
-	mode: string;
-}
-
-interface TreeEntry {
-	path: string;
-	sha: string;
-	mode: string;
-	type: "blob" | "tree";
-}
+import type { IndexEntry } from "./types/IndexEntry.ts";
+import type { TreeEntry } from "./types/TreeEntry.ts";
+import { getCurrentBranch, getCurrentCommit, getIndex, hashObject, updateBranch } from "./utils.js";
 
 export async function commit(path: string, message: string): Promise<string> {
 	const gitDir = join(path, ".git");
@@ -46,17 +35,10 @@ export async function commit(path: string, message: string): Promise<string> {
 	const parentSha = await getCurrentCommit(gitDir);
 	const commitSha = await createCommit(gitDir, treeSha, message, parentSha);
 
-	await updateBranch(gitDir, commitSha);
+	const branchName = await getCurrentBranch(gitDir);
+	await updateBranch(gitDir, branchName, commitSha);
 
 	return commitSha;
-}
-
-async function updateBranch(gitDir: string, commitSha: string): Promise<void> {
-	const branch = await getCurrentBranch(gitDir);
-	const branchPath = join(gitDir, "refs", "heads", branch);
-
-	await mkdir(dirname(branchPath), { recursive: true });
-	await writeFile(branchPath, commitSha + "\n", "utf-8");
 }
 
 async function createTree(gitDir: string, index: Map<string, IndexEntry>): Promise<string> {

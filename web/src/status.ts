@@ -2,17 +2,10 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
+import type { StatusInfo } from "./types/StatusInfo.ts";
 import { getIndex, hashFile } from "./utils.js";
 
-export interface Status {
-	branch: string;
-	upToDate: string;
-	staged: string[];
-	modified: string[];
-	untracked: string[];
-}
-
-export async function status(path: string): Promise<Status> {
+export async function status(path: string): Promise<StatusInfo> {
 	const gitDir = join(path, ".git");
 
 	if (!existsSync(gitDir)) {

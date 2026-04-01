@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
 import { status } from "./status.js";
+import { getCurrentBranch } from "./utils.ts";
 
 export async function push(path: string, remote?: string, branch?: string): Promise<void> {
 	const gitDir = join(path, ".git");
@@ -30,16 +31,4 @@ export async function push(path: string, remote?: string, branch?: string): Prom
 	const remoteBranchPath = join(gitDir, "refs", "remotes", remoteName, branchName);
 	await mkdir(dirname(remoteBranchPath), { recursive: true });
 	await writeFile(remoteBranchPath, commitSha + "\n", "utf-8");
-}
-
-async function getCurrentBranch(gitDir: string): Promise<string> {
-	const headPath = join(gitDir, "HEAD");
-	const headContent = (await readFile(headPath, "utf-8")).trim();
-
-	const match = headContent.match(/^ref: refs\/heads\/(.+)$/);
-	if (match) {
-		return match[1];
-	}
-
-	throw new Error("Not on a branch (detached HEAD)");
 }

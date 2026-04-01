@@ -1,15 +1,15 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
-import { getCurrentBranch, getCurrentCommit, hashObject, readObject } from "./utils.js";
-
-export interface MergeResult {
-	success: boolean;
-	fastForward: boolean;
-	commitSha?: string;
-	message?: string;
-}
+import type { MergeResult } from "./types/MergeResult.ts";
+import {
+	getCurrentBranch,
+	getCurrentCommit,
+	hashObject,
+	readObject,
+	updateBranch,
+} from "./utils.js";
 
 export async function merge(
 	path: string,
@@ -90,12 +90,6 @@ async function getBranchCommit(gitDir: string, branchName: string): Promise<stri
 	}
 
 	return (await readFile(branchPath, "utf-8")).trim();
-}
-
-async function updateBranch(gitDir: string, branchName: string, commitSha: string): Promise<void> {
-	const branchPath = join(gitDir, "refs", "heads", branchName);
-	await mkdir(dirname(branchPath), { recursive: true });
-	await writeFile(branchPath, commitSha + "\n", "utf-8");
 }
 
 async function isAncestorOf(

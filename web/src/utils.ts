@@ -1,12 +1,9 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-export interface IndexEntry {
-	path: string;
-	sha: string;
-	mode: string;
-}
+import type { IndexEntry } from "./types/IndexEntry.ts";
+import type { TreeEntry } from "./types/TreeEntry.ts";
 
 export async function readObject(gitDir: string, sha: string): Promise<string> {
 	const zlib = await import("node:zlib");
@@ -116,4 +113,72 @@ export async function hashObject(
 	}
 
 	return sha;
+}
+
+export function extractTreeFromCommit(commitData: string): string {
+	const lines = commitData.split("\n");
+	for (const line of lines) {
+		if (line.startsWith("tree ")) {
+			return line.slice(5);
+		}
+	}
+	throw new Error("Invalid commit object");
+}
+
+export function parseTreeEntries(treeData: string): TreeEntry[] {
+	const entries: TreeEntry[] = [];
+	let contentStart = treeData.indexOf("\n") + 1;
+
+	while (contentStart < treeData.length) {
+		const firstSpaceIndex = treeData.indexOf(" ", contentStart);
+		const secondSpaceIndex = treeData.indexOf(" ", firstSpaceIndex + 1);
+		const tabIndex = treeData.indexOf("\t", secondSpaceIndex + 1);
+		const nullIndex = treeData.indexOf("\0", tabIndex);
+
+		if (firstSpaceIndex === -1 || secondSpaceIndex === -1 || tabIndex === -1 || nullIndex === -1) {
+			break;
+		}
+
+		const mode = treeData.slice(contentStart, firstSpaceIndex);
+		const type = treeData.slice(firstSpaceIndex + 1, secondSpaceIndex);
+		const sha = treeData.slice(secondSpaceIndex + 1, tabIndex);
+		const path = treeData.slice(tabIndex + 1, nullIndex);
+
+		if (type !== "blob" && type !== "tree") {
+			break;
+		}
+
+		entries.push({
+			path,
+			sha,
+			mode,
+			type: type as "blob" | "tree",
+		});
+
+		contentStart = nullIndex + 1;
+	}
+
+	return entries;
+}
+
+export function extractContentFromBlob(blobData: string): string {
+	const lines = blobData.split("\n");
+	const header = lines[0];
+
+	if (!header.startsWith("blob ")) {
+		throw new Error("Invalid blob object");
+	}
+
+	const contentStart = header.length + 1;
+	return blobData.slice(contentStart);
+}
+
+export async function updateBranch(
+	gitDir: string,
+	branchName: string,
+	commitSha: string,
+): Promise<void> {
+	const branchPath = join(gitDir, "refs", "heads", branchName);
+	await mkdir(dirname(branchPath), { recursive: true });
+	await writeFile(branchPath, commitSha + "\n", "utf-8");
 }
