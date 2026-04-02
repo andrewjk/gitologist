@@ -170,4 +170,118 @@ public static class Utils
         Directory.CreateDirectory(Path.GetDirectoryName(branchPath)!);
         await File.WriteAllTextAsync(branchPath, commitSha + "\n");
     }
+
+    public static async Task<string> ReadObject(string gitDir, string sha)
+    {
+        var objectPath = Path.Combine(gitDir, "objects", sha.Substring(0, 2), sha.Substring(2));
+        var compressed = await File.ReadAllBytesAsync(objectPath);
+        var decompressed = Decompress(compressed);
+        return Encoding.UTF8.GetString(decompressed);
+    }
+
+    public static byte[] Decompress(byte[] compressed)
+    {
+        using var input = new MemoryStream(compressed);
+        using var output = new MemoryStream();
+        using var deflate = new DeflateStream(input, CompressionMode.Decompress);
+        deflate.CopyTo(output);
+        return output.ToArray();
+    }
+
+    public static string ExtractTreeFromCommit(string commitData)
+    {
+        // Git object format: "commit <size>\0<content>"
+        // Find the null terminator after the header
+        var nullIndex = commitData.IndexOf('\0');
+        if (nullIndex == -1)
+        {
+            throw new InvalidOperationException("Invalid commit object: no null terminator");
+        }
+
+        // Get content after the null terminator
+        var content = commitData.Substring(nullIndex + 1);
+        var lines = content.Split('\n');
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("tree "))
+            {
+                return line.Substring(5).Trim();
+            }
+        }
+
+        throw new InvalidOperationException("Invalid commit object: no tree line found");
+    }
+
+    public static List<TreeEntry> ParseTreeEntries(string treeData)
+    {
+        var entries = new List<TreeEntry>();
+        // Git object format: "tree <size>\0<content>"
+        var headerEnd = treeData.IndexOf('\0');
+        if (headerEnd == -1)
+        {
+            return entries;
+        }
+
+        var contentStart = headerEnd + 1;
+
+        while (contentStart < treeData.Length)
+        {
+            var firstSpaceIndex = treeData.IndexOf(' ', contentStart);
+            if (firstSpaceIndex == -1) break;
+
+            var secondSpaceIndex = treeData.IndexOf(' ', firstSpaceIndex + 1);
+            if (secondSpaceIndex == -1) break;
+
+            var tabIndex = treeData.IndexOf('\t', secondSpaceIndex + 1);
+            if (tabIndex == -1) break;
+
+            var entryNullIndex = treeData.IndexOf('\0', tabIndex);
+            if (entryNullIndex == -1) break;
+
+            var mode = treeData.Substring(contentStart, firstSpaceIndex - contentStart);
+            var type = treeData.Substring(firstSpaceIndex + 1, secondSpaceIndex - firstSpaceIndex - 1);
+            var sha = treeData.Substring(secondSpaceIndex + 1, tabIndex - secondSpaceIndex - 1);
+            var path = treeData.Substring(tabIndex + 1, entryNullIndex - tabIndex - 1);
+
+            if (type != "blob" && type != "tree")
+            {
+                break;
+            }
+
+            entries.Add(
+                new TreeEntry
+                {
+                    Path = path,
+                    Sha = sha,
+                    Mode = mode,
+                    Type = type,
+                }
+            );
+
+            contentStart = entryNullIndex + 1;
+        }
+
+        return entries;
+    }
+
+    public static string ExtractContentFromBlob(string blobData)
+    {
+        // Git object format: "blob <size>\0<content>"
+        var nullIndex = blobData.IndexOf('\0');
+        if (nullIndex == -1)
+        {
+            throw new InvalidOperationException("Invalid blob object: no null terminator");
+        }
+
+        // Verify header starts with "blob "
+        var header = blobData.Substring(0, nullIndex);
+        if (!header.StartsWith("blob "))
+        {
+            throw new InvalidOperationException("Invalid blob object: incorrect header");
+        }
+
+        // Return content after the null terminator
+        return blobData.Substring(nullIndex + 1);
+    }
 }
