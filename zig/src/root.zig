@@ -8,3 +8,4 @@ pub const addAll = @import("add.zig").addAll;
 pub const commit = @import("commit.zig").commit;
 pub const restore = @import("restore.zig").restore;
 pub const restoreAll = @import("restore.zig").restoreAll;
+pub const remoteAdd = @import("remote.zig").remoteAdd;
