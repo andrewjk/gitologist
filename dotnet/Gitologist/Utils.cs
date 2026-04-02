@@ -124,9 +124,10 @@ public static class Utils
     {
         var bytes = Encoding.UTF8.GetBytes(content);
         using var output = new MemoryStream();
-        using var deflate = new DeflateStream(output, CompressionLevel.Optimal);
-        deflate.Write(bytes, 0, bytes.Length);
-        deflate.Close();
+        using (var zlib = new ZLibStream(output, CompressionLevel.Optimal))
+        {
+            zlib.Write(bytes, 0, bytes.Length);
+        }
         return output.ToArray();
     }
 
@@ -183,8 +184,10 @@ public static class Utils
     {
         using var input = new MemoryStream(compressed);
         using var output = new MemoryStream();
-        using var deflate = new DeflateStream(input, CompressionMode.Decompress);
-        deflate.CopyTo(output);
+        using (var zlib = new ZLibStream(input, CompressionMode.Decompress))
+        {
+            zlib.CopyTo(output);
+        }
         return output.ToArray();
     }
 
