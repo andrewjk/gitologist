@@ -205,9 +205,14 @@ fn createTreeRecursive(
     defer tree_content.deinit(allocator);
 
     for (tree_entries.items) |entry| {
-        const line = try std.fmt.allocPrint(allocator, "{s} {s} {s}\t{s}\x00", .{ entry.mode, entry.entry_type, entry.sha, entry.path });
-        defer allocator.free(line);
-        try tree_content.appendSlice(allocator, line);
+        try tree_content.appendSlice(allocator, entry.mode);
+        try tree_content.appendSlice(allocator, " ");
+        try tree_content.appendSlice(allocator, entry.entry_type);
+        try tree_content.appendSlice(allocator, " ");
+        try tree_content.appendSlice(allocator, entry.sha);
+        try tree_content.append(allocator, 0);
+        try tree_content.appendSlice(allocator, entry.path);
+        try tree_content.append(allocator, 0);
     }
 
     return utils.hashObject(io, allocator, git_dir_path, tree_content.items, "tree");

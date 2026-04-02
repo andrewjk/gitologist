@@ -4,4 +4,5 @@ comptime {
     _ = @import("status_test.zig");
     _ = @import("add_test.zig");
     _ = @import("commit_test.zig");
+    _ = @import("restore_test.zig");
 }
