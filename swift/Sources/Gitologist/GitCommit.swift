@@ -63,7 +63,7 @@ private func createTree(at rootPath: String, gitDir: String, index: [String: Ind
 		treeEntries.append((path: entry.path, sha: blobSha, mode: entry.mode))
 	}
 	
-	// Build tree content - format: "<mode> <type> <sha>\t<path>\0"
+	// Build tree content - format: "<mode> blob <sha>\t<path>\0"
 	var treeContent = ""
 	for entry in treeEntries {
 		treeContent += "\(entry.mode) blob \(entry.sha)\t\(entry.path)\u{0000}"
@@ -80,7 +80,7 @@ private func createCommit(at gitDir: String, treeSha: String, message: String, p
 	let minutes = (abs(offset) % 3600) / 60
 	let sign = offset >= 0 ? "+" : "-"
 
-	let author = String(format: "User <user@example.com> %d %@%02d%02d", timestamp, sign, hours, minutes)
+	let author = String(format: "User <user@example.com> %d %@%02d%02d", timestamp, sign as CVarArg, hours, minutes)
 
 	var commitContent = "tree \(treeSha)\n"
 	if let parentSha = parentSha {
