@@ -112,7 +112,7 @@ swift-format format --recursive --in-place Sources/ Tests/
 
 ## .NET (C#)
 
-Uses **.NET 8** with SDK-style projects.
+Uses **.NET 10** with SDK-style projects.
 
 ### Build/Lint/Test Commands
 
