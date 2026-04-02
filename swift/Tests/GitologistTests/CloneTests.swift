@@ -64,6 +64,8 @@ struct CloneTests {
 		let targetPath = testDirPath.appendingPathComponent("test-repo")
 		let resultPath = try await clone(url: url, targetPath: targetPath.path)
 
+		#expect(resultPath == targetPath.path)
+
 		let headPath = targetPath.appendingPathComponent(".git").appendingPathComponent("HEAD")
 		let headContent = try String(contentsOf: headPath, encoding: .utf8)
 
@@ -79,6 +81,8 @@ struct CloneTests {
 		let url = "https://github.com/user/repo.git"
 		let targetPath = testDirPath.appendingPathComponent("test-repo")
 		let resultPath = try await clone(url: url, targetPath: targetPath.path)
+
+		#expect(resultPath == targetPath.path)
 
 		let configPath = targetPath.appendingPathComponent(".git").appendingPathComponent("config")
 		let configContent = try String(contentsOf: configPath, encoding: .utf8)
