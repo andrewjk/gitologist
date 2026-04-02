@@ -21,7 +21,12 @@ func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry]
 		throw LogError.notAGitRepository
 	}
 
-	let branchName = options?.branch ?? (try? await getCurrentBranch(at: gitDir.path)) ?? "master"
+	let branchName: String
+	if let customBranch = options?.branch {
+		branchName = customBranch
+	} else {
+		branchName = (try? await getCurrentBranch(at: gitDir.path)) ?? "master"
+	}
 	let branchPath = gitDir
 		.appendingPathComponent("refs")
 		.appendingPathComponent("heads")

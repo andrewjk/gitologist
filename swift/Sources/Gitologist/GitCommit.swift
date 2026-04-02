@@ -48,25 +48,62 @@ func commit(at path: String, message: String) async throws -> String {
 }
 
 private func createTree(at rootPath: String, gitDir: String, index: [String: IndexEntry]) async throws -> String {
-	// Create a flat tree (no subdirectories for now)
-	var treeEntries: [(path: String, sha: String, mode: String)] = []
+	return try await createTreeRecursive(at: rootPath, gitDir: gitDir, index: index, prefix: "")
+}
+
+private func createTreeRecursive(at rootPath: String, gitDir: String, index: [String: IndexEntry], prefix: String) async throws -> String {
+	var treeEntries: [(path: String, sha: String, mode: String, type: TreeEntryType)] = []
 	
-	for entry in index.values.sorted(by: { $0.path < $1.path }) {
-		// Skip paths with subdirectories for now
-		guard !entry.path.contains("/") else { continue }
-		
-		// Read file content and create blob
-		let fullPath = URL(fileURLWithPath: rootPath).appendingPathComponent(entry.path)
+	// Get paths at this level
+	let paths = index.keys.filter { path in
+		if prefix.isEmpty {
+			return !path.contains("/")
+		}
+		if path.hasPrefix(prefix + "/") {
+			let remaining = path.dropFirst(prefix.count + 1)
+			return !remaining.contains("/")
+		}
+		return false
+	}.sorted()
+	
+	// Add blobs (files) at this level
+	for path in paths {
+		guard let entry = index[path] else { continue }
+		let fullPath = URL(fileURLWithPath: rootPath).appendingPathComponent(path)
 		let content = try String(contentsOf: fullPath, encoding: .utf8)
 		let blobSha = try await hashObject(at: gitDir, content: content, type: "blob")
-		
-		treeEntries.append((path: entry.path, sha: blobSha, mode: entry.mode))
+		let fileName = prefix.isEmpty ? path : String(path.dropFirst(prefix.count + 1))
+		treeEntries.append((path: fileName, sha: blobSha, mode: entry.mode, type: .blob))
 	}
 	
-	// Build tree content - format: "<mode> blob <sha>\t<path>\0"
+	// Find subdirectories
+	var subdirs = Set<String>()
+	for path in index.keys {
+		if path.contains("/") {
+			let parts = path.split(separator: "/")
+			if prefix.isEmpty {
+				subdirs.insert(String(parts[0]))
+			} else if path.hasPrefix(prefix + "/") {
+				let remaining = path.dropFirst(prefix.count + 1)
+				if remaining.contains("/") {
+					let subparts = remaining.split(separator: "/")
+					subdirs.insert(String(subparts[0]))
+				}
+			}
+		}
+	}
+	
+	// Add trees (directories)
+	for dir in subdirs.sorted() {
+		let dirPrefix = prefix.isEmpty ? dir : "\(prefix)/\(dir)"
+		let dirSha = try await createTreeRecursive(at: rootPath, gitDir: gitDir, index: index, prefix: dirPrefix)
+		treeEntries.append((path: dir, sha: dirSha, mode: "040000", type: .tree))
+	}
+	
+	// Build tree content - format: "<mode> <type> <sha>\t<path>\0"
 	var treeContent = ""
 	for entry in treeEntries {
-		treeContent += "\(entry.mode) blob \(entry.sha)\t\(entry.path)\u{0000}"
+		treeContent += "\(entry.mode) \(entry.type == .blob ? "blob" : "tree") \(entry.sha)\t\(entry.path)\u{0000}"
 	}
 	
 	return try await hashObject(at: gitDir, content: treeContent, type: "tree")

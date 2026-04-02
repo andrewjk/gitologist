@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum PullError: Error, LocalizedError {
 	case notAGitRepository

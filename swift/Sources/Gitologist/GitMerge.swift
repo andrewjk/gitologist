@@ -194,8 +194,17 @@ private func getParents(gitDir: String, sha: String) async throws -> [String] {
 private func getTree(gitDir: String, sha: String) async throws -> String? {
 	do {
 		let commitData = try await readObject(at: gitDir, sha: sha)
-		let lines = commitData.components(separatedBy: .newlines)
-
+		// The commit data includes a header like "commit <size>\0", so we need to skip past the null byte
+		guard let nullIndex = commitData.firstIndex(of: "\0") else {
+			return nil
+		}
+		let contentIndex = commitData.index(after: nullIndex)
+		guard contentIndex < commitData.endIndex else {
+			return nil
+		}
+		let content = String(commitData[contentIndex...])
+		
+		let lines = content.components(separatedBy: .newlines)
 		for line in lines {
 			if line.starts(with: "tree ") {
 				return String(line.dropFirst(5))

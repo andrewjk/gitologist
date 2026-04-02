@@ -1,6 +1,6 @@
 import Foundation
 import CryptoKit
-import Compression
+import zlib
 
 func hashFile(at path: String) async throws -> String {
 	let data = try Data(contentsOf: URL(fileURLWithPath: path))
@@ -84,13 +84,59 @@ func hashObject(at gitDir: String, content: String, type: String) async throws -
 	}
 
 	try FileManager.default.createDirectory(at: objectDir, withIntermediateDirectories: true)
-	try data.write(to: objectPath)
+	let compressedData = try compressData(data)
+	try compressedData.write(to: objectPath)
 
 	return sha
 }
 
 private func compressData(_ data: Data) throws -> Data {
-	return data
+	// Use zlib compression for git object format compatibility
+	var compressedData = Data()
+	
+	// Initialize zlib stream
+	var stream = z_stream()
+	stream.zalloc = nil
+	stream.zfree = nil
+	stream.opaque = nil
+	
+	// Initialize for compression - use the underlying function directly
+	let initResult = deflateInit_(&stream, Z_DEFAULT_COMPRESSION, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
+	guard initResult == Z_OK else {
+		throw GitError.invalidIndexFile("Failed to initialize compression")
+	}
+	defer { deflateEnd(&stream) }
+	
+	// Compress the data
+	var outputBuffer = [UInt8](repeating: 0, count: 1024)
+	
+	let compressResult = data.withUnsafeBytes { sourceBytes in
+		stream.next_in = UnsafeMutablePointer<Bytef>(mutating: sourceBytes.bindMemory(to: Bytef.self).baseAddress!)
+		stream.avail_in = uInt(data.count)
+		
+		var result: Int32 = Z_OK
+		repeat {
+			outputBuffer.withUnsafeMutableBufferPointer { buffer in
+				stream.next_out = buffer.baseAddress!
+				stream.avail_out = uInt(buffer.count)
+			}
+			
+			result = deflate(&stream, Z_FINISH)
+			
+			let bytesWritten = outputBuffer.count - Int(stream.avail_out)
+			if bytesWritten > 0 {
+				compressedData.append(contentsOf: outputBuffer[0..<bytesWritten])
+			}
+		} while result == Z_OK
+		
+		return result
+	}
+	
+	guard compressResult == Z_STREAM_END else {
+		throw GitError.invalidIndexFile("Failed to compress data")
+	}
+	
+	return compressedData
 }
 
 func updateBranch(at gitDir: String, branchName: String, commitSha: String) async throws {
@@ -105,8 +151,58 @@ func readObject(at gitDir: String, sha: String) async throws -> String {
 		.appendingPathComponent(String(sha.prefix(2)))
 		.appendingPathComponent(String(sha.dropFirst(2)))
 
-	let data = try Data(contentsOf: objectPath)
+	let compressedData = try Data(contentsOf: objectPath)
+	let data = try decompressData(compressedData)
 	return String(data: data, encoding: .utf8)!
+}
+
+private func decompressData(_ data: Data) throws -> Data {
+	// Use zlib decompression for git object format compatibility
+	var decompressedData = Data()
+	
+	// Initialize zlib stream
+	var stream = z_stream()
+	stream.zalloc = nil
+	stream.zfree = nil
+	stream.opaque = nil
+	
+	// Initialize for decompression - use the underlying function directly
+	let initResult = inflateInit_(&stream, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
+	guard initResult == Z_OK else {
+		throw GitError.invalidIndexFile("Failed to initialize decompression")
+	}
+	defer { inflateEnd(&stream) }
+	
+	// Decompress the data
+	var outputBuffer = [UInt8](repeating: 0, count: 4096)
+	
+	let decompressResult = data.withUnsafeBytes { sourceBytes in
+		stream.next_in = UnsafeMutablePointer<Bytef>(mutating: sourceBytes.bindMemory(to: Bytef.self).baseAddress!)
+		stream.avail_in = uInt(data.count)
+		
+		var result: Int32 = Z_OK
+		repeat {
+			outputBuffer.withUnsafeMutableBufferPointer { buffer in
+				stream.next_out = buffer.baseAddress!
+				stream.avail_out = uInt(buffer.count)
+			}
+			
+			result = inflate(&stream, Z_NO_FLUSH)
+			
+			let bytesWritten = outputBuffer.count - Int(stream.avail_out)
+			if bytesWritten > 0 {
+				decompressedData.append(contentsOf: outputBuffer[0..<bytesWritten])
+			}
+		} while result == Z_OK
+		
+		return result
+	}
+	
+	guard decompressResult == Z_STREAM_END || decompressResult == Z_OK else {
+		throw GitError.invalidIndexFile("Failed to decompress data")
+	}
+	
+	return decompressedData
 }
 
 func extractContentFromBlob(_ blobData: String) throws -> String {
