@@ -77,6 +77,22 @@ pub fn getIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8
     return index;
 }
 
+pub fn writeIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8, index: std.StringHashMap(IndexEntry)) !void {
+    var content = std.ArrayList(u8).initCapacity(allocator, 100) catch unreachable;
+    defer content.deinit(allocator);
+
+    var iter = index.iterator();
+    while (iter.next()) |entry| {
+        const value = entry.value_ptr.*;
+        const line = try std.fmt.allocPrint(allocator, "{s} {s} {s}\n", .{ value.path, value.sha, value.mode });
+        defer allocator.free(line);
+        try content.appendSlice(allocator, line);
+    }
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = index_path, .data = content.items });
+}
+
 pub const IndexEntry = struct {
     path: []const u8,
     sha: []const u8,

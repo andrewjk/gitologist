@@ -3,3 +3,5 @@ const std = @import("std");
 
 pub const init = @import("init.zig").init;
 pub const status = @import("status.zig").status;
+pub const add = @import("add.zig").add;
+pub const addAll = @import("add.zig").addAll;
