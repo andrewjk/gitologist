@@ -93,8 +93,113 @@ pub fn writeIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const 
     try cwd.writeFile(io, .{ .sub_path = index_path, .data = content.items });
 }
 
+pub fn hashObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, content: []const u8, obj_type: []const u8) ![]const u8 {
+    const header = try std.fmt.allocPrint(allocator, "{s} {d}\x00", .{ obj_type, content.len });
+    defer allocator.free(header);
+
+    var hasher = std.crypto.hash.Sha1.init(.{});
+    hasher.update(header);
+    hasher.update(content);
+
+    var hash: [20]u8 = undefined;
+    hasher.final(&hash);
+
+    const hex_hash = try allocator.alloc(u8, 40);
+    const hex_digits = "0123456789abcdef";
+
+    for (0..20) |i| {
+        hex_hash[2 * i] = hex_digits[hash[i] >> 4];
+        hex_hash[2 * i + 1] = hex_digits[hash[i] & 0x0f];
+    }
+
+    const obj_dir = try std.fmt.allocPrint(allocator, "{s}/objects/{s}", .{ git_dir_path, hex_hash[0..2] });
+    defer allocator.free(obj_dir);
+
+    const cwd = std.Io.Dir.cwd();
+    cwd.createDirPath(io, obj_dir) catch |err| {
+        if (err != error.PathAlreadyExists) {
+            return err;
+        }
+    };
+
+    const obj_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ obj_dir, hex_hash[2..] });
+    defer allocator.free(obj_path);
+
+    var compressed = std.ArrayList(u8).initCapacity(allocator, content.len + 100) catch unreachable;
+    defer compressed.deinit(allocator);
+
+    try compressed.appendSlice(allocator, header);
+    try compressed.appendSlice(allocator, content);
+
+    try cwd.writeFile(io, .{ .sub_path = obj_path, .data = compressed.items });
+
+    return hex_hash;
+}
+
+pub fn getCurrentBranch(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8) ![]const u8 {
+    const head_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "HEAD" });
+    defer allocator.free(head_path);
+
+    const cwd = std.Io.Dir.cwd();
+    const head_content = try cwd.readFileAlloc(io, head_path, allocator, .unlimited);
+    defer allocator.free(head_content);
+
+    const trimmed = std.mem.trim(u8, head_content, &std.ascii.whitespace);
+
+    const prefix = "ref: refs/heads/";
+    if (std.mem.startsWith(u8, trimmed, prefix)) {
+        const branch = trimmed[prefix.len..];
+        return allocator.dupe(u8, branch);
+    }
+
+    return allocator.dupe(u8, "(detached HEAD)");
+}
+
+pub fn getCurrentCommit(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8) !?[]const u8 {
+    const branch = try getCurrentBranch(io, allocator, git_dir_path);
+    defer allocator.free(branch);
+
+    if (std.mem.eql(u8, branch, "(detached HEAD)")) {
+        return null;
+    }
+
+    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "refs", "heads", branch });
+    defer allocator.free(branch_path);
+
+    const cwd = std.Io.Dir.cwd();
+    const commit_sha = cwd.readFileAlloc(io, branch_path, allocator, .unlimited) catch |err| {
+        if (err == error.FileNotFound) {
+            return null;
+        }
+        return err;
+    };
+
+    const trimmed = std.mem.trim(u8, commit_sha, &std.ascii.whitespace);
+    allocator.free(commit_sha);
+
+    return try allocator.dupe(u8, trimmed);
+}
+
+pub fn updateBranch(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, branch_name: []const u8, commit_sha: []const u8) !void {
+    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "refs", "heads", branch_name });
+    defer allocator.free(branch_path);
+
+    const commit_with_newline = try std.fmt.allocPrint(allocator, "{s}\n", .{commit_sha});
+    defer allocator.free(commit_with_newline);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = branch_path, .data = commit_with_newline });
+}
+
 pub const IndexEntry = struct {
     path: []const u8,
     sha: []const u8,
     mode: []const u8,
+};
+
+pub const TreeEntry = struct {
+    path: []const u8,
+    sha: []const u8,
+    mode: []const u8,
+    entry_type: []const u8,
 };
