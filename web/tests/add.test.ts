@@ -135,7 +135,7 @@ describe("add", () => {
 		const crypto = await import("node:crypto");
 		const expectedHash = crypto.createHash("sha1").update("content").digest("hex");
 
-		expect(indexContent).toContain(`test.txt ${expectedHash} 100644`);
+		expect(indexContent).toContain(`test.txt\t${expectedHash}\t100644`);
 	});
 
 	it("should preserve existing index entries when adding new files", async () => {

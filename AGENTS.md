@@ -50,12 +50,14 @@ vp fmt              # Format with Oxfmt
 - **Test imports**: Import from `vite-plus/test` (`import { describe, it, expect } from "vite-plus/test"`)
 
 **File structure:**
+
 1. Imports (external → internal)
 2. Interfaces/types
 3. Exported functions/classes (public API)
 4. Helper functions (in call order)
 
 **Naming:**
+
 - Functions: camelCase (`initRepo`, `parseCommit`)
 - Types/Interfaces: PascalCase (`LogEntry`, `MergeResult`)
 - Constants: UPPER_SNAKE_CASE for true constants
@@ -98,11 +100,13 @@ swift-format format --recursive --in-place Sources/ Tests/
 - **Access control**: Implicit internal by default
 
 **Naming:**
+
 - Types: PascalCase (`LogEntry`, `MergeOptions`)
 - Functions/variables: camelCase (`initRepo`, `abbreviatedSha`)
 - Private constants: lowerCamelCase or UPPER_SNAKE_CASE for file-level constants
 
 **Testing (Swift Testing framework):**
+
 - Use `@Test` attribute on test functions
 - Use `#expect()` for assertions
 - Test naming: descriptive, starts with "should"
@@ -140,6 +144,7 @@ dotnet format --verify              # Check formatting (CI)
 - **Nullable**: enabled
 
 **Naming:**
+
 - Classes/interfaces: PascalCase
 - Methods: PascalCase
 - Properties: PascalCase

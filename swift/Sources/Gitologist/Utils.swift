@@ -26,7 +26,7 @@ func getIndex(at path: String) async throws -> [String: IndexEntry] {
 	let lines = content.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines)
 
 	for line in lines where !line.isEmpty {
-		let parts = line.components(separatedBy: .whitespaces)
+		let parts = line.components(separatedBy: "\t")
 		guard parts.count >= 2 else { continue }
 
 		let filePath = parts[0]
@@ -43,7 +43,7 @@ func writeIndex(at path: String, index: [String: IndexEntry]) async throws {
 	var lines: [String] = []
 
 	for entry in index.values {
-		lines.append("\(entry.path) \(entry.sha) \(entry.mode)")
+		lines.append("\(entry.path)\t\(entry.sha)\t\(entry.mode)")
 	}
 
 	let content = lines.joined(separator: "\n") + "\n"

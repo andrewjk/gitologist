@@ -63,11 +63,11 @@ export async function getIndex(indexPath: string): Promise<Map<string, IndexEntr
 
 	try {
 		const content = await readFile(indexPath, "utf-8");
-		const lines = content.trim().split("\n");
+		const lines = content.split("\n");
 
 		for (const line of lines) {
 			if (!line) continue;
-			const parts = line.split(" ");
+			const parts = line.split("\t");
 			if (parts.length >= 2) {
 				const [path, sha, mode = "100644"] = parts;
 				index.set(path, { path, sha, mode });
@@ -84,7 +84,7 @@ export async function writeIndex(indexPath: string, index: Map<string, IndexEntr
 	const lines: string[] = [];
 
 	for (const entry of index.values()) {
-		lines.push(`${entry.path} ${entry.sha} ${entry.mode}`);
+		lines.push(`${entry.path}\t${entry.sha}\t${entry.mode}`);
 	}
 
 	await writeFile(indexPath, lines.join("\n") + "\n", "utf-8");

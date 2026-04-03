@@ -53,10 +53,12 @@ export async function status(path: string): Promise<StatusInfo> {
 	}
 
 	for (const [filePath, entry] of index) {
-		if (!existsSync(join(path, filePath))) {
+		const fullPath = join(path, filePath);
+
+		if (!existsSync(fullPath)) {
 			deleted.push(filePath);
 		} else {
-			const currentHash = await hashFile(join(path, filePath));
+			const currentHash = await hashFile(fullPath);
 			if (entry.sha !== currentHash) {
 				modified.push(filePath);
 			}

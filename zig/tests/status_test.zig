@@ -231,7 +231,7 @@ test "should detect modified files" {
     const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
     defer allocator.free(index_path);
 
-    const index_data = try std.fmt.allocPrint(allocator, "test.txt {s}\n", .{original_hash});
+    const index_data = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644\n", .{original_hash});
     defer allocator.free(index_data);
     try cwd.writeFile(io, .{ .sub_path = index_path, .data = index_data });
 
@@ -259,7 +259,7 @@ test "should detect modified files" {
     allocator.free(result.untracked);
 }
 
-test "should detect deleted files as modified" {
+test "should detect deleted files as deleted" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
 
@@ -280,7 +280,7 @@ test "should detect deleted files as modified" {
     const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
     defer allocator.free(index_path);
 
-    const index_data = try std.fmt.allocPrint(allocator, "test.txt {s}\n", .{hash});
+    const index_data = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644\n", .{hash});
     defer allocator.free(index_data);
     try cwd.writeFile(io, .{ .sub_path = index_path, .data = index_data });
 
@@ -293,8 +293,8 @@ test "should detect deleted files as modified" {
 
     const result = try status(io, allocator, tmp_path);
 
-    try std.testing.expect(result.modified.len == 1);
-    try std.testing.expectEqualStrings("test.txt", result.modified[0]);
+    try std.testing.expect(result.deleted.len == 1);
+    try std.testing.expectEqualStrings("test.txt", result.deleted[0]);
 
     allocator.free(result.branch);
     allocator.free(result.up_to_date);
@@ -307,6 +307,9 @@ test "should detect deleted files as modified" {
 
     for (result.untracked) |item| allocator.free(item);
     allocator.free(result.untracked);
+
+    for (result.deleted) |item| allocator.free(item);
+    allocator.free(result.deleted);
 }
 
 test "should handle detached HEAD" {
@@ -459,7 +462,7 @@ test "should correctly identify files matching index" {
     const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
     defer allocator.free(index_path);
 
-    const index_data = try std.fmt.allocPrint(allocator, "test.txt {s}\n", .{hash});
+    const index_data = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644\n", .{hash});
     defer allocator.free(index_data);
     try cwd.writeFile(io, .{ .sub_path = index_path, .data = index_data });
 

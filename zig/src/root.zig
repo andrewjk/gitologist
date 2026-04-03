@@ -21,6 +21,9 @@ pub const IgnorePattern = @import("ignore_parser.zig").IgnorePattern;
 pub const LogEntry = @import("types/LogEntry.zig").LogEntry;
 pub const LogOptions = @import("types/LogOptions.zig").LogOptions;
 pub const MergeOptions = @import("merge.zig").MergeOptions;
+pub const types = struct {
+    pub const StatusInfo = @import("types/StatusInfo.zig").StatusInfo;
+};
 
 // Placeholder function for main.zig
 pub fn printAnotherMessage(writer: anytype) !void {

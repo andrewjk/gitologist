@@ -3,6 +3,7 @@
 ## Testing
 
 Run tests with:
+
 ```bash
 zig build test
 ```
@@ -20,6 +21,7 @@ The `std.ArrayList(T)` API has changed:
 - **Appending**: Use `list.append(allocator, item)` - the allocator is now passed as a parameter
 
 Example:
+
 ```zig
 var entries = std.ArrayList(std.Io.Dir.Entry).initCapacity(allocator, 0) catch unreachable;
 defer entries.deinit(allocator);
@@ -65,6 +67,7 @@ const dir = try cwd.openDir(io, path, .{});
 ```
 
 **Common leak pattern to avoid:**
+
 ```zig
 // DON'T DO THIS - leaks memory
 const dir = try cwd.openDir(io, try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" }), .{});

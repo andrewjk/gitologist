@@ -97,7 +97,7 @@ public class StatusTests
         await Init.InitRepo(_testDir);
         var indexPath = Path.Combine(_testDir, ".git", "index");
         var originalHash = Utils.HashString("original");
-        await File.WriteAllTextAsync(indexPath, $"test.txt {originalHash}\n");
+        await File.WriteAllTextAsync(indexPath, $"test.txt\t{originalHash}\t100644\n");
 
         await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified content");
 
@@ -112,13 +112,13 @@ public class StatusTests
         await Init.InitRepo(_testDir);
         var indexPath = Path.Combine(_testDir, ".git", "index");
         var hash = Utils.HashString("content");
-        await File.WriteAllTextAsync(indexPath, $"test.txt {hash}\n");
+        await File.WriteAllTextAsync(indexPath, $"test.txt	{hash}	100644\n");
 
         await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
         File.Delete(Path.Combine(_testDir, "test.txt"));
 
         var result = await Status.GetStatus(_testDir);
-        CollectionAssert.Contains(result.Modified, "test.txt");
+        CollectionAssert.Contains(result.Deleted, "test.txt");
     }
 
     [TestMethod]
@@ -190,7 +190,7 @@ public class StatusTests
         await Init.InitRepo(_testDir);
         var indexPath = Path.Combine(_testDir, ".git", "index");
         var hash = Utils.HashString("content");
-        await File.WriteAllTextAsync(indexPath, $"test.txt {hash}\n");
+        await File.WriteAllTextAsync(indexPath, $"test.txt	{hash}	100644\n");
 
         await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
 

@@ -65,7 +65,7 @@ describe("status", () => {
 		const indexPath = join(testDir, ".git", "index");
 		const crypto = await import("node:crypto");
 		const originalHash = crypto.createHash("sha1").update("original").digest("hex");
-		await writeFile(indexPath, `test.txt ${originalHash}\n`, "utf-8");
+		await writeFile(indexPath, `test.txt\t${originalHash}\t100644\n`, "utf-8");
 
 		await writeFile(join(testDir, "test.txt"), "modified content");
 
@@ -78,13 +78,13 @@ describe("status", () => {
 		const indexPath = join(testDir, ".git", "index");
 		const crypto = await import("node:crypto");
 		const hash = crypto.createHash("sha1").update("content").digest("hex");
-		await writeFile(indexPath, `test.txt ${hash}\n`, "utf-8");
+		await writeFile(indexPath, `test.txt\t${hash}\t100644\n`, "utf-8");
 
 		await writeFile(join(testDir, "test.txt"), "content");
 		await rm(join(testDir, "test.txt"));
 
 		const result = await status(testDir);
-		expect(result.modified).toContain("test.txt");
+		expect(result.deleted).toContain("test.txt");
 	});
 
 	it("should handle detached HEAD", async () => {
@@ -124,7 +124,7 @@ describe("status", () => {
 		const indexPath = join(testDir, ".git", "index");
 		const crypto = await import("node:crypto");
 		const hash = crypto.createHash("sha1").update("content").digest("hex");
-		await writeFile(indexPath, `test.txt ${hash}\n`, "utf-8");
+		await writeFile(indexPath, `test.txt\t${hash}\t100644\n`, "utf-8");
 
 		await writeFile(join(testDir, "test.txt"), "content");
 

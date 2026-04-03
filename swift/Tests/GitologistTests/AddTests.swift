@@ -185,7 +185,7 @@ struct AddTests {
 		let indexContent = try String(contentsOf: indexPath, encoding: .utf8)
 		let expectedHash = sha1Hash(of: "content")
 
-		#expect(indexContent.contains("test.txt \(expectedHash) 100644"))
+		#expect(indexContent.contains("test.txt\t\(expectedHash)\t100644"))
 
 		try? fileManager.removeItem(at: testDirPath)
 	}

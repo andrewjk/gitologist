@@ -58,7 +58,7 @@ pub fn getIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8
     while (iter.next()) |line| {
         if (line.len == 0) continue;
 
-        var parts = std.mem.splitScalar(u8, line, ' ');
+        var parts = std.mem.splitScalar(u8, line, '\t');
         const path = parts.first();
         const sha = parts.next() orelse continue;
         const mode = parts.next() orelse "100644";
@@ -84,7 +84,7 @@ pub fn writeIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const 
     var iter = index.iterator();
     while (iter.next()) |entry| {
         const value = entry.value_ptr.*;
-        const line = try std.fmt.allocPrint(allocator, "{s} {s} {s}\n", .{ value.path, value.sha, value.mode });
+        const line = try std.fmt.allocPrint(allocator, "{s}\t{s}\t{s}\n", .{ value.path, value.sha, value.mode });
         defer allocator.free(line);
         try content.appendSlice(allocator, line);
     }

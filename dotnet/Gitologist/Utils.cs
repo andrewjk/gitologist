@@ -41,7 +41,7 @@ public static class Utils
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
 
-                var parts = line.Split(' ');
+                var parts = line.Split('\t');
                 if (parts.Length >= 2)
                 {
                     var path = parts[0];
@@ -64,7 +64,7 @@ public static class Utils
 
         foreach (var entry in index.Values)
         {
-            lines.Add($"{entry.Path} {entry.Sha} {entry.Mode}");
+            lines.Add($"{entry.Path}\t{entry.Sha}\t{entry.Mode}");
         }
 
         await File.WriteAllTextAsync(indexPath, string.Join('\n', lines) + '\n');

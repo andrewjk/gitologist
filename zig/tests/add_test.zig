@@ -352,7 +352,7 @@ test "should verify file hash in index" {
     const expected_hash = try hashString(allocator, "content");
     defer allocator.free(expected_hash);
 
-    const expected_line = try std.fmt.allocPrint(allocator, "test.txt {s} 100644", .{expected_hash});
+    const expected_line = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644", .{expected_hash});
     defer allocator.free(expected_line);
 
     try std.testing.expect(std.mem.indexOf(u8, index_content, expected_line) != null);

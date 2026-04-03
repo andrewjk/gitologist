@@ -90,7 +90,7 @@ struct StatusTests {
 
 		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
 		let originalHash = sha1Hash(of: "original")
-		try "test.txt \(originalHash)\n".write(to: indexPath, atomically: true, encoding: .utf8)
+		try "test.txt\t\(originalHash)\t100644\n".write(to: indexPath, atomically: true, encoding: .utf8)
 
 		try "modified content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
 
@@ -108,14 +108,14 @@ struct StatusTests {
 
 		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
 		let hash = sha1Hash(of: "content")
-		try "test.txt \(hash)\n".write(to: indexPath, atomically: true, encoding: .utf8)
+		try "test.txt\t\(hash)\t100644\n".write(to: indexPath, atomically: true, encoding: .utf8)
 
 		let testFile = testDirPath.appendingPathComponent("test.txt")
 		try "content".write(to: testFile, atomically: true, encoding: .utf8)
 		try? fileManager.removeItem(at: testFile)
 
 		let result = try await status(at: testDirPath.path)
-		#expect(result.modified.contains("test.txt"))
+		#expect(result.deleted.contains("test.txt"))
 
 		try? fileManager.removeItem(at: testDirPath)
 	}
@@ -182,7 +182,7 @@ struct StatusTests {
 
 		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
 		let hash = sha1Hash(of: "content")
-		try "test.txt \(hash)\n".write(to: indexPath, atomically: true, encoding: .utf8)
+		try "test.txt\t\(hash)\t100644\n".write(to: indexPath, atomically: true, encoding: .utf8)
 
 		try "content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
 
