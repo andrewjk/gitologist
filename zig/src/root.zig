@@ -15,6 +15,14 @@ pub const pull = @import("pull.zig").pull;
 pub const log = @import("log.zig").log;
 pub const merge = @import("merge.zig").merge;
 
+pub const IgnoreParser = @import("ignore_parser.zig").IgnoreParser;
+pub const IgnorePattern = @import("ignore_parser.zig").IgnorePattern;
+
 pub const LogEntry = @import("types/LogEntry.zig").LogEntry;
 pub const LogOptions = @import("types/LogOptions.zig").LogOptions;
 pub const MergeOptions = @import("merge.zig").MergeOptions;
+
+// Placeholder function for main.zig
+pub fn printAnotherMessage(writer: anytype) !void {
+    try writer.writeAll("Hello from Gitologist!\n");
+}

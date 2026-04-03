@@ -13,7 +13,14 @@ func getIndex(at path: String) async throws -> [String: IndexEntry] {
 		return [:]
 	}
 
-	let content = try String(contentsOfFile: path, encoding: .utf8)
+	// Try to read as UTF-8 text (our custom format)
+	// If that fails (e.g., binary git index), return empty index
+	guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
+		// File exists but isn't valid UTF-8 text (probably binary git index or corrupted)
+		// Return empty index to start fresh
+		return [:]
+	}
+
 	var index: [String: IndexEntry] = [:]
 
 	let lines = content.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines)

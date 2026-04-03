@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { IgnoreParser } from "./IgnoreParser.ts";
 import { status } from "./status.js";
 import { getIndex, hashFile, writeIndex } from "./utils.js";
 
@@ -14,7 +15,16 @@ export async function add(path: string, files: string[]): Promise<void> {
 	const indexPath = join(gitDir, "index");
 	const index = await getIndex(indexPath);
 
+	// Load gitignore patterns
+	const gitignore = new IgnoreParser();
+	await gitignore.loadGitignore(path);
+
 	for (const file of files) {
+		// Skip ignored files
+		if (gitignore.isIgnored(file)) {
+			continue;
+		}
+
 		const fullPath = join(path, file);
 
 		if (!existsSync(fullPath)) {

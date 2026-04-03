@@ -50,7 +50,11 @@ func status(at path: String) async throws -> StatusInfo {
 	var modified: [String] = []
 	var untracked: [String] = []
 
-	let workingFiles = getWorkingFiles(at: path)
+	// Load gitignore patterns
+	let gitignore = IgnoreParser()
+	await gitignore.loadGitignore(repoPath: path)
+
+	let workingFiles = await getWorkingFiles(at: path, gitignore: gitignore)
 
 	for filePath in index.keys {
 		staged.append(filePath)
@@ -84,11 +88,11 @@ func status(at path: String) async throws -> StatusInfo {
 	)
 }
 
-private func getWorkingFiles(at path: String) -> [String] {
+private func getWorkingFiles(at path: String, gitignore: IgnoreParser) async -> [String] {
 	var files: [String] = []
 	let baseURL = URL(fileURLWithPath: path).standardizedFileURL
 
-	func scan(_ dir: URL) {
+	func scan(_ dir: URL) async {
 		let standardizedDir = dir.standardizedFileURL
 		guard let entries = try? FileManager.default.contentsOfDirectory(at: standardizedDir, includingPropertiesForKeys: nil) else {
 			return
@@ -104,16 +108,22 @@ private func getWorkingFiles(at path: String) -> [String] {
 				continue
 			}
 
+			let standardizedEntry = entry.standardizedFileURL
+			let relPath = standardizedEntry.pathComponents.dropFirst(baseURL.pathComponents.count).joined(separator: "/")
+
+			// Check if this path is ignored
+			if await gitignore.isIgnored(filePath: relPath, isDirectory: isDirectory) {
+				continue
+			}
+
 			if isDirectory {
-				scan(entry)
+				await scan(entry)
 			} else if isFile {
-				let standardizedEntry = entry.standardizedFileURL
-				let relPath = standardizedEntry.pathComponents.dropFirst(baseURL.pathComponents.count).joined(separator: "/")
 				files.append(relPath)
 			}
 		}
 	}
 
-	scan(baseURL)
+	await scan(baseURL)
 	return files
 }

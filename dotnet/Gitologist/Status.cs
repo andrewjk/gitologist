@@ -42,7 +42,11 @@ public static class Status
         var modified = new List<string>();
         var untracked = new List<string>();
 
-        var workingFiles = Utils.GetWorkingFiles(path);
+        // Load gitignore patterns
+        var gitignore = new IgnoreParser();
+        await gitignore.LoadGitignore(path);
+
+        var workingFiles = Utils.GetWorkingFiles(path, gitignore);
 
         foreach (var filePath in index.Keys)
         {

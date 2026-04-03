@@ -2,6 +2,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
+import { IgnoreParser } from "./IgnoreParser.ts";
 import type { StatusInfo } from "./types/StatusInfo.ts";
 import { getIndex, hashFile } from "./utils.js";
 
@@ -34,7 +35,11 @@ export async function status(path: string): Promise<StatusInfo> {
 	const modified: string[] = [];
 	const untracked: string[] = [];
 
-	const workingFiles = getWorkingFiles(path);
+	// Load gitignore patterns
+	const gitignore = new IgnoreParser();
+	await gitignore.loadGitignore(path);
+
+	const workingFiles = getWorkingFiles(path, gitignore);
 
 	for (const filePath of index.keys()) {
 		staged.push(filePath);
@@ -66,7 +71,7 @@ export async function status(path: string): Promise<StatusInfo> {
 	};
 }
 
-function getWorkingFiles(path: string): string[] {
+function getWorkingFiles(path: string, gitignore: IgnoreParser): string[] {
 	const files: string[] = [];
 
 	function scan(dir: string) {
@@ -77,11 +82,16 @@ function getWorkingFiles(path: string): string[] {
 
 			const fullPath = join(dir, entry);
 			const stat = statSync(fullPath);
+			const relPath = relative(path, fullPath);
+
+			// Check if this path is ignored
+			if (gitignore.isIgnored(relPath, stat.isDirectory())) {
+				continue;
+			}
 
 			if (stat.isDirectory()) {
 				scan(fullPath);
 			} else if (stat.isFile()) {
-				const relPath = relative(path, fullPath);
 				files.push(relPath);
 			}
 		}

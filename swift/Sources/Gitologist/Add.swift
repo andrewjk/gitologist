@@ -21,6 +21,10 @@ func add(at path: String, files: [String]) async throws {
 		throw AddError.notAGitRepository
 	}
 
+	// Load gitignore patterns
+	let gitignore = IgnoreParser()
+	await gitignore.loadGitignore(repoPath: path)
+
 	let indexPath = gitDir.appendingPathComponent("index")
 	var index = try await getIndex(at: indexPath.path)
 
@@ -29,6 +33,11 @@ func add(at path: String, files: [String]) async throws {
 
 		guard FileManager.default.fileExists(atPath: fullPath.path) else {
 			throw AddError.fileNotFound(file)
+		}
+
+		// Skip ignored files
+		if await gitignore.isIgnored(filePath: file) {
+			continue
 		}
 
 		let hash = try await hashFile(at: fullPath.path)

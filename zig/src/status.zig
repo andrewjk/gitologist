@@ -3,6 +3,7 @@ const std = @import("std");
 const StatusInfo = @import("types/StatusInfo.zig").StatusInfo;
 
 const utils = @import("utils.zig");
+const IgnoreParser = @import("ignore_parser.zig").IgnoreParser;
 
 pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !StatusInfo {
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
@@ -44,7 +45,12 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
         try staged.append(allocator, path_copy);
     }
 
-    var working_files = try getWorkingFiles(io, allocator, path);
+    // Load gitignore patterns
+    var gitignore = IgnoreParser.init(allocator);
+    defer gitignore.deinit();
+    try gitignore.loadGitignore(io, path);
+
+    var working_files = try getWorkingFiles(io, allocator, path, gitignore);
     defer {
         for (working_files.items) |file| {
             allocator.free(file);
@@ -112,14 +118,14 @@ fn getBranch(io: std.Io, allocator: std.mem.Allocator, git_dir: std.Io.Dir) ![]c
     return allocator.dupe(u8, "(detached HEAD)");
 }
 
-fn getWorkingFiles(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !std.ArrayList([]const u8) {
+fn getWorkingFiles(io: std.Io, allocator: std.mem.Allocator, path: []const u8, gitignore: IgnoreParser) !std.ArrayList([]const u8) {
     var files = std.ArrayList([]const u8).initCapacity(allocator, 10) catch unreachable;
 
     const cwd = std.Io.Dir.cwd();
     const dir = try cwd.openDir(io, path, .{});
     defer dir.close(io);
 
-    try scan(io, allocator, dir, path, path, &files);
+    try scan(io, allocator, dir, path, path, &files, gitignore);
 
     return files;
 }
@@ -131,6 +137,7 @@ fn scan(
     base_path: []const u8,
     current_path: []const u8,
     files: *std.ArrayList([]const u8),
+    gitignore: IgnoreParser,
 ) !void {
     var dir_entries = std.ArrayList(std.Io.Dir.Entry).initCapacity(allocator, 20) catch unreachable;
     defer {
@@ -158,15 +165,24 @@ fn scan(
         const full_path = try std.fs.path.join(allocator, &[_][]const u8{ current_path, entry.name });
         defer allocator.free(full_path);
 
+        const is_directory = entry.kind == .directory;
+        const rel_path = try std.fs.path.relative(allocator, ".", null, base_path, full_path);
+        defer allocator.free(rel_path);
+
+        // Check if this path is ignored
+        if (gitignore.isIgnored(rel_path, is_directory)) {
+            continue;
+        }
+
         switch (entry.kind) {
             .directory => {
                 const sub_dir = try dir.openDir(io, entry.name, .{});
                 defer sub_dir.close(io);
-                try scan(io, allocator, sub_dir, base_path, full_path, files);
+                try scan(io, allocator, sub_dir, base_path, full_path, files, gitignore);
             },
             .file => {
-                const rel_path = try std.fs.path.relative(allocator, ".", null, base_path, full_path);
-                try files.append(allocator, rel_path);
+                const rel_path_copy = try allocator.dupe(u8, rel_path);
+                try files.append(allocator, rel_path_copy);
             },
             else => {},
         }

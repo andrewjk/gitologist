@@ -3,6 +3,7 @@ const std = @import("std");
 const utils = @import("utils.zig");
 
 const status_module = @import("status.zig");
+const IgnoreParser = @import("ignore_parser.zig").IgnoreParser;
 
 pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []const []const u8) !void {
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
@@ -13,6 +14,11 @@ pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []
         return error.NotAGitRepository;
     };
     defer git_dir.close(io);
+
+    // Load gitignore patterns
+    var gitignore = IgnoreParser.init(allocator);
+    defer gitignore.deinit();
+    try gitignore.loadGitignore(io, path);
 
     const git_index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
     defer allocator.free(git_index_path);
@@ -36,6 +42,11 @@ pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []
 
         if (cwd.access(io, full_path, .{})) |_| {} else |_| {
             return error.FileNotFound;
+        }
+
+        // Skip ignored files
+        if (gitignore.isIgnored(file, false)) {
+            continue;
         }
 
         const hash = try utils.hashFile(io, allocator, full_path);

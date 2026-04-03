@@ -13,6 +13,10 @@ public static class Add
             throw new InvalidOperationException("Not a git repository");
         }
 
+        // Load gitignore patterns
+        var gitignore = new IgnoreParser();
+        await gitignore.LoadGitignore(path);
+
         var indexPath = Path.Combine(gitDir, "index");
         var index = await Utils.GetIndex(indexPath);
 
@@ -23,6 +27,12 @@ public static class Add
             if (!File.Exists(fullPath))
             {
                 throw new FileNotFoundException($"File not found: {file}");
+            }
+
+            // Skip ignored files
+            if (gitignore.IsIgnored(file))
+            {
+                continue;
             }
 
             var hash = await Utils.HashFile(fullPath);

@@ -70,14 +70,14 @@ public static class Utils
         await File.WriteAllTextAsync(indexPath, string.Join('\n', lines) + '\n');
     }
 
-    public static List<string> GetWorkingFiles(string path)
+    public static List<string> GetWorkingFiles(string path, IgnoreParser? gitignore = null)
     {
         var files = new List<string>();
-        ScanDirectory(path, path, files);
+        ScanDirectory(path, path, files, gitignore);
         return files;
     }
 
-    private static void ScanDirectory(string basePath, string currentPath, List<string> files)
+    private static void ScanDirectory(string basePath, string currentPath, List<string> files, IgnoreParser? gitignore)
     {
         var entries = Directory.GetFileSystemEntries(currentPath);
 
@@ -89,10 +89,17 @@ public static class Utils
                 continue;
 
             var relativePath = Path.GetRelativePath(basePath, entry);
+            var isDirectory = Directory.Exists(entry);
 
-            if (Directory.Exists(entry))
+            // Check if this path is ignored
+            if (gitignore != null && gitignore.IsIgnored(relativePath, isDirectory))
             {
-                ScanDirectory(basePath, entry, files);
+                continue;
+            }
+
+            if (isDirectory)
+            {
+                ScanDirectory(basePath, entry, files, gitignore);
             }
             else if (File.Exists(entry))
             {
