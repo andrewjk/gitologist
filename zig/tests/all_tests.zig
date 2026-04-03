@@ -11,4 +11,5 @@ comptime {
     _ = @import("pull_test.zig");
     _ = @import("log_test.zig");
     _ = @import("merge_test.zig");
+    _ = @import("git_compat_test.zig");
 }
