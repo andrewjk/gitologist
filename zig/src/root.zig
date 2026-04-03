@@ -12,3 +12,7 @@ pub const remoteAdd = @import("remote.zig").remoteAdd;
 pub const clone = @import("clone.zig").clone;
 pub const push = @import("push.zig").push;
 pub const pull = @import("pull.zig").pull;
+pub const log = @import("log.zig").log;
+
+pub const LogEntry = @import("types/LogEntry.zig").LogEntry;
+pub const LogOptions = @import("types/LogOptions.zig").LogOptions;

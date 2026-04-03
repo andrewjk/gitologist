@@ -63,11 +63,12 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
     defer allocator.free(tree_sha);
 
     const parent_sha_opt = try utils.getCurrentCommit(io, allocator, git_dir_path);
-    if (parent_sha_opt) |parent_sha| {
-        defer allocator.free(parent_sha);
-    }
 
     const commit_sha = try createCommit(io, allocator, git_dir_path, tree_sha, message, parent_sha_opt);
+
+    if (parent_sha_opt) |parent_sha| {
+        allocator.free(parent_sha);
+    }
 
     const branch_name = try utils.getCurrentBranch(io, allocator, git_dir_path);
     defer allocator.free(branch_name);

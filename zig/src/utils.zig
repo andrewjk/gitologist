@@ -175,9 +175,10 @@ pub fn getCurrentCommit(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
     };
 
     const trimmed = std.mem.trim(u8, commit_sha, &std.ascii.whitespace);
+    const result = try allocator.dupe(u8, trimmed);
     allocator.free(commit_sha);
 
-    return try allocator.dupe(u8, trimmed);
+    return result;
 }
 
 pub fn updateBranch(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, branch_name: []const u8, commit_sha: []const u8) !void {

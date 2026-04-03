@@ -9,4 +9,5 @@ comptime {
     _ = @import("clone_test.zig");
     _ = @import("push_test.zig");
     _ = @import("pull_test.zig");
+    _ = @import("log_test.zig");
 }
