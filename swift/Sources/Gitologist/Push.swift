@@ -9,7 +9,7 @@ enum PushError: Error, LocalizedError {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
-		case .localBranchDoesNotExist(let branch):
+		case let .localBranchDoesNotExist(branch):
 			return "Local branch '\(branch)' does not exist"
 		case .uncommittedChanges:
 			return "You have uncommitted changes. Commit or stash them before pushing."
@@ -41,7 +41,7 @@ func push(at path: String, remote: String? = nil, branch: String? = nil) async t
 
 	let currentStatus = try await status(at: path)
 
-	guard currentStatus.modified.isEmpty && currentStatus.untracked.isEmpty else {
+	guard currentStatus.modified.isEmpty, currentStatus.untracked.isEmpty else {
 		throw PushError.uncommittedChanges
 	}
 

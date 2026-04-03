@@ -10,9 +10,9 @@ enum GitError: Error, LocalizedError {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
-		case .invalidIndexFile(let message):
+		case let .invalidIndexFile(message):
 			return "Invalid index file: \(message)"
-		case .fileReadError(let message):
+		case let .fileReadError(message):
 			return "File read error: \(message)"
 		case .notOnABranch:
 			return "Not on a branch (detached HEAD)"
@@ -32,7 +32,7 @@ func status(at path: String) async throws -> StatusInfo {
 
 	do {
 		let headContent = try String(contentsOf: headPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-		
+
 		let regex = /^ref: refs\/heads\/(.+)$/
 		if let match = headContent.firstMatch(of: regex) {
 			branch = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,7 +64,7 @@ func status(at path: String) async throws -> StatusInfo {
 
 	for (filePath, entry) in index {
 		let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
-		
+
 		if !FileManager.default.fileExists(atPath: fullPath.path) {
 			modified.append(filePath)
 		} else {
@@ -99,7 +99,8 @@ private func getWorkingFiles(at path: String) -> [String] {
 
 			guard let resourceValues = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]),
 			      let isDirectory = resourceValues.isDirectory,
-			      let isFile = resourceValues.isRegularFile else {
+			      let isFile = resourceValues.isRegularFile
+			else {
 				continue
 			}
 

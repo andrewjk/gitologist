@@ -1,6 +1,6 @@
-import Testing
-@testable import Gitologist
 import Foundation
+@testable import Gitologist
+import Testing
 
 struct MergeTests {
 	var testDir: URL {
@@ -136,7 +136,7 @@ struct MergeTests {
 
 		#expect(result.success == true)
 		#expect(result.fastForward == false)
-		
+
 		let shaPattern = /^[a-f0-9]{40}$/
 		#expect(result.commitSha?.wholeMatch(of: shaPattern) != nil)
 
@@ -166,7 +166,7 @@ struct MergeTests {
 
 		#expect(result.success == true)
 		#expect(result.fastForward == false)
-		
+
 		let shaPattern = /^[a-f0-9]{40}$/
 		#expect(result.commitSha?.wholeMatch(of: shaPattern) != nil)
 

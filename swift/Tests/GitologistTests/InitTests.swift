@@ -1,6 +1,6 @@
-import Testing
-@testable import Gitologist
 import Foundation
+@testable import Gitologist
+import Testing
 
 struct InitTests {
 	var testDir: URL {

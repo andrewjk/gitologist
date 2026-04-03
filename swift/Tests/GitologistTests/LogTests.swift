@@ -1,6 +1,6 @@
-import Testing
-@testable import Gitologist
 import Foundation
+@testable import Gitologist
+import Testing
 
 struct LogTests {
 	var testDir: URL {
@@ -107,7 +107,7 @@ struct LogTests {
 		let result = try await log(at: testDirPath.path)
 
 		#expect(result.count == 1)
-		
+
 		let shaPattern = /^[a-f0-9]{40}$/
 		#expect(result[0].sha.wholeMatch(of: shaPattern) != nil)
 
@@ -126,7 +126,7 @@ struct LogTests {
 		let result = try await log(at: testDirPath.path)
 
 		#expect(result.count == 1)
-		
+
 		let abbreviatedPattern = /^[a-f0-9]{7}$/
 		#expect(result[0].abbreviatedSha.wholeMatch(of: abbreviatedPattern) != nil)
 

@@ -1,7 +1,7 @@
-import Testing
-@testable import Gitologist
-import Foundation
 import CryptoKit
+import Foundation
+@testable import Gitologist
+import Testing
 
 struct AddTests {
 	var testDir: URL {

@@ -9,9 +9,9 @@ enum RestoreError: Error, LocalizedError {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
-		case .fileNotFound(let file):
+		case let .fileNotFound(file):
 			return "File not found: \(file)"
-		case .fileNotInCommit(let file):
+		case let .fileNotInCommit(file):
 			return "File not in commit: \(file)"
 		}
 	}

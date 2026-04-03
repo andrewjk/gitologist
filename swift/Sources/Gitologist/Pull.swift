@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit
+import Foundation
 
 enum PullError: Error, LocalizedError {
 	case notAGitRepository
@@ -11,7 +11,7 @@ enum PullError: Error, LocalizedError {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
-		case .remoteBranchDoesNotExist(let branch):
+		case let .remoteBranchDoesNotExist(branch):
 			return "Remote branch '\(branch)' does not exist"
 		case .invalidCommitObject:
 			return "Invalid commit object"
@@ -110,7 +110,7 @@ private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: 
 	}
 }
 
-private func updateIndex(gitDir: String, workingPath: String, treeSha: String) async throws {
+private func updateIndex(gitDir: String, workingPath _: String, treeSha: String) async throws {
 	let indexPath = URL(fileURLWithPath: gitDir).appendingPathComponent("index")
 	var index = try await getIndex(at: indexPath.path)
 

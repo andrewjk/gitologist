@@ -8,7 +8,7 @@ enum RemoteError: Error, LocalizedError {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
-		case .remoteAlreadyExists(let name):
+		case let .remoteAlreadyExists(name):
 			return "Remote '\(name)' already exists"
 		}
 	}
@@ -37,10 +37,10 @@ func remoteAdd(at path: String, name: String, url: String) async throws {
 	}
 
 	let remoteConfig = """
-[remote "\(name)"]
-	url = \(url)
-	fetch = +refs/heads/*:refs/remotes/\(name)/*
-"""
+	[remote "\(name)"]
+		url = \(url)
+		fetch = +refs/heads/*:refs/remotes/\(name)/*
+	"""
 
 	configContent = configContent.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + remoteConfig.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
 

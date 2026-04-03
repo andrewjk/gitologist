@@ -13,7 +13,7 @@ enum MergeError: Error, LocalizedError {
 			return "Not a git repository"
 		case .cannotMergeIntoSelf:
 			return "Cannot merge a branch into itself"
-		case .branchNotFound(let branch):
+		case let .branchNotFound(branch):
 			return "Branch '\(branch)' not found"
 		case .cannotMergeIntoEmptyBranch:
 			return "Cannot merge into an empty branch"
@@ -203,7 +203,7 @@ private func getTree(gitDir: String, sha: String) async throws -> String? {
 			return nil
 		}
 		let content = String(commitData[contentIndex...])
-		
+
 		let lines = content.components(separatedBy: .newlines)
 		for line in lines {
 			if line.starts(with: "tree ") {

@@ -53,7 +53,7 @@ private func createTree(at rootPath: String, gitDir: String, index: [String: Ind
 
 private func createTreeRecursive(at rootPath: String, gitDir: String, index: [String: IndexEntry], prefix: String) async throws -> String {
 	var treeEntries: [(path: String, sha: String, mode: String, type: TreeEntryType)] = []
-	
+
 	// Get paths at this level
 	let paths = index.keys.filter { path in
 		if prefix.isEmpty {
@@ -65,7 +65,7 @@ private func createTreeRecursive(at rootPath: String, gitDir: String, index: [St
 		}
 		return false
 	}.sorted()
-	
+
 	// Add blobs (files) at this level
 	for path in paths {
 		guard let entry = index[path] else { continue }
@@ -75,7 +75,7 @@ private func createTreeRecursive(at rootPath: String, gitDir: String, index: [St
 		let fileName = prefix.isEmpty ? path : String(path.dropFirst(prefix.count + 1))
 		treeEntries.append((path: fileName, sha: blobSha, mode: entry.mode, type: .blob))
 	}
-	
+
 	// Find subdirectories
 	var subdirs = Set<String>()
 	for path in index.keys {
@@ -92,20 +92,20 @@ private func createTreeRecursive(at rootPath: String, gitDir: String, index: [St
 			}
 		}
 	}
-	
+
 	// Add trees (directories)
 	for dir in subdirs.sorted() {
 		let dirPrefix = prefix.isEmpty ? dir : "\(prefix)/\(dir)"
 		let dirSha = try await createTreeRecursive(at: rootPath, gitDir: gitDir, index: index, prefix: dirPrefix)
 		treeEntries.append((path: dir, sha: dirSha, mode: "040000", type: .tree))
 	}
-	
+
 	// Build tree content - format: "<mode> <type> <sha>\t<path>\0"
 	var treeContent = ""
 	for entry in treeEntries {
 		treeContent += "\(entry.mode) \(entry.type == .blob ? "blob" : "tree") \(entry.sha)\t\(entry.path)\u{0000}"
 	}
-	
+
 	return try await hashObject(at: gitDir, content: treeContent, type: "tree")
 }
 

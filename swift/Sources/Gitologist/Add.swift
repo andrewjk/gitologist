@@ -6,7 +6,7 @@ enum AddError: Error, LocalizedError {
 
 	var errorDescription: String? {
 		switch self {
-		case .fileNotFound(let file):
+		case let .fileNotFound(file):
 			return "File not found: \(file)"
 		case .notAGitRepository:
 			return "Not a git repository"

@@ -8,7 +8,7 @@ enum LogError: Error, LocalizedError {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
-		case .branchNotFound(let branch):
+		case let .branchNotFound(branch):
 			return "Branch '\(branch)' not found"
 		}
 	}
