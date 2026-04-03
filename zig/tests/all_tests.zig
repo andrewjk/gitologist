@@ -8,4 +8,5 @@ comptime {
     _ = @import("remote_test.zig");
     _ = @import("clone_test.zig");
     _ = @import("push_test.zig");
+    _ = @import("pull_test.zig");
 }
