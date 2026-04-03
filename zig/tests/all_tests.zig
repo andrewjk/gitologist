@@ -10,4 +10,5 @@ comptime {
     _ = @import("push_test.zig");
     _ = @import("pull_test.zig");
     _ = @import("log_test.zig");
+    _ = @import("merge_test.zig");
 }
