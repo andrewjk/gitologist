@@ -295,7 +295,7 @@ public class PullTests
             ".git",
             "refs",
             "heads",
-            "master"
+            "main"
         );
         var localBranchContent = await File.ReadAllTextAsync(localBranchPath);
 

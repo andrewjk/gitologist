@@ -69,7 +69,7 @@ struct CloneTests {
 		let headPath = targetPath.appendingPathComponent(".git").appendingPathComponent("HEAD")
 		let headContent = try String(contentsOf: headPath, encoding: .utf8)
 
-		#expect(headContent.contains("ref: refs/heads/master"))
+		#expect(headContent.contains("ref: refs/heads/main"))
 
 		try? fileManager.removeItem(at: testDirPath)
 	}

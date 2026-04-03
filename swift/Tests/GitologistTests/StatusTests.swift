@@ -20,7 +20,7 @@ struct StatusTests {
 		try await initRepo(at: testDirPath.path)
 
 		let result = try await status(at: testDirPath.path)
-		#expect(result.branch == "master")
+		#expect(result.branch == "main")
 
 		try? fileManager.removeItem(at: testDirPath)
 	}

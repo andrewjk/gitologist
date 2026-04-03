@@ -4,7 +4,7 @@ namespace Gitologist;
 
 public static class Init
 {
-    private const string HEAD_FILE = "ref: refs/heads/master\n";
+    private const string HEAD_FILE = "ref: refs/heads/main\n";
     private const string CONFIG_FILE = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n";
 
     public static async Task InitRepo(string path)

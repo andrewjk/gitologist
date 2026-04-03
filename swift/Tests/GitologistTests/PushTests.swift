@@ -24,7 +24,7 @@ struct PushTests {
 
 		try await push(at: testDirPath.path)
 
-		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("origin").appendingPathComponent("master")
+		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("origin").appendingPathComponent("main")
 		#expect(fileManager.fileExists(atPath: remoteBranchPath.path))
 
 		let remoteBranchContent = try String(contentsOf: remoteBranchPath, encoding: .utf8)
@@ -46,7 +46,7 @@ struct PushTests {
 
 		try await push(at: testDirPath.path, remote: "upstream")
 
-		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("upstream").appendingPathComponent("master")
+		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("upstream").appendingPathComponent("main")
 		#expect(fileManager.fileExists(atPath: remoteBranchPath.path))
 
 		try? fileManager.removeItem(at: testDirPath)
@@ -155,7 +155,7 @@ struct PushTests {
 
 		try await push(at: testDirPath.path)
 
-		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("origin").appendingPathComponent("master")
+		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("origin").appendingPathComponent("main")
 		let remoteBranchContent = try String(contentsOf: remoteBranchPath, encoding: .utf8)
 
 		#expect(remoteBranchContent.trimmingCharacters(in: .whitespacesAndNewlines) == secondSha)
@@ -177,7 +177,7 @@ struct PushTests {
 		let remoteDir = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("myremote")
 		#expect(fileManager.fileExists(atPath: remoteDir.path))
 
-		let remoteBranchPath = remoteDir.appendingPathComponent("master")
+		let remoteBranchPath = remoteDir.appendingPathComponent("main")
 		#expect(fileManager.fileExists(atPath: remoteBranchPath.path))
 
 		try? fileManager.removeItem(at: testDirPath)
@@ -200,11 +200,11 @@ struct PushTests {
 
 		try await push(at: testDirPath.path)
 
-		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("origin").appendingPathComponent("master")
+		let remoteBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent("origin").appendingPathComponent("main")
 		let remoteBranchContent = try String(contentsOf: remoteBranchPath, encoding: .utf8)
 		let remoteSha = remoteBranchContent.trimmingCharacters(in: .whitespacesAndNewlines)
 
-		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("master")
+		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
 		let localBranchContent = try String(contentsOf: localBranchPath, encoding: .utf8)
 		let localSha = localBranchContent.trimmingCharacters(in: .whitespacesAndNewlines)
 

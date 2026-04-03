@@ -54,7 +54,7 @@ public class InitTests
     {
         await Init.InitRepo(_testDir);
         var head = await File.ReadAllTextAsync(Path.Combine(_gitDir, "HEAD"));
-        Assert.AreEqual("ref: refs/heads/master\n", head);
+        Assert.AreEqual("ref: refs/heads/main\n", head);
     }
 
     [TestMethod]

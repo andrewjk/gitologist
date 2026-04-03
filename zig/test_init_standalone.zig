@@ -27,5 +27,5 @@ test "init creates git repository" {
     const head = try git_dir.readFileAlloc(io, "HEAD", allocator, .unlimited);
     defer allocator.free(head);
 
-    try testing.expectEqualStrings("ref: refs/heads/master\n", head);
+    try testing.expectEqualStrings("ref: refs/heads/main\n", head);
 }

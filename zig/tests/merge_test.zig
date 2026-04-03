@@ -50,7 +50,7 @@ test "should throw error when merging a branch into itself" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    const result = merge(io, allocator, tmp_path, "master", null);
+    const result = merge(io, allocator, tmp_path, "main", null);
     try std.testing.expectError(error.CannotMergeIntoSelf, result);
 }
 
@@ -131,7 +131,7 @@ test "should throw error when merging into empty branch" {
     const feature_sha = try commit(io, allocator, tmp_path, "Feature commit");
     allocator.free(feature_sha);
 
-    try checkoutBranch(io, allocator, tmp_path, "master");
+    try checkoutBranch(io, allocator, tmp_path, "main");
     try deleteBranchCommit(io, allocator, tmp_path);
 
     const result = merge(io, allocator, tmp_path, "feature", null);
@@ -182,7 +182,7 @@ test "should perform fast-forward merge when possible" {
     try add(io, allocator, tmp_path, feature_paths);
     const feature_sha = try commit(io, allocator, tmp_path, "Feature commit");
 
-    try checkoutBranch(io, allocator, tmp_path, "master");
+    try checkoutBranch(io, allocator, tmp_path, "main");
 
     const result = try merge(io, allocator, tmp_path, "feature", null);
     defer {
@@ -243,21 +243,21 @@ test "should create merge commit when not fast-forward" {
     const feature_sha = try commit(io, allocator, tmp_path, "Feature commit");
     allocator.free(feature_sha);
 
-    try checkoutBranch(io, allocator, tmp_path, "master");
+    try checkoutBranch(io, allocator, tmp_path, "main");
 
-    const master_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "master.txt" });
-    defer allocator.free(master_file_path);
+    const main_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "main.txt" });
+    defer allocator.free(main_file_path);
 
-    try cwd.writeFile(io, .{ .sub_path = master_file_path, .data = "master content" });
+    try cwd.writeFile(io, .{ .sub_path = main_file_path, .data = "main content" });
 
-    const master_paths = try allocator.alloc([]const u8, 1);
-    defer allocator.free(master_paths);
-    master_paths[0] = try allocator.dupe(u8, "master.txt");
-    defer allocator.free(master_paths[0]);
+    const main_paths = try allocator.alloc([]const u8, 1);
+    defer allocator.free(main_paths);
+    main_paths[0] = try allocator.dupe(u8, "main.txt");
+    defer allocator.free(main_paths[0]);
 
-    try add(io, allocator, tmp_path, master_paths);
-    const master_sha = try commit(io, allocator, tmp_path, "Master commit");
-    allocator.free(master_sha);
+    try add(io, allocator, tmp_path, main_paths);
+    const main_sha = try commit(io, allocator, tmp_path, "Master commit");
+    allocator.free(main_sha);
 
     const result = try merge(io, allocator, tmp_path, "feature", null);
     defer {
@@ -317,7 +317,7 @@ test "should allow non-fast-forward merge with option" {
     const feature_sha = try commit(io, allocator, tmp_path, "Feature commit");
     allocator.free(feature_sha);
 
-    try checkoutBranch(io, allocator, tmp_path, "master");
+    try checkoutBranch(io, allocator, tmp_path, "main");
 
     const opts = MergeOptions{ .no_fast_forward = true };
     const result = try merge(io, allocator, tmp_path, "feature", opts);
@@ -420,21 +420,21 @@ test "should use custom merge message" {
     const feature_sha = try commit(io, allocator, tmp_path, "Feature commit");
     allocator.free(feature_sha);
 
-    try checkoutBranch(io, allocator, tmp_path, "master");
+    try checkoutBranch(io, allocator, tmp_path, "main");
 
-    const master_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "master.txt" });
-    defer allocator.free(master_file_path);
+    const main_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "main.txt" });
+    defer allocator.free(main_file_path);
 
-    try cwd.writeFile(io, .{ .sub_path = master_file_path, .data = "master content" });
+    try cwd.writeFile(io, .{ .sub_path = main_file_path, .data = "main content" });
 
-    const master_paths = try allocator.alloc([]const u8, 1);
-    defer allocator.free(master_paths);
-    master_paths[0] = try allocator.dupe(u8, "master.txt");
-    defer allocator.free(master_paths[0]);
+    const main_paths = try allocator.alloc([]const u8, 1);
+    defer allocator.free(main_paths);
+    main_paths[0] = try allocator.dupe(u8, "main.txt");
+    defer allocator.free(main_paths[0]);
 
-    try add(io, allocator, tmp_path, master_paths);
-    const master_sha = try commit(io, allocator, tmp_path, "Master commit");
-    allocator.free(master_sha);
+    try add(io, allocator, tmp_path, main_paths);
+    const main_sha = try commit(io, allocator, tmp_path, "Master commit");
+    allocator.free(main_sha);
 
     const custom_message = try allocator.dupe(u8, "Custom merge message");
     defer allocator.free(custom_message);

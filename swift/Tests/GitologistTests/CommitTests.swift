@@ -98,7 +98,7 @@ struct CommitTests {
 
 		let commitSha = try await commit(at: testDirPath.path, message: "Test commit")
 
-		let branchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("master")
+		let branchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
 		let branchRef = try String(contentsOf: branchPath, encoding: .utf8)
 
 		#expect(branchRef.trimmingCharacters(in: .whitespacesAndNewlines) == commitSha)
@@ -123,7 +123,7 @@ struct CommitTests {
 
 		#expect(firstSha != secondSha)
 
-		let branchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("master")
+		let branchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
 		let branchRef = try String(contentsOf: branchPath, encoding: .utf8)
 
 		#expect(branchRef.trimmingCharacters(in: .whitespacesAndNewlines) == secondSha)

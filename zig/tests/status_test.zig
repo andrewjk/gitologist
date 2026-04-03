@@ -42,7 +42,7 @@ test "should return current branch" {
 
     const result = try status(io, allocator, tmp_path);
 
-    try std.testing.expectEqualStrings("master", result.branch);
+    try std.testing.expectEqualStrings("main", result.branch);
 
     allocator.free(result.branch);
     allocator.free(result.up_to_date);

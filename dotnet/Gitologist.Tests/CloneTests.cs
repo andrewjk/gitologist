@@ -77,7 +77,7 @@ public class CloneTests
         var headPath = Path.Combine(resultPath, ".git", "HEAD");
         var headContent = await File.ReadAllTextAsync(headPath);
 
-        StringAssert.Contains(headContent, "ref: refs/heads/master");
+        StringAssert.Contains(headContent, "ref: refs/heads/main");
     }
 
     [TestMethod]

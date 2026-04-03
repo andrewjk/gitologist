@@ -40,7 +40,7 @@ public class StatusTests
     {
         await Init.InitRepo(_testDir);
         var result = await Status.GetStatus(_testDir);
-        Assert.AreEqual("master", result.Branch);
+        Assert.AreEqual("main", result.Branch);
     }
 
     [TestMethod]

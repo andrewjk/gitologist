@@ -9,7 +9,7 @@ public class GitCompatTests
 {
     private string _baseDir = null!;
     private string _remoteDir = null!;
-    private string _defaultBranch = "master";
+    private string _defaultBranch = "main";
 
     [TestInitialize]
     public void Setup()
@@ -21,7 +21,7 @@ public class GitCompatTests
         Directory.CreateDirectory(_baseDir);
 
         // Detect git default branch
-        _defaultBranch = "master";
+        _defaultBranch = "main";
 
         try
         {
@@ -65,7 +65,7 @@ public class GitCompatTests
         }
         catch
         {
-            // Use default master
+            // Use default main
         }
 
         // Create a bare remote repository

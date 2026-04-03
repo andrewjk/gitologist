@@ -23,7 +23,7 @@ public static class Restore
             }
         }
 
-        var branchPath = Path.Combine(gitDir, "refs", "heads", "master");
+        var branchPath = Path.Combine(gitDir, "refs", "heads", "main");
         var commitSha = (await File.ReadAllTextAsync(branchPath)).Trim();
 
         var commitData = await Utils.ReadObject(gitDir, commitSha);

@@ -48,7 +48,7 @@ struct InitTests {
 
 		try await initRepo(at: testDirPath.path)
 		let headContent = try String(contentsOf: testDirPath.appendingPathComponent(".git").appendingPathComponent("HEAD"), encoding: .utf8)
-		#expect(headContent == "ref: refs/heads/master\n")
+		#expect(headContent == "ref: refs/heads/main\n")
 
 		try? fileManager.removeItem(at: testDirPath)
 	}

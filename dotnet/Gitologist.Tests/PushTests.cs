@@ -53,7 +53,7 @@ public class PushTests
             "refs",
             "remotes",
             "origin",
-            "master"
+            "main"
         );
         Assert.IsTrue(File.Exists(remoteBranchPath));
 
@@ -80,7 +80,7 @@ public class PushTests
             "refs",
             "remotes",
             "upstream",
-            "master"
+            "main"
         );
         Assert.IsTrue(File.Exists(remoteBranchPath));
     }
@@ -229,7 +229,7 @@ public class PushTests
             "refs",
             "remotes",
             "origin",
-            "master"
+            "main"
         );
         var remoteBranchContent = await File.ReadAllTextAsync(remoteBranchPath);
 
@@ -258,7 +258,7 @@ public class PushTests
         );
         Assert.IsTrue(Directory.Exists(remoteDir));
 
-        var remoteBranchPath = Path.Combine(remoteDir, "master");
+        var remoteBranchPath = Path.Combine(remoteDir, "main");
         Assert.IsTrue(File.Exists(remoteBranchPath));
     }
 
@@ -290,7 +290,7 @@ public class PushTests
             "refs",
             "remotes",
             "origin",
-            "master"
+            "main"
         );
         var remoteBranchContent = await File.ReadAllTextAsync(remoteBranchPath);
 
@@ -301,7 +301,7 @@ public class PushTests
             ".git",
             "refs",
             "heads",
-            "master"
+            "main"
         );
         var localBranchContent = await File.ReadAllTextAsync(localBranchPath);
 

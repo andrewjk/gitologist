@@ -23,7 +23,7 @@ pub fn restore(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files
         }
     }
 
-    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "refs", "heads", "master" });
+    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "refs", "heads", "main" });
     defer allocator.free(branch_path);
 
     const commit_sha_bytes = try cwd.readFileAlloc(io, branch_path, allocator, .unlimited);

@@ -106,7 +106,7 @@ test "should initialize git repository" {
     const head = try git_dir.readFileAlloc(io, "HEAD", allocator, .unlimited);
     defer allocator.free(head);
 
-    try std.testing.expect(std.mem.indexOf(u8, head, "ref: refs/heads/master") != null);
+    try std.testing.expect(std.mem.indexOf(u8, head, "ref: refs/heads/main") != null);
 }
 
 test "should add remote" {

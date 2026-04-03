@@ -166,5 +166,5 @@ pub fn build(b: *std.Build) void {
     // verbosity) to validate assumptions and diagnose problems.
     //
     // Lastly, the Zig build system is relatively simple and self-contained,
-    // and reading its source code will allow you to master it.
+    // and reading its source code will allow you to main it.
 }

@@ -35,7 +35,7 @@ struct MergeTests {
 		_ = try await commit(at: testDirPath.path, message: "Initial commit")
 
 		await #expect(throws: MergeError.self) {
-			try await merge(at: testDirPath.path, branchName: "master")
+			try await merge(at: testDirPath.path, branchName: "main")
 		}
 
 		try? fileManager.removeItem(at: testDirPath)
@@ -73,7 +73,7 @@ struct MergeTests {
 		try await add(at: testDirPath.path, files: ["feature.txt"])
 		_ = try await commit(at: testDirPath.path, message: "Feature commit")
 
-		try await checkoutBranch(at: testDirPath.path, branchName: "master")
+		try await checkoutBranch(at: testDirPath.path, branchName: "main")
 		try await deleteBranchCommit(at: testDirPath.path)
 
 		await #expect(throws: MergeError.self) {
@@ -99,7 +99,7 @@ struct MergeTests {
 		try await add(at: testDirPath.path, files: ["feature.txt"])
 		let featureSha = try await commit(at: testDirPath.path, message: "Feature commit")
 
-		try await checkoutBranch(at: testDirPath.path, branchName: "master")
+		try await checkoutBranch(at: testDirPath.path, branchName: "main")
 
 		let result = try await merge(at: testDirPath.path, branchName: "feature")
 
@@ -126,10 +126,10 @@ struct MergeTests {
 		try await add(at: testDirPath.path, files: ["feature.txt"])
 		_ = try await commit(at: testDirPath.path, message: "Feature commit")
 
-		try await checkoutBranch(at: testDirPath.path, branchName: "master")
+		try await checkoutBranch(at: testDirPath.path, branchName: "main")
 
-		try "master content".write(to: testDirPath.appendingPathComponent("master.txt"), atomically: true, encoding: .utf8)
-		try await add(at: testDirPath.path, files: ["master.txt"])
+		try "main content".write(to: testDirPath.appendingPathComponent("main.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["main.txt"])
 		_ = try await commit(at: testDirPath.path, message: "Master commit")
 
 		let result = try await merge(at: testDirPath.path, branchName: "feature")
@@ -159,7 +159,7 @@ struct MergeTests {
 		try await add(at: testDirPath.path, files: ["feature.txt"])
 		_ = try await commit(at: testDirPath.path, message: "Feature commit")
 
-		try await checkoutBranch(at: testDirPath.path, branchName: "master")
+		try await checkoutBranch(at: testDirPath.path, branchName: "main")
 
 		let options = MergeOptions(message: nil, noFastForward: true)
 		let result = try await merge(at: testDirPath.path, branchName: "feature", options: options)
@@ -208,10 +208,10 @@ struct MergeTests {
 		try await add(at: testDirPath.path, files: ["feature.txt"])
 		_ = try await commit(at: testDirPath.path, message: "Feature commit")
 
-		try await checkoutBranch(at: testDirPath.path, branchName: "master")
+		try await checkoutBranch(at: testDirPath.path, branchName: "main")
 
-		try "master content".write(to: testDirPath.appendingPathComponent("master.txt"), atomically: true, encoding: .utf8)
-		try await add(at: testDirPath.path, files: ["master.txt"])
+		try "main content".write(to: testDirPath.appendingPathComponent("main.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["main.txt"])
 		_ = try await commit(at: testDirPath.path, message: "Master commit")
 
 		let options = MergeOptions(message: "Custom merge message", noFastForward: nil)

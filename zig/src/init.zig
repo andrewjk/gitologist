@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const HEAD_FILE = "ref: refs/heads/master\n";
+const HEAD_FILE = "ref: refs/heads/main\n";
 const CONFIG_FILE = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n";
 
 pub fn init(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void {

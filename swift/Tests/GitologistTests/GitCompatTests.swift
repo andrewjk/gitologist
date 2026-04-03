@@ -32,7 +32,7 @@ struct GitCompatTests {
 
 	private func setupRemoteRepo(at baseDirPath: URL) async throws -> (remoteDir: URL, defaultBranch: String) {
 		// Detect git default branch
-		var defaultBranch = "master"
+		var defaultBranch = "main"
 
 		// Create a test repo to check default branch
 		let testDir = baseDirPath.appendingPathComponent("branch-test")
@@ -110,7 +110,7 @@ struct GitCompatTests {
 		let ourHead = try String(contentsOf: ourDir.appendingPathComponent(".git").appendingPathComponent("HEAD"), encoding: .utf8)
 		let theirHead = try String(contentsOf: theirDir.appendingPathComponent(".git").appendingPathComponent("HEAD"), encoding: .utf8)
 
-		// Both should point to a branch (usually master or main)
+		// Both should point to a branch (usually main or main)
 		let headPattern = /^ref: refs\/heads\//
 		#expect(ourHead.wholeMatch(of: headPattern) != nil || ourHead.hasPrefix("ref: refs/heads/"))
 		#expect(theirHead.wholeMatch(of: headPattern) != nil || theirHead.hasPrefix("ref: refs/heads/"))

@@ -377,7 +377,7 @@ test "should update local branch reference" {
 
     try pull(io, allocator, tmp_path, null, null);
 
-    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "master" });
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
     defer allocator.free(local_branch_path);
 
     const local_branch_content = try cwd.readFileAlloc(io, local_branch_path, allocator, .unlimited);

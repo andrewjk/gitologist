@@ -1,6 +1,6 @@
 import Foundation
 
-private let HEAD_FILE = "ref: refs/heads/master\n"
+private let HEAD_FILE = "ref: refs/heads/main\n"
 private let CONFIG_FILE = """
 [core]
 	repositoryformatversion = 0

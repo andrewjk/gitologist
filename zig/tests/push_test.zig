@@ -35,7 +35,7 @@ test "should push to default remote and branch" {
 
     try push(io, allocator, tmp_path, null, null);
 
-    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "master" });
+    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "main" });
     defer allocator.free(remote_branch_path);
 
     const git_dir = try cwd.openDir(io, tmp_path, .{});
@@ -81,7 +81,7 @@ test "should push to specified remote" {
 
     try push(io, allocator, tmp_path, "upstream", null);
 
-    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "upstream", "master" });
+    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "upstream", "main" });
     defer allocator.free(remote_branch_path);
 
     const git_dir = try cwd.openDir(io, tmp_path, .{});
@@ -293,7 +293,7 @@ test "should update existing remote branch" {
 
     try push(io, allocator, tmp_path, null, null);
 
-    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "master" });
+    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "main" });
     defer allocator.free(remote_branch_path);
 
     const git_dir = try cwd.openDir(io, tmp_path, .{});
@@ -347,7 +347,7 @@ test "should create remote directory if it does not exist" {
 
     _ = try git_dir.openDir(io, remote_dir, .{});
 
-    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ remote_dir, "master" });
+    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ remote_dir, "main" });
     defer allocator.free(remote_branch_path);
 
     const remote_branch_content = try git_dir.readFileAlloc(io, remote_branch_path, allocator, .unlimited);
@@ -397,7 +397,7 @@ test "should handle multiple pushes to same branch" {
 
     try push(io, allocator, tmp_path, null, null);
 
-    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "master" });
+    const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "main" });
     defer allocator.free(remote_branch_path);
 
     const git_dir = try cwd.openDir(io, tmp_path, .{});
@@ -408,7 +408,7 @@ test "should handle multiple pushes to same branch" {
 
     const remote_sha = std.mem.trim(u8, remote_branch_content, &std.ascii.whitespace);
 
-    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "master" });
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
     defer allocator.free(local_branch_path);
 
     const local_branch_content = try git_dir.readFileAlloc(io, local_branch_path, allocator, .unlimited);

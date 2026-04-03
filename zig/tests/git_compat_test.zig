@@ -291,7 +291,7 @@ test "should create repo structure like git clone" {
     }
 
     const push_result = try std.process.run(allocator, io, .{
-        .argv = &[_][]const u8{ "git", "push", "origin", "master" },
+        .argv = &[_][]const u8{ "git", "push", "origin", "main" },
         .cwd = .{ .path = temp_clone },
     });
     defer {

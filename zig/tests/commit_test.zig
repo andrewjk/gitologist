@@ -158,7 +158,7 @@ test "should update branch reference" {
     const commit_sha = try commit(io, allocator, tmp_path, "Test commit");
     defer allocator.free(commit_sha);
 
-    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "master" });
+    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
     defer allocator.free(branch_path);
 
     const branch_ref = try cwd.readFileAlloc(io, branch_path, allocator, .unlimited);
@@ -196,7 +196,7 @@ test "should handle multiple commits" {
 
     try std.testing.expect(!std.mem.eql(u8, first_sha, second_sha));
 
-    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "master" });
+    const branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
     defer allocator.free(branch_path);
 
     const branch_ref = try cwd.readFileAlloc(io, branch_path, allocator, .unlimited);

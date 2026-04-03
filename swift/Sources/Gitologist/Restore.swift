@@ -32,7 +32,7 @@ func restore(at path: String, files: [String]) async throws {
 		}
 	}
 
-	let branchPath = gitDir.appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("master")
+	let branchPath = gitDir.appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
 	let commitSha = try String(contentsOf: branchPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
 
 	let commitData = try await readObject(at: gitDir.path, sha: commitSha)

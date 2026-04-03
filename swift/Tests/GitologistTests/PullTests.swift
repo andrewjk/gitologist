@@ -210,7 +210,7 @@ struct PullTests {
 
 		try await pull(at: testDirPath.path)
 
-		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("master")
+		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
 		let localBranchContent = try String(contentsOf: localBranchPath, encoding: .utf8)
 
 		#expect(localBranchContent.trimmingCharacters(in: .whitespacesAndNewlines) == secondSha)

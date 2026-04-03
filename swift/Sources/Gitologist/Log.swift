@@ -25,7 +25,7 @@ func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry]
 	if let customBranch = options?.branch {
 		branchName = customBranch
 	} else {
-		branchName = (try? await getCurrentBranch(at: gitDir.path)) ?? "master"
+		branchName = (try? await getCurrentBranch(at: gitDir.path)) ?? "main"
 	}
 	let branchPath = gitDir
 		.appendingPathComponent("refs")

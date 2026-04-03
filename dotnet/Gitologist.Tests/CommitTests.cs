@@ -122,7 +122,7 @@ public class CommitTests
 
         var commitSha = await Commit.CreateCommit(_testDir, "Test commit");
 
-        var branchPath = Path.Combine(_testDir, ".git", "refs", "heads", "master");
+        var branchPath = Path.Combine(_testDir, ".git", "refs", "heads", "main");
         var branchRef = await File.ReadAllTextAsync(branchPath);
 
         Assert.AreEqual(commitSha, branchRef.Trim());
@@ -147,7 +147,7 @@ public class CommitTests
 
         Assert.AreNotEqual(firstSha, secondSha);
 
-        var branchPath = Path.Combine(_testDir, ".git", "refs", "heads", "master");
+        var branchPath = Path.Combine(_testDir, ".git", "refs", "heads", "main");
         var branchRef = await File.ReadAllTextAsync(branchPath);
 
         Assert.AreEqual(secondSha, branchRef.Trim());

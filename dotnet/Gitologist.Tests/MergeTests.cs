@@ -73,7 +73,7 @@ public class MergeTests
         await Commit.CreateCommit(_testDir, "Initial commit");
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
-            () => Merge.MergeBranch(_testDir, "master")
+            () => Merge.MergeBranch(_testDir, "main")
         );
     }
 
@@ -114,7 +114,7 @@ public class MergeTests
         await Add.AddFiles(_testDir, new[] { "feature.txt" });
         await Commit.CreateCommit(_testDir, "Feature commit");
 
-        await CheckoutBranch(_testDir, "master");
+        await CheckoutBranch(_testDir, "main");
         await DeleteBranchCommit(_testDir);
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
@@ -143,7 +143,7 @@ public class MergeTests
         await Add.AddFiles(_testDir, new[] { "feature.txt" });
         var featureSha = await Commit.CreateCommit(_testDir, "Feature commit");
 
-        await CheckoutBranch(_testDir, "master");
+        await CheckoutBranch(_testDir, "main");
 
         var result = await Merge.MergeBranch(_testDir, "feature");
 
@@ -173,13 +173,13 @@ public class MergeTests
         await Add.AddFiles(_testDir, new[] { "feature.txt" });
         await Commit.CreateCommit(_testDir, "Feature commit");
 
-        await CheckoutBranch(_testDir, "master");
+        await CheckoutBranch(_testDir, "main");
 
         await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "master.txt"),
-            "master content"
+            Path.Combine(_testDir, "main.txt"),
+            "main content"
         );
-        await Add.AddFiles(_testDir, new[] { "master.txt" });
+        await Add.AddFiles(_testDir, new[] { "main.txt" });
         await Commit.CreateCommit(_testDir, "Master commit");
 
         var result = await Merge.MergeBranch(_testDir, "feature");
@@ -210,7 +210,7 @@ public class MergeTests
         await Add.AddFiles(_testDir, new[] { "feature.txt" });
         await Commit.CreateCommit(_testDir, "Feature commit");
 
-        await CheckoutBranch(_testDir, "master");
+        await CheckoutBranch(_testDir, "main");
 
         var options = new MergeOptions { NoFastForward = true };
         var result = await Merge.MergeBranch(_testDir, "feature", options);
@@ -260,13 +260,13 @@ public class MergeTests
         await Add.AddFiles(_testDir, new[] { "feature.txt" });
         await Commit.CreateCommit(_testDir, "Feature commit");
 
-        await CheckoutBranch(_testDir, "master");
+        await CheckoutBranch(_testDir, "main");
 
         await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "master.txt"),
-            "master content"
+            Path.Combine(_testDir, "main.txt"),
+            "main content"
         );
-        await Add.AddFiles(_testDir, new[] { "master.txt" });
+        await Add.AddFiles(_testDir, new[] { "main.txt" });
         await Commit.CreateCommit(_testDir, "Master commit");
 
         var options = new MergeOptions { Message = "Custom merge message" };

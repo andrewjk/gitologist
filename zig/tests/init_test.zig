@@ -86,7 +86,7 @@ test "should create HEAD file" {
     const head = try git_dir.readFileAlloc(io, "HEAD", allocator, .unlimited);
     defer allocator.free(head);
 
-    try std.testing.expectEqualStrings("ref: refs/heads/master\n", head);
+    try std.testing.expectEqualStrings("ref: refs/heads/main\n", head);
 }
 
 test "should create config file" {
