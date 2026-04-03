@@ -10,3 +10,4 @@ pub const restore = @import("restore.zig").restore;
 pub const restoreAll = @import("restore.zig").restoreAll;
 pub const remoteAdd = @import("remote.zig").remoteAdd;
 pub const clone = @import("clone.zig").clone;
+pub const push = @import("push.zig").push;

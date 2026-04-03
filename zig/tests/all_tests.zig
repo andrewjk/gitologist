@@ -7,4 +7,5 @@ comptime {
     _ = @import("restore_test.zig");
     _ = @import("remote_test.zig");
     _ = @import("clone_test.zig");
+    _ = @import("push_test.zig");
 }
