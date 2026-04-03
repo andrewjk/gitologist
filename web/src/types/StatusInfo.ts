@@ -4,4 +4,5 @@ export interface StatusInfo {
 	staged: string[];
 	modified: string[];
 	untracked: string[];
+	deleted: string[];
 }

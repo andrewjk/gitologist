@@ -6,4 +6,5 @@ pub const StatusInfo = struct {
     staged: []const []const u8,
     modified: []const []const u8,
     untracked: []const []const u8,
+    deleted: []const []const u8,
 };

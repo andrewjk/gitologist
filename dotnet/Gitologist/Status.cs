@@ -41,6 +41,7 @@ public static class Status
         var staged = new List<string>();
         var modified = new List<string>();
         var untracked = new List<string>();
+        var deleted = new List<string>();
 
         // Load gitignore patterns
         var gitignore = new IgnoreParser();
@@ -66,7 +67,7 @@ public static class Status
             var fullPath = Path.Combine(path, filePath);
             if (!File.Exists(fullPath))
             {
-                modified.Add(filePath);
+                deleted.Add(filePath);
             }
             else
             {
@@ -85,6 +86,7 @@ public static class Status
             Staged = staged.ToArray(),
             Modified = modified.ToArray(),
             Untracked = untracked.ToArray(),
+            Deleted = deleted.ToArray(),
         };
     }
 }

@@ -7,4 +7,5 @@ public record class StatusInfo
     public required string[] Staged { get; init; }
     public required string[] Modified { get; init; }
     public required string[] Untracked { get; init; }
+    public required string[] Deleted { get; init; }
 }

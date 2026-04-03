@@ -34,6 +34,7 @@ export async function status(path: string): Promise<StatusInfo> {
 	const staged: string[] = [];
 	const modified: string[] = [];
 	const untracked: string[] = [];
+	const deleted: string[] = [];
 
 	// Load gitignore patterns
 	const gitignore = new IgnoreParser();
@@ -53,7 +54,7 @@ export async function status(path: string): Promise<StatusInfo> {
 
 	for (const [filePath, entry] of index) {
 		if (!existsSync(join(path, filePath))) {
-			modified.push(filePath);
+			deleted.push(filePath);
 		} else {
 			const currentHash = await hashFile(join(path, filePath));
 			if (entry.sha !== currentHash) {
@@ -68,6 +69,7 @@ export async function status(path: string): Promise<StatusInfo> {
 		staged,
 		modified,
 		untracked,
+		deleted,
 	};
 }
 

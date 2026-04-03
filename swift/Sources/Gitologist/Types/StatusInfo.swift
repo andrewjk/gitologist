@@ -6,4 +6,5 @@ struct StatusInfo: Codable {
 	let staged: [String]
 	let modified: [String]
 	let untracked: [String]
+	let deleted: [String]
 }

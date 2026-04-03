@@ -37,6 +37,7 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
     var staged = std.ArrayList([]const u8).initCapacity(allocator, index.count()) catch unreachable;
     var modified = std.ArrayList([]const u8).initCapacity(allocator, index.count()) catch unreachable;
     var untracked = std.ArrayList([]const u8).initCapacity(allocator, 10) catch unreachable;
+    var deleted = std.ArrayList([]const u8).initCapacity(allocator, index.count()) catch unreachable;
 
     var iter = index.iterator();
     while (iter.next()) |entry| {
@@ -83,7 +84,7 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
             }
         } else |_| {
             const path_copy = try allocator.dupe(u8, file_path);
-            try modified.append(allocator, path_copy);
+            try deleted.append(allocator, path_copy);
         }
     }
 
@@ -95,6 +96,7 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
         .staged = try staged.toOwnedSlice(allocator),
         .modified = try modified.toOwnedSlice(allocator),
         .untracked = try untracked.toOwnedSlice(allocator),
+        .deleted = try deleted.toOwnedSlice(allocator),
     };
 }
 

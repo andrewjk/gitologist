@@ -49,6 +49,7 @@ func status(at path: String) async throws -> StatusInfo {
 	var staged: [String] = []
 	var modified: [String] = []
 	var untracked: [String] = []
+	var deleted: [String] = []
 
 	// Load gitignore patterns
 	let gitignore = IgnoreParser()
@@ -70,7 +71,7 @@ func status(at path: String) async throws -> StatusInfo {
 		let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
 
 		if !FileManager.default.fileExists(atPath: fullPath.path) {
-			modified.append(filePath)
+			deleted.append(filePath)
 		} else {
 			let currentHash = try await hashFile(at: fullPath.path)
 			if entry.sha != currentHash {
@@ -84,7 +85,8 @@ func status(at path: String) async throws -> StatusInfo {
 		upToDate: "Your branch is up to date with 'origin/\(branch)'.",
 		staged: staged,
 		modified: modified,
-		untracked: untracked
+		untracked: untracked,
+		deleted: deleted
 	)
 }
 
