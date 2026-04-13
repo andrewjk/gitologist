@@ -196,7 +196,7 @@ export async function writeIndex(indexPath: string, index: Map<string, IndexEntr
 export async function hashObject(
 	gitDir: string,
 	content: string,
-	type: "blob" | "tree" | "commit",
+	type: "blob" | "tree" | "commit" | "tag",
 ): Promise<string> {
 	const crypto = await import("node:crypto");
 	const zlib = await import("node:zlib");
@@ -221,7 +221,7 @@ export async function hashObject(
 export async function hashObjectBuffer(
 	gitDir: string,
 	content: Buffer,
-	type: "blob" | "tree" | "commit",
+	type: "blob" | "tree" | "commit" | "tag",
 ): Promise<string> {
 	const crypto = await import("node:crypto");
 	const zlib = await import("node:zlib");

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
+import { fetchFromRemote } from "./fetch.ts";
 import {
 	extractContentFromBlob,
 	extractTreeFromCommit,
@@ -16,6 +17,8 @@ export async function pull(path: string, remote?: string, branch?: string): Prom
 	if (!existsSync(gitDir)) {
 		throw new Error("Not a git repository");
 	}
+
+	await fetchFromRemote(path, remote);
 
 	const remoteName = remote || "origin";
 	const branchName = branch || (await getCurrentBranch(gitDir));

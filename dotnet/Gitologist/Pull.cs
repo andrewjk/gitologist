@@ -20,6 +20,8 @@ public static class Pull
         var remoteName = remote ?? "origin";
         var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
 
+        await Fetch.FetchFromRemote(path, remoteName);
+
         var remoteBranchPath = Path.Combine(
             gitDir,
             "refs",

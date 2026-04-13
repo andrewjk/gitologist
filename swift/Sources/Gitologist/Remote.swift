@@ -46,3 +46,56 @@ func remoteAdd(at path: String, name: String, url: String) async throws {
 
 	try configContent.write(to: configPath, atomically: true, encoding: .utf8)
 }
+
+func getRemoteUrl(at gitDir: String, remoteName: String) async -> String? {
+	let configPath = URL(fileURLWithPath: gitDir).appendingPathComponent("config")
+
+	guard FileManager.default.fileExists(atPath: configPath.path) else {
+		return nil
+	}
+
+	guard let configContent = try? String(contentsOf: configPath, encoding: .utf8) else {
+		return nil
+	}
+
+	let lines = configContent.split(separator: "\n")
+
+	var inRemoteSection = false
+	var currentRemote = ""
+
+	for line in lines {
+		let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+		let remotePattern = "^\\[remote \"([^\"]+)\"\\]$"
+		guard let regex = try? NSRegularExpression(pattern: remotePattern) else {
+			continue
+		}
+		let nsRange = NSRange(trimmed.startIndex..., in: trimmed)
+		if let match = regex.firstMatch(in: trimmed, options: [], range: nsRange) {
+			inRemoteSection = true
+			if let nameRange = Range(match.range(at: 1), in: trimmed) {
+				currentRemote = String(trimmed[nameRange])
+			}
+			continue
+		}
+
+		if inRemoteSection, currentRemote == remoteName {
+			let urlPattern = "^url\\s*=\\s*(.+)$"
+			guard let urlRegex = try? NSRegularExpression(pattern: urlPattern) else {
+				continue
+			}
+			let urlNsRange = NSRange(trimmed.startIndex..., in: trimmed)
+			if let urlMatch = urlRegex.firstMatch(in: trimmed, options: [], range: urlNsRange) {
+				if let urlRange = Range(urlMatch.range(at: 1), in: trimmed) {
+					return String(trimmed[urlRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+				}
+			}
+		}
+
+		if trimmed.hasPrefix("["), !trimmed.hasPrefix("[remote") {
+			inRemoteSection = false
+		}
+	}
+
+	return nil
+}

@@ -38,4 +38,49 @@ public static class Remote
 
         await File.WriteAllTextAsync(configPath, configContent);
     }
+
+    public static async Task<string?> GetRemoteUrl(string gitDir, string remoteName)
+    {
+        var configPath = Path.Combine(gitDir, "config");
+
+        if (!File.Exists(configPath))
+        {
+            return null;
+        }
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        var lines = configContent.Split('\n');
+
+        var inRemoteSection = false;
+        var currentRemote = "";
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            var sectionMatch = Regex.Match(trimmed, @"^\[remote\s+""([^""]+)""\]");
+            if (sectionMatch.Success)
+            {
+                inRemoteSection = true;
+                currentRemote = sectionMatch.Groups[1].Value;
+                continue;
+            }
+
+            if (inRemoteSection && currentRemote == remoteName)
+            {
+                var urlMatch = Regex.Match(trimmed, @"^url\s*=\s*(.+)$");
+                if (urlMatch.Success)
+                {
+                    return urlMatch.Groups[1].Value.Trim();
+                }
+            }
+
+            if (trimmed.StartsWith("[") && !trimmed.StartsWith("[remote"))
+            {
+                inRemoteSection = false;
+            }
+        }
+
+        return null;
+    }
 }

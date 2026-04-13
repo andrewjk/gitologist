@@ -58,3 +58,51 @@ pub fn remoteAdd(io: std.Io, allocator: std.mem.Allocator, path: []const u8, nam
 
     try cwd.writeFile(io, .{ .sub_path = config_path, .data = result.items });
 }
+
+pub fn getRemoteUrl(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, remote_name: []const u8) !?[]const u8 {
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "config" });
+    defer allocator.free(config_path);
+
+    const cwd = std.Io.Dir.cwd();
+    const config_content = cwd.readFileAlloc(io, config_path, allocator, .unlimited) catch |err| {
+        if (err == error.FileNotFound) {
+            return null;
+        }
+        return err;
+    };
+    defer allocator.free(config_content);
+
+    var lines = std.mem.splitScalar(u8, config_content, '\n');
+
+    var in_remote_section = false;
+    var current_remote: []const u8 = "";
+
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+
+        var remote_pattern_buf: [256]u8 = undefined;
+        const remote_pattern = try std.fmt.bufPrint(&remote_pattern_buf, "[remote \"{s}\"]", .{remote_name});
+
+        if (std.mem.indexOf(u8, trimmed, remote_pattern)) |_| {
+            in_remote_section = true;
+            current_remote = remote_name;
+            continue;
+        }
+
+        if (in_remote_section and std.mem.eql(u8, current_remote, remote_name)) {
+            if (std.mem.indexOf(u8, trimmed, "url")) |_| {
+                var parts = std.mem.splitScalar(u8, trimmed, '=');
+                _ = parts.next(); // Skip "url"
+                const url = parts.next() orelse continue;
+                const trimmed_url = std.mem.trim(u8, url, &std.ascii.whitespace);
+                return try allocator.dupe(u8, trimmed_url);
+            }
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "[") and !std.mem.startsWith(u8, trimmed, "[remote")) {
+            in_remote_section = false;
+        }
+    }
+
+    return null;
+}

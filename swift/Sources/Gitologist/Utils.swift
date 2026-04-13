@@ -250,7 +250,7 @@ func hashObject(at gitDir: String, data: Data, type: String) async throws -> Str
 	return sha
 }
 
-private func compressData(_ data: Data) throws -> Data {
+func compressData(_ data: Data) throws -> Data {
 	// Use zlib compression for git object format compatibility
 	var compressedData = Data()
 
@@ -342,7 +342,7 @@ func readObject(at gitDir: String, sha: String) async throws -> String {
 	return result
 }
 
-private func decompressData(_ data: Data) throws -> Data {
+func decompressData(_ data: Data) throws -> Data {
 	// Use zlib decompression for git object format compatibility
 	var decompressedData = Data()
 

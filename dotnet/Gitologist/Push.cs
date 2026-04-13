@@ -39,6 +39,13 @@ public static class Push
 
         var commitSha = (await File.ReadAllTextAsync(localBranchPath)).Trim();
 
+        var remoteUrl = await Remote.GetRemoteUrl(gitDir, remoteName);
+
+        if (remoteUrl != null && (remoteUrl.StartsWith("http://") || remoteUrl.StartsWith("https://")))
+        {
+            await PushToRemote(remoteUrl, commitSha, branchName, gitDir);
+        }
+
         var remoteBranchPath = Path.Combine(
             gitDir,
             "refs",
@@ -50,5 +57,116 @@ public static class Push
             Path.GetDirectoryName(remoteBranchPath)!
         );
         await File.WriteAllTextAsync(remoteBranchPath, commitSha + "\n");
+    }
+
+    private static async Task PushToRemote(
+        string remoteUrl,
+        string commitSha,
+        string branchName,
+        string gitDir
+    )
+    {
+        var remoteRefs = await DiscoverRefsForPush(remoteUrl);
+        var remoteRef = remoteRefs.FirstOrDefault(r => r.Ref == $"refs/heads/{branchName}");
+        var oldSha = remoteRef?.Sha ?? new string('0', 40);
+
+        var objects = await Objects.EnumerateObjects(gitDir, commitSha);
+
+        var packfile = Packfile.CreatePackfile(objects);
+
+        await UploadPackfile(remoteUrl, oldSha, commitSha, branchName, packfile);
+    }
+
+    private static async Task<List<DiscoveredRef>> DiscoverRefsForPush(string remoteUrl)
+    {
+        var url = new Uri(new Uri(remoteUrl), "info/refs?service=git-receive-pack");
+
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Accept", "application/x-git-receive-pack-advertisement");
+        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
+
+        var response = await client.GetAsync(url);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Failed to discover refs: {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+
+        var data = await response.Content.ReadAsByteArrayAsync();
+        var lines = Packfile.DecodePktLines(data);
+
+        var refs = new List<DiscoveredRef>();
+        var started = false;
+
+        foreach (var line in lines)
+        {
+            if (line.Contains("# service=git-receive-pack"))
+            {
+                started = true;
+                continue;
+            }
+
+            if (!started) continue;
+            if (string.IsNullOrEmpty(line)) continue;
+
+            var parts = line.Split(new[] { ' ' }, 2);
+            if (parts.Length >= 2)
+            {
+                var sha = parts[0];
+                if (sha.Length == 40 && sha.All(c => char.IsLetterOrDigit(c)))
+                {
+                    var refName = parts[1].Split('\0')[0];
+                    refs.Add(new DiscoveredRef { Sha = sha, Ref = refName });
+                }
+            }
+        }
+
+        return refs;
+    }
+
+    private static async Task UploadPackfile(
+        string remoteUrl,
+        string oldSha,
+        string newSha,
+        string branchName,
+        byte[] packfile
+    )
+    {
+        var url = new Uri(new Uri(remoteUrl), "git-receive-pack");
+
+        var requestBody = BuildPushRequest(oldSha, newSha, branchName, packfile);
+
+        using var client = new HttpClient();
+        using var content = new ByteArrayContent(requestBody);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-git-receive-pack-request");
+        client.DefaultRequestHeaders.Add("Accept", "application/x-git-receive-pack-result");
+
+        var response = await client.PostAsync(url, content);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Push failed: {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+
+        var data = await response.Content.ReadAsByteArrayAsync();
+        var lines = Packfile.DecodePktLines(data);
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("ng "))
+            {
+                var reason = line.Substring(3);
+                throw new InvalidOperationException($"Push rejected: {reason}");
+            }
+        }
+    }
+
+    private static byte[] BuildPushRequest(string oldSha, string newSha, string branchName, byte[] packfile)
+    {
+        var lines = new List<byte[]>();
+
+        lines.Add(Packfile.EncodePktLine($"{oldSha} {newSha} refs/heads/{branchName}"));
+        lines.Add(Packfile.EncodePktLine(null));
+        lines.Add(packfile);
+
+        return lines.SelectMany(x => x).ToArray();
     }
 }
