@@ -62,32 +62,118 @@ export async function getIndex(indexPath: string): Promise<Map<string, IndexEntr
 	}
 
 	try {
-		const content = await readFile(indexPath, "utf-8");
-		const lines = content.split("\n");
+		const buffer = await readFile(indexPath);
 
-		for (const line of lines) {
-			if (!line) continue;
-			const parts = line.split("\t");
-			if (parts.length >= 2) {
-				const [path, sha, mode = "100644"] = parts;
-				index.set(path, { path, sha, mode });
+		const signature = buffer.toString("ascii", 0, 4);
+		if (signature !== "DIRC") {
+			return index;
+		}
+
+		const numEntries = buffer.readUInt32BE(8);
+
+		let offset = 12;
+
+		for (let i = 0; i < numEntries; i++) {
+			const ctimeSeconds = buffer.readUInt32BE(offset);
+			const ctimeNanos = buffer.readUInt32BE(offset + 4);
+			const mtimeSeconds = buffer.readUInt32BE(offset + 8);
+			const mtimeNanos = buffer.readUInt32BE(offset + 12);
+			const dev = buffer.readUInt32BE(offset + 16);
+			const ino = buffer.readUInt32BE(offset + 20);
+			const mode = buffer.readUInt32BE(offset + 24).toString(8);
+			const uid = buffer.readUInt32BE(offset + 28);
+			const gid = buffer.readUInt32BE(offset + 32);
+			const size = buffer.readUInt32BE(offset + 36);
+
+			const sha = buffer.subarray(offset + 40, offset + 60).toString("hex");
+
+			buffer.readUInt16BE(offset + 60);
+
+			let pathEnd = offset + 62;
+			while (pathEnd < buffer.length && buffer[pathEnd] !== 0) {
+				pathEnd++;
 			}
+
+			const path = buffer.toString("utf-8", offset + 62, pathEnd);
+
+			// Calculate entry size with 8-byte alignment
+			const entryLength = 62 + path.length + 1;
+			const paddingLength = (8 - (entryLength % 8)) % 8;
+			offset = pathEnd + 1 + paddingLength;
+
+			index.set(path, {
+				path,
+				sha,
+				mode,
+				size,
+				ctimeSeconds,
+				ctimeNanos,
+				mtimeSeconds,
+				mtimeNanos,
+				dev,
+				ino,
+				uid,
+				gid,
+			});
 		}
 	} catch {
-		// If we can't read the index, return empty
+		return index;
 	}
 
 	return index;
 }
 
 export async function writeIndex(indexPath: string, index: Map<string, IndexEntry>): Promise<void> {
-	const lines: string[] = [];
+	const entries = Array.from(index.values()).sort((a, b) => a.path.localeCompare(b.path));
 
-	for (const entry of index.values()) {
-		lines.push(`${entry.path}\t${entry.sha}\t${entry.mode}`);
+	const header = Buffer.alloc(12);
+	header.write("DIRC", 0, "ascii");
+	header.writeUInt32BE(2, 4);
+	header.writeUInt32BE(entries.length, 8);
+
+	const entryBuffers: Buffer[] = [];
+
+	for (const entry of entries) {
+		const entryBuf = Buffer.alloc(62 + entry.path.length + 1);
+
+		entryBuf.writeUInt32BE(entry.ctimeSeconds, 0);
+		entryBuf.writeUInt32BE(entry.ctimeNanos, 4);
+		entryBuf.writeUInt32BE(entry.mtimeSeconds, 8);
+		entryBuf.writeUInt32BE(entry.mtimeNanos, 12);
+		entryBuf.writeUInt32BE(entry.dev, 16);
+		entryBuf.writeUInt32BE(entry.ino, 20);
+		entryBuf.writeUInt32BE(parseInt(entry.mode, 8), 24);
+		entryBuf.writeUInt32BE(entry.uid, 28);
+		entryBuf.writeUInt32BE(entry.gid, 32);
+		entryBuf.writeUInt32BE(entry.size, 36);
+
+		const shaBuffer = Buffer.from(entry.sha, "hex");
+		shaBuffer.copy(entryBuf, 40);
+
+		const flags = Math.min(entry.path.length, 0xfff);
+		entryBuf.writeUInt16BE(flags, 60);
+
+		entryBuf.write(entry.path, 62, "utf-8");
+		entryBuf.writeUInt8(0, 62 + entry.path.length);
+
+		const entryLength = 62 + entry.path.length + 1;
+		const paddingLength = (8 - (entryLength % 8)) % 8;
+		const paddingBuf = Buffer.alloc(paddingLength);
+		const paddedEntry = Buffer.concat([entryBuf, paddingBuf]);
+
+		entryBuffers.push(paddedEntry);
 	}
 
-	await writeFile(indexPath, lines.join("\n") + "\n", "utf-8");
+	const content = Buffer.concat([header, ...entryBuffers]);
+
+	const crypto = await import("node:crypto");
+	const hash = crypto.createHash("sha1");
+	hash.update(content);
+	const checksum = hash.digest();
+
+	const finalBuffer = Buffer.concat([content, checksum]);
+
+	await writeFile(indexPath, finalBuffer);
 }
 
 export async function hashObject(

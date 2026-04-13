@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -130,12 +130,15 @@ describe("add", () => {
 		await writeFile(join(testDir, "test.txt"), "content");
 		await add(testDir, ["test.txt"]);
 
+		const { getIndex } = await import("../src/utils.js");
 		const indexPath = join(testDir, ".git", "index");
-		const indexContent = await readFile(indexPath, "utf-8");
+		const index = await getIndex(indexPath);
 		const crypto = await import("node:crypto");
 		const expectedHash = crypto.createHash("sha1").update("content").digest("hex");
 
-		expect(indexContent).toContain(`test.txt\t${expectedHash}\t100644`);
+		expect(index.has("test.txt")).toBe(true);
+		expect(index.get("test.txt")?.sha).toBe(expectedHash);
+		expect(index.get("test.txt")?.mode).toBe("100644");
 	});
 
 	it("should preserve existing index entries when adding new files", async () => {

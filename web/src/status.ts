@@ -57,7 +57,7 @@ export async function status(path: string): Promise<StatusInfo> {
 
 		if (!existsSync(fullPath)) {
 			deleted.push(filePath);
-		} else {
+		} else if (statSync(fullPath).isFile()) {
 			const currentHash = await hashFile(fullPath);
 			if (entry.sha !== currentHash) {
 				modified.push(filePath);

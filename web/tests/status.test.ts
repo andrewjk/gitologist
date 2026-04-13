@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 
+import { add } from "../src/add";
 import { init } from "../src/init";
 import { status } from "../src/status";
 
@@ -62,10 +63,8 @@ describe("status", () => {
 	});
 
 	it("should detect modified files", async () => {
-		const indexPath = join(testDir, ".git", "index");
-		const crypto = await import("node:crypto");
-		const originalHash = crypto.createHash("sha1").update("original").digest("hex");
-		await writeFile(indexPath, `test.txt\t${originalHash}\t100644\n`, "utf-8");
+		await writeFile(join(testDir, "test.txt"), "original");
+		await add(testDir, ["test.txt"]);
 
 		await writeFile(join(testDir, "test.txt"), "modified content");
 
@@ -74,13 +73,10 @@ describe("status", () => {
 		expect(result.untracked).toEqual([]);
 	});
 
-	it("should detect deleted files as modified", async () => {
-		const indexPath = join(testDir, ".git", "index");
-		const crypto = await import("node:crypto");
-		const hash = crypto.createHash("sha1").update("content").digest("hex");
-		await writeFile(indexPath, `test.txt\t${hash}\t100644\n`, "utf-8");
-
+	it("should detect deleted files as deleted", async () => {
 		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+
 		await rm(join(testDir, "test.txt"));
 
 		const result = await status(testDir);
@@ -121,12 +117,8 @@ describe("status", () => {
 	});
 
 	it("should correctly identify files matching index", async () => {
-		const indexPath = join(testDir, ".git", "index");
-		const crypto = await import("node:crypto");
-		const hash = crypto.createHash("sha1").update("content").digest("hex");
-		await writeFile(indexPath, `test.txt\t${hash}\t100644\n`, "utf-8");
-
 		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
 
 		const result = await status(testDir);
 		expect(result.modified).toEqual([]);

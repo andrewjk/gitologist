@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { stat } from "node:fs/promises";
 
 import { IgnoreParser } from "./IgnoreParser.ts";
 import { status } from "./status.js";
@@ -20,7 +21,6 @@ export async function add(path: string, files: string[]): Promise<void> {
 	await gitignore.loadGitignore(path);
 
 	for (const file of files) {
-		// Skip ignored files
 		if (gitignore.isIgnored(file)) {
 			continue;
 		}
@@ -32,11 +32,21 @@ export async function add(path: string, files: string[]): Promise<void> {
 		}
 
 		const hash = await hashFile(fullPath);
+		const stats = await stat(fullPath);
 
 		index.set(file, {
 			path: file,
 			sha: hash,
 			mode: "100644",
+			size: stats.size,
+			ctimeSeconds: Math.floor(stats.ctimeMs / 1000),
+			ctimeNanos: (stats.ctimeMs % 1000) * 1000000,
+			mtimeSeconds: Math.floor(stats.mtimeMs / 1000),
+			mtimeNanos: (stats.mtimeMs % 1000) * 1000000,
+			dev: stats.dev,
+			ino: stats.ino,
+			uid: stats.uid,
+			gid: stats.gid,
 		});
 	}
 

@@ -119,6 +119,24 @@ describe("git compatibility", () => {
 	});
 
 	describe("add and commit", () => {
+		it("should create an index that git can read", async () => {
+			const ourDir = join(baseDir, "our-add");
+			await mkdir(ourDir, { recursive: true });
+			await init(ourDir);
+
+			await writeFile(join(ourDir, "test.txt"), "test content");
+			await writeFile(join(ourDir, "test 2.txt"), "test content 2");
+			await add(ourDir, ["test.txt", "test 2.txt"]);
+
+			const gitStatus = execSync("git status", {
+				cwd: ourDir,
+				encoding: "utf-8",
+			});
+
+			expect(gitStatus).toContain("new file:   test.txt");
+			expect(gitStatus).toContain("new file:   test 2.txt");
+		});
+
 		it("should create commits that git can read", async () => {
 			const ourDir = join(baseDir, "our-commit");
 			await mkdir(ourDir, { recursive: true });
