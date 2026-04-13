@@ -175,8 +175,12 @@ fn updateIndexRecursive(
 
             const file_content = utils.extractContentFromBlob(blob_data);
 
+            // Use git blob hash format (with "blob <size>\0" header)
+            const blob_header = try std.fmt.allocPrint(allocator, "blob {d}\x00{s}", .{ file_content.len, file_content });
+            defer allocator.free(blob_header);
+
             var hasher = std.crypto.hash.Sha1.init(.{});
-            hasher.update(file_content);
+            hasher.update(blob_header);
 
             var hash: [20]u8 = undefined;
             hasher.final(&hash);

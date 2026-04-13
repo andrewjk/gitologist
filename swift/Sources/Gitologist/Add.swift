@@ -39,7 +39,9 @@ func add(at path: String, files: [String]) async throws {
 			continue
 		}
 
-		let hash = try await hashFile(at: fullPath.path)
+		let content = try String(contentsOf: fullPath, encoding: .utf8)
+		// Write blob object to .git/objects and get hash
+		let hash = try await hashObject(at: gitDir.path, content: content, type: "blob")
 		let attributes = try FileManager.default.attributesOfItem(atPath: fullPath.path)
 
 		let fileSize = attributes[.size] as! UInt32

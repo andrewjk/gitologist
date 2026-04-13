@@ -77,7 +77,7 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
             const file = cwd.openFile(io, full_path, .{}) catch continue;
             defer file.close(io);
 
-            const current_hash = try utils.hashFile(io, allocator, full_path);
+            const current_hash = try utils.hashFileAsBlob(io, allocator, full_path);
             defer allocator.free(current_hash);
 
             if (!std.mem.eql(u8, index_entry.sha, current_hash)) {

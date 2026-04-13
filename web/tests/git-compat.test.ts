@@ -128,6 +128,7 @@ describe("git compatibility", () => {
 			await writeFile(join(ourDir, "test 2.txt"), "test content 2");
 			await add(ourDir, ["test.txt", "test 2.txt"]);
 
+			// Check `git status`
 			const gitStatus = execSync("git status", {
 				cwd: ourDir,
 				encoding: "utf-8",
@@ -153,6 +154,14 @@ describe("git compatibility", () => {
 			});
 
 			expect(gitLog).toContain("Test commit");
+
+			// Check `git status`
+			const gitStatus = execSync("git status", {
+				cwd: ourDir,
+				encoding: "utf-8",
+			});
+
+			expect(gitStatus).toContain("nothing to commit, working tree clean");
 		});
 
 		it("should produce same commit structure as git", async () => {

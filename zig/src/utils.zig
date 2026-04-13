@@ -30,6 +30,44 @@ pub fn hashFile(io: std.Io, allocator: std.mem.Allocator, file_path: []const u8)
     return hex_hash;
 }
 
+pub fn hashFileAsBlob(io: std.Io, allocator: std.mem.Allocator, file_path: []const u8) ![]const u8 {
+    const cwd = std.Io.Dir.cwd();
+    const file = try cwd.openFile(io, file_path, .{});
+    defer file.close(io);
+
+    var buffer: [4096]u8 = undefined;
+    var content = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    var offset: u64 = 0;
+
+    while (true) {
+        const bytes_read = try std.Io.File.readPositionalAll(file, io, &buffer, offset);
+        if (bytes_read == 0) break;
+        try content.appendSlice(allocator, buffer[0..bytes_read]);
+        offset += bytes_read;
+    }
+
+    // Git blob hash format: "blob <size>\0<content>"
+    const blob_header = try std.fmt.allocPrint(allocator, "blob {d}\x00{s}", .{ content.items.len, content.items });
+    defer allocator.free(blob_header);
+
+    var hasher = std.crypto.hash.Sha1.init(.{});
+    hasher.update(blob_header);
+
+    var hash: [20]u8 = undefined;
+    hasher.final(&hash);
+
+    const hex_hash = try allocator.alloc(u8, 40);
+    const hex_digits = "0123456789abcdef";
+
+    for (0..20) |i| {
+        hex_hash[2 * i] = hex_digits[hash[i] >> 4];
+        hex_hash[2 * i + 1] = hex_digits[hash[i] & 0x0f];
+    }
+
+    content.deinit(allocator);
+    return hex_hash;
+}
+
 pub fn getIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8) !std.StringHashMap(IndexEntry) {
     var index = std.StringHashMap(IndexEntry).init(allocator);
 
@@ -182,7 +220,7 @@ pub fn getIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8
 }
 
 pub fn writeIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8, index: std.StringHashMap(IndexEntry)) !void {
-    var entries = std.ArrayList(IndexEntry).initCapacity(allocator, index.count()) catch unreachable;
+    var entries = std.ArrayList(IndexEntry).initCapacity(allocator, 0) catch unreachable;
     defer entries.deinit(allocator);
 
     var iter = index.iterator();
@@ -196,7 +234,7 @@ pub fn writeIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const 
         }
     }.compare);
 
-    var content = std.ArrayList(u8).initCapacity(allocator, 100) catch unreachable;
+    var content = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
     defer content.deinit(allocator);
 
     try content.appendSlice(allocator, "DIRC");
@@ -316,6 +354,60 @@ pub fn hashObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
     return hex_hash;
 }
 
+pub fn hashObjectBinary(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, data: []const u8, obj_type: []const u8) ![]const u8 {
+    const header = try std.fmt.allocPrint(allocator, "{s} {d}\x00", .{ obj_type, data.len });
+    defer allocator.free(header);
+
+    var full_data = std.ArrayList(u8).initCapacity(allocator, header.len + data.len) catch unreachable;
+    defer full_data.deinit(allocator);
+    try full_data.appendSlice(allocator, header);
+    try full_data.appendSlice(allocator, data);
+
+    var hasher = std.crypto.hash.Sha1.init(.{});
+    hasher.update(full_data.items);
+
+    var hash: [20]u8 = undefined;
+    hasher.final(&hash);
+
+    const hex_hash = try allocator.alloc(u8, 40);
+    const hex_digits = "0123456789abcdef";
+
+    for (0..20) |i| {
+        hex_hash[2 * i] = hex_digits[hash[i] >> 4];
+        hex_hash[2 * i + 1] = hex_digits[hash[i] & 0x0f];
+    }
+
+    const obj_dir = try std.fmt.allocPrint(allocator, "{s}/objects/{s}", .{ git_dir_path, hex_hash[0..2] });
+    defer allocator.free(obj_dir);
+
+    const cwd = std.Io.Dir.cwd();
+    cwd.createDirPath(io, obj_dir) catch |err| {
+        if (err != error.PathAlreadyExists) {
+            return err;
+        }
+    };
+
+    const obj_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ obj_dir, hex_hash[2..] });
+    defer allocator.free(obj_path);
+
+    // Compress the object data with zlib (required by git)
+    const flate = std.compress.flate;
+
+    var file = try cwd.createFile(io, obj_path, .{});
+    defer file.close(io);
+
+    var write_buffer: [flate.max_window_len]u8 = undefined;
+    var file_writer = std.Io.File.Writer.init(file, io, &write_buffer);
+    var flate_buffer: [flate.max_window_len]u8 = undefined;
+    var compress = try flate.Compress.init(&file_writer.interface, &flate_buffer, .zlib, .default);
+    try compress.writer.writeAll(full_data.items);
+    try compress.writer.flush();
+    try compress.finish();
+    try file_writer.interface.flush();
+
+    return hex_hash;
+}
+
 pub fn getCurrentBranch(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8) ![]const u8 {
     const head_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "HEAD" });
     defer allocator.free(head_path);
@@ -415,7 +507,39 @@ pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
     defer writer.deinit();
     _ = try decompress.reader.streamRemaining(&writer.writer);
 
-    return writer.toOwnedSlice();
+    const decompressed = try writer.toOwnedSlice();
+
+    // Find the null byte separating header from content
+    const null_idx = std.mem.indexOfScalar(u8, decompressed, 0) orelse {
+        allocator.free(decompressed);
+        return error.InvalidObjectFormat;
+    };
+
+    const header = decompressed[0..null_idx];
+
+    // For tree objects, return hex-encoded binary content
+    if (std.mem.startsWith(u8, header, "tree ")) {
+        const content_data = decompressed[null_idx + 1 ..];
+
+        // Convert to hex
+        var hex_content = std.ArrayList(u8).initCapacity(allocator, content_data.len * 2) catch unreachable;
+        defer hex_content.deinit(allocator);
+
+        //try hex_content.ensureTotalCapacityPrecise(content_data.len * 2);
+
+        const hex_digits = "0123456789abcdef";
+        for (content_data) |byte| {
+            try hex_content.append(allocator, hex_digits[byte >> 4]);
+            try hex_content.append(allocator, hex_digits[byte & 0x0f]);
+        }
+
+        const result = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ header, hex_content.items });
+        allocator.free(decompressed);
+        return result;
+    }
+
+    // For blobs, preserve the null byte and return as is
+    return decompressed;
 }
 
 pub fn extractContentFromBlob(blob_data: []const u8) []const u8 {
@@ -440,9 +564,35 @@ pub fn extractTreeFromCommit(commit_data: []const u8) ![]const u8 {
 }
 
 pub fn parseTreeEntries(allocator: std.mem.Allocator, tree_data: []const u8) !std.ArrayList(TreeEntry) {
-    const content = extractContentFromBlob(tree_data);
+    // Split by first newline to get header and hex content
+    const newline_idx = std.mem.indexOfScalar(u8, tree_data, '\n') orelse return error.InvalidTreeFormat;
+    if (newline_idx == 0) return error.InvalidTreeFormat;
 
-    var entries = std.ArrayList(TreeEntry).initCapacity(allocator, 10) catch unreachable;
+    const header = tree_data[0..newline_idx];
+    if (!std.mem.startsWith(u8, header, "tree ")) {
+        return error.InvalidTreeFormat;
+    }
+
+    const hex_content = tree_data[newline_idx + 1 ..];
+    if (hex_content.len == 0) {
+        return error.InvalidTreeFormat;
+    }
+
+    // Convert hex back to bytes
+    var content = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer content.deinit(allocator);
+
+    try content.ensureTotalCapacityPrecise(allocator, hex_content.len / 2);
+
+    var i: usize = 0;
+    while (i + 1 < hex_content.len) {
+        const byte_high = std.fmt.charToDigit(hex_content[i], 16) catch return error.InvalidTreeFormat;
+        const byte_low = std.fmt.charToDigit(hex_content[i + 1], 16) catch return error.InvalidTreeFormat;
+        try content.append(allocator, byte_high * 16 + byte_low);
+        i += 2;
+    }
+
+    var entries = std.ArrayList(TreeEntry).initCapacity(allocator, 0) catch unreachable;
     errdefer {
         for (entries.items) |entry| {
             allocator.free(entry.path);
@@ -453,35 +603,46 @@ pub fn parseTreeEntries(allocator: std.mem.Allocator, tree_data: []const u8) !st
         entries.deinit(allocator);
     }
 
-    var i: usize = 0;
-    while (i < content.len) {
-        const first_space = std.mem.indexOfScalar(u8, content[i..], ' ') orelse break;
-        const mode = content[i .. i + first_space];
+    var offset: usize = 0;
+    while (offset < content.items.len) {
+        // Find space after mode
+        const space_idx = std.mem.indexOfScalar(u8, content.items[offset..], ' ') orelse break;
+        if (space_idx == 0) break;
 
-        const second_space = std.mem.indexOfScalar(u8, content[i + first_space + 1 ..], ' ') orelse break;
-        const type_start = i + first_space + 1;
-        const entry_type_str = content[type_start .. type_start + second_space];
+        // Find null after filename
+        const after_space_idx = offset + space_idx + 1;
+        const null_idx = std.mem.indexOfScalar(u8, content.items[after_space_idx..], 0) orelse break;
+        if (null_idx == 0) break;
 
-        const sha_start = type_start + second_space + 1;
-        if (sha_start + 40 > content.len) break;
-        const sha = content[sha_start .. sha_start + 40];
+        // Extract mode
+        const mode = content.items[offset .. offset + space_idx];
 
-        const null_after_sha = sha_start + 40;
-        if (null_after_sha >= content.len) break;
-        if (content[null_after_sha] != 0) break;
+        // Extract filename
+        const name_data = content.items[after_space_idx .. after_space_idx + null_idx];
 
-        const path_start = null_after_sha + 1;
-        const null_after_path = std.mem.indexOfScalar(u8, content[path_start..], 0) orelse break;
-        const path = content[path_start .. path_start + null_after_path];
+        // Extract 20-byte SHA
+        const sha_start = after_space_idx + null_idx + 1;
+        if (sha_start + 20 > content.items.len) break;
+        const sha_bytes = content.items[sha_start .. sha_start + 20];
+
+        // Convert SHA bytes to hex
+        var sha: [40]u8 = undefined;
+        for (0..20) |byte_idx| {
+            sha[2 * byte_idx] = "0123456789abcdef"[sha_bytes[byte_idx] >> 4];
+            sha[2 * byte_idx + 1] = "0123456789abcdef"[sha_bytes[byte_idx] & 0x0f];
+        }
+
+        // Determine type from mode
+        const entry_type = if (std.mem.eql(u8, mode, "040000")) "tree" else "blob";
 
         try entries.append(allocator, .{
-            .path = try allocator.dupe(u8, path),
-            .sha = try allocator.dupe(u8, sha),
+            .path = try allocator.dupe(u8, name_data),
+            .sha = try allocator.dupe(u8, &sha),
             .mode = try allocator.dupe(u8, mode),
-            .entry_type = try allocator.dupe(u8, entry_type_str),
+            .entry_type = try allocator.dupe(u8, entry_type),
         });
 
-        i = path_start + null_after_path + 1;
+        offset = sha_start + 20;
     }
 
     return entries;

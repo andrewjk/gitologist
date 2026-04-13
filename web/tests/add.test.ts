@@ -134,7 +134,9 @@ describe("add", () => {
 		const indexPath = join(testDir, ".git", "index");
 		const index = await getIndex(indexPath);
 		const crypto = await import("node:crypto");
-		const expectedHash = crypto.createHash("sha1").update("content").digest("hex");
+		// The index stores the git blob hash (with "blob <size>\0" header)
+		const blobContent = "blob 7\0content";
+		const expectedHash = crypto.createHash("sha1").update(blobContent).digest("hex");
 
 		expect(index.has("test.txt")).toBe(true);
 		expect(index.get("test.txt")?.sha).toBe(expectedHash);

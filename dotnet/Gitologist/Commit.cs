@@ -81,15 +81,12 @@ public static class Commit
         foreach (var path in paths)
         {
             var entry = index[path];
-            var content = await File.ReadAllTextAsync(
-                Path.Combine(gitDir, "..", path)
-            );
-            var blobSha = await Utils.HashObject(gitDir, content, "blob");
+            // Use the SHA from the index entry directly - it was computed during add
             treeEntries.Add(
                 new TreeEntry
                 {
                     Path = string.IsNullOrEmpty(prefix) ? path : path.Substring(prefix.Length + 1),
-                    Sha = blobSha,
+                    Sha = entry.Sha,
                     Mode = entry.Mode,
                     Type = "blob",
                 }
@@ -148,17 +145,30 @@ public static class Commit
             );
         }
 
-        var treeContent = new StringBuilder();
+        // Sort entries by path (Git requires this)
+        treeEntries = treeEntries.OrderBy(e => e.Path).ToList();
+
+        // Build tree content as binary data
+        // Format: <mode> <name>\0<20-byte SHA> for each entry
+        var treeContent = new List<byte>();
         foreach (var entry in treeEntries)
         {
-            treeContent.AppendLine(
-                $"{entry.Mode} {entry.Type} {entry.Sha}\t{entry.Path}\0"
-            );
+            // Add mode
+            treeContent.AddRange(Encoding.UTF8.GetBytes(entry.Mode));
+            treeContent.Add((byte)' ');
+
+            // Add name
+            treeContent.AddRange(Encoding.UTF8.GetBytes(entry.Path));
+            treeContent.Add((byte)0);
+
+            // Add 20-byte SHA
+            var shaBytes = Convert.FromHexString(entry.Sha);
+            treeContent.AddRange(shaBytes);
         }
 
         return await Utils.HashObject(
             gitDir,
-            treeContent.ToString().TrimEnd('\n'),
+            treeContent.ToArray(),
             "tree"
         );
     }

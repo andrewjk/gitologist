@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { IgnoreParser } from "./IgnoreParser.ts";
 import { status } from "./status.ts";
-import { getIndex, hashFile, writeIndex } from "./utils.ts";
+import { getIndex, hashObject, writeIndex } from "./utils.ts";
 
 export async function add(path: string, files: string[]): Promise<void> {
 	const gitDir = join(path, ".git");
@@ -31,7 +31,9 @@ export async function add(path: string, files: string[]): Promise<void> {
 			throw new Error(`File not found: ${file}`);
 		}
 
-		const hash = await hashFile(fullPath);
+		const content = await readFile(fullPath, "utf-8");
+		// Write blob object to .git/objects and get hash
+		const hash = await hashObject(gitDir, content, "blob");
 		const stats = await stat(fullPath);
 
 		index.set(file, {

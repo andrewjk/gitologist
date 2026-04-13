@@ -183,7 +183,9 @@ struct AddTests {
 
 		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
 		let index = try await getIndex(at: indexPath.path)
-		let expectedHash = sha1Hash(of: "content")
+		// The index stores the git blob hash (with "blob <size>\0" header)
+		let blobContent = "blob 7\0content"
+		let expectedHash = sha1Hash(of: blobContent)
 
 		#expect(index["test.txt"] != nil)
 		#expect(index["test.txt"]?.sha == expectedHash)

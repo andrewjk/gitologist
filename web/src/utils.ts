@@ -10,13 +10,21 @@ export async function readObject(gitDir: string, sha: string): Promise<string> {
 
 	const objectPath = join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
 	const compressed = await readFile(objectPath);
-	const decompressed = zlib.inflateSync(compressed).toString("utf-8");
+	const decompressed = zlib.inflateSync(compressed);
 
-	const nullIndex = decompressed.indexOf("\0");
-	const header = decompressed.slice(0, nullIndex);
+	const nullIndex = decompressed.indexOf(0);
+	const header = decompressed.slice(0, nullIndex).toString("utf-8");
 	const content = decompressed.slice(nullIndex + 1);
 
-	return `${header}\n${content}`;
+	// For tree objects, we need to return binary content differently
+	// Return header as string, but mark it so we know it's binary
+	if (header.startsWith("tree ")) {
+		// For trees, return a special format that preserves binary SHA data
+		// We'll encode the binary content as hex for the string representation
+		return `${header}\n${content.toString("hex")}`;
+	}
+
+	return `${header}\n${content.toString("utf-8")}`;
 }
 
 export async function getCurrentBranch(gitDir: string): Promise<string> {
@@ -51,6 +59,15 @@ export async function hashFile(filePath: string): Promise<string> {
 	const content = await readFile(filePath);
 	const hash = crypto.createHash("sha1");
 	hash.update(content);
+	return hash.digest("hex");
+}
+
+export async function hashFileAsBlob(filePath: string): Promise<string> {
+	const crypto = await import("node:crypto");
+	const content = await readFile(filePath, "utf-8");
+	const header = `blob ${content.length}\0${content}`;
+	const hash = crypto.createHash("sha1");
+	hash.update(header);
 	return hash.digest("hex");
 }
 
@@ -201,6 +218,32 @@ export async function hashObject(
 	return sha;
 }
 
+export async function hashObjectBuffer(
+	gitDir: string,
+	content: Buffer,
+	type: "blob" | "tree" | "commit",
+): Promise<string> {
+	const crypto = await import("node:crypto");
+	const zlib = await import("node:zlib");
+
+	const header = Buffer.from(`${type} ${content.length}\0`, "utf-8");
+	const fullContent = Buffer.concat([header, content]);
+	const hash = crypto.createHash("sha1");
+	hash.update(fullContent);
+	const sha = hash.digest("hex");
+
+	const objectDir = join(gitDir, "objects", sha.slice(0, 2));
+	const objectPath = join(objectDir, sha.slice(2));
+
+	if (!existsSync(objectPath)) {
+		await mkdir(objectDir, { recursive: true });
+		const compressed = zlib.deflateSync(fullContent);
+		await writeFile(objectPath, compressed);
+	}
+
+	return sha;
+}
+
 export function extractTreeFromCommit(commitData: string): string {
 	const lines = commitData.split("\n");
 	for (const line of lines) {
@@ -213,35 +256,53 @@ export function extractTreeFromCommit(commitData: string): string {
 
 export function parseTreeEntries(treeData: string): TreeEntry[] {
 	const entries: TreeEntry[] = [];
-	let contentStart = treeData.indexOf("\n") + 1;
+	const lines = treeData.split("\n");
+	if (lines.length < 2 || !lines[0].startsWith("tree ")) {
+		return entries;
+	}
 
-	while (contentStart < treeData.length) {
-		const firstSpaceIndex = treeData.indexOf(" ", contentStart);
-		const secondSpaceIndex = treeData.indexOf(" ", firstSpaceIndex + 1);
-		const tabIndex = treeData.indexOf("\t", secondSpaceIndex + 1);
-		const nullIndex = treeData.indexOf("\0", tabIndex);
+	// Get the hex-encoded binary content
+	const hexContent = lines.slice(1).join("\n");
+	if (!hexContent) {
+		return entries;
+	}
 
-		if (firstSpaceIndex === -1 || secondSpaceIndex === -1 || tabIndex === -1 || nullIndex === -1) {
-			break;
-		}
+	// Convert hex back to buffer
+	const content = Buffer.from(hexContent, "hex");
+	let offset = 0;
 
-		const mode = treeData.slice(contentStart, firstSpaceIndex);
-		const type = treeData.slice(firstSpaceIndex + 1, secondSpaceIndex);
-		const sha = treeData.slice(secondSpaceIndex + 1, tabIndex);
-		const path = treeData.slice(tabIndex + 1, nullIndex);
+	while (offset < content.length) {
+		// Find space after mode
+		const spaceIndex = content.indexOf(0x20, offset);
+		if (spaceIndex === -1) break;
 
-		if (type !== "blob" && type !== "tree") {
-			break;
-		}
+		// Find null after filename
+		const nullIndex = content.indexOf(0x00, spaceIndex + 1);
+		if (nullIndex === -1) break;
+
+		// Extract mode (e.g., "100644")
+		const mode = content.slice(offset, spaceIndex).toString("utf-8");
+
+		// Extract filename
+		const name = content.slice(spaceIndex + 1, nullIndex).toString("utf-8");
+
+		// Extract 20-byte SHA
+		const shaStart = nullIndex + 1;
+		const shaEnd = shaStart + 20;
+		if (shaEnd > content.length) break;
+		const sha = content.slice(shaStart, shaEnd).toString("hex");
+
+		// Determine type from mode
+		const type = mode === "040000" ? "tree" : "blob";
 
 		entries.push({
-			path,
+			path: name,
 			sha,
 			mode,
-			type: type as "blob" | "tree",
+			type,
 		});
 
-		contentStart = nullIndex + 1;
+		offset = shaEnd;
 	}
 
 	return entries;

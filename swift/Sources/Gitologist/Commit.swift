@@ -66,14 +66,12 @@ private func createTreeRecursive(at rootPath: String, gitDir: String, index: [St
 		return false
 	}.sorted()
 
-	// Add blobs (files) at this level
+	// Add blobs (files) at this level - use SHA from index
 	for path in paths {
 		guard let entry = index[path] else { continue }
-		let fullPath = URL(fileURLWithPath: rootPath).appendingPathComponent(path)
-		let content = try String(contentsOf: fullPath, encoding: .utf8)
-		let blobSha = try await hashObject(at: gitDir, content: content, type: "blob")
 		let fileName = prefix.isEmpty ? path : String(path.dropFirst(prefix.count + 1))
-		treeEntries.append((path: fileName, sha: blobSha, mode: entry.mode, type: .blob))
+		// Use the SHA from the index entry directly - it was computed during add
+		treeEntries.append((path: fileName, sha: entry.sha, mode: entry.mode, type: .blob))
 	}
 
 	// Find subdirectories
@@ -100,13 +98,40 @@ private func createTreeRecursive(at rootPath: String, gitDir: String, index: [St
 		treeEntries.append((path: dir, sha: dirSha, mode: "040000", type: .tree))
 	}
 
-	// Build tree content - format: "<mode> <type> <sha>\t<path>\0"
-	var treeContent = ""
+	// Sort entries by path (Git requires this)
+	treeEntries.sort { $0.path < $1.path }
+
+	// Build tree content as binary Data
+	// Format: <mode> <name>\0<20-byte SHA> for each entry
+	var treeContent = Data()
 	for entry in treeEntries {
-		treeContent += "\(entry.mode) \(entry.type == .blob ? "blob" : "tree") \(entry.sha)\t\(entry.path)\u{0000}"
+		let modeStr = entry.mode
+		let nameStr = entry.path
+
+		// Add mode and name with null separator
+		if let modeData = modeStr.data(using: .utf8),
+		   let nameData = nameStr.data(using: .utf8)
+		{
+			treeContent.append(modeData)
+			treeContent.append(0x20) // space
+			treeContent.append(nameData)
+			treeContent.append(0x00) // null
+
+			// Add 20-byte SHA
+			var shaBytes: [UInt8] = []
+			for i in stride(from: 0, to: entry.sha.count, by: 2) {
+				let start = entry.sha.index(entry.sha.startIndex, offsetBy: i)
+				let end = entry.sha.index(entry.sha.startIndex, offsetBy: i + 2)
+				let byteString = String(entry.sha[start ..< end])
+				if let byte = UInt8(byteString, radix: 16) {
+					shaBytes.append(byte)
+				}
+			}
+			treeContent.append(contentsOf: shaBytes)
+		}
 	}
 
-	return try await hashObject(at: gitDir, content: treeContent, type: "tree")
+	return try await hashObject(at: gitDir, data: treeContent, type: "tree")
 }
 
 private func createCommit(at gitDir: String, treeSha: String, message: String, parentSha: String?) async throws -> String {

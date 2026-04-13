@@ -47,7 +47,11 @@ pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []
             continue;
         }
 
-        const hash = try utils.hashFile(io, allocator, full_path);
+        const file_content = try cwd.readFileAlloc(io, full_path, allocator, .unlimited);
+        defer allocator.free(file_content);
+
+        // Write blob object to .git/objects and get hash
+        const hash = try utils.hashObject(io, allocator, git_dir_path, file_content, "blob");
         defer allocator.free(hash);
 
         const hash_copy = try allocator.dupe(u8, hash);

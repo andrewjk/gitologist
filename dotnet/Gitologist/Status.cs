@@ -71,7 +71,7 @@ public static class Status
             }
             else if (!Directory.Exists(fullPath))
             {
-                var currentHash = await Utils.HashFile(fullPath);
+                var currentHash = await Utils.HashFileAsBlob(fullPath);
                 if (entry.Sha != currentHash)
                 {
                     modified.Add(filePath);

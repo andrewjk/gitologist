@@ -345,6 +345,30 @@ public class GitCompatTests
 
         Assert.IsNotNull(gitLog);
         Assert.IsTrue(gitLog.Contains("Test commit"));
+
+        // Check `git status`
+        string? gitStatus = null;
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "status",
+                WorkingDirectory = ourDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var process = Process.Start(psi);
+            gitStatus = process?.StandardOutput.ReadToEnd();
+            process?.WaitForExit();
+        }
+        catch
+        {
+        }
+
+        Assert.IsNotNull(gitStatus);
+        Assert.IsTrue(gitStatus.Contains("nothing to commit, working tree clean"));
     }
 
     [TestMethod]

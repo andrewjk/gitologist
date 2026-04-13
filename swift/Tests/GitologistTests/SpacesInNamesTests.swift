@@ -46,6 +46,21 @@ struct SpacesInNamesTests {
 		try? fileManager.removeItem(at: testDirPath)
 	}
 
+	@Test func shouldAddFileWithLeadingSpaceInName() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "content".write(to: testDirPath.appendingPathComponent(" leading.txt"), atomically: true, encoding: .utf8)
+
+		try await add(at: testDirPath.path, files: [" leading.txt"])
+
+		let result = try await status(at: testDirPath.path)
+		#expect(result.untracked == [])
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
 	@Test func shouldAddFileWithTrailingSpaceInName() async throws {
 		let testDirPath = testDir
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
@@ -407,6 +422,28 @@ struct SpacesInNamesTests {
 		let content2 = try String(contentsOf: testDirPath.appendingPathComponent("file two.txt"), encoding: .utf8)
 		#expect(content1 == "original1")
 		#expect(content2 == "original2")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldUpdateStatusAfterRestoringFileWithSpace() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "original".write(to: testDirPath.appendingPathComponent("test file.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test file.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "modified".write(to: testDirPath.appendingPathComponent("test file.txt"), atomically: true, encoding: .utf8)
+
+		var result = try await status(at: testDirPath.path)
+		#expect(result.modified.contains("test file.txt"))
+
+		try await restore(at: testDirPath.path, files: ["test file.txt"])
+
+		result = try await status(at: testDirPath.path)
+		#expect(result.modified == [])
 
 		try? fileManager.removeItem(at: testDirPath)
 	}

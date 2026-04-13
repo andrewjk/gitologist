@@ -140,7 +140,9 @@ public static class Pull
             {
                 var blobData = await Utils.ReadObject(gitDir, entry.Sha);
                 var fileContent = Utils.ExtractContentFromBlob(blobData);
-                var hash = Utils.HashString(fileContent);
+                // Use git blob hash format (with "blob <size>\0" header)
+                var blobHeader = $"blob {fileContent.Length}\0{fileContent}";
+                var hash = Utils.HashString(blobHeader);
 
                 var entryPath = string.IsNullOrEmpty(prefix)
                     ? entry.Path

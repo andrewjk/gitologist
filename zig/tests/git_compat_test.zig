@@ -146,6 +146,26 @@ test "should create valid commit structure" {
 
     try std.testing.expectEqual(@as(usize, 1), log_result.len);
     try std.testing.expectEqualStrings("Test commit", log_result[0].message);
+
+    // Check git status - should be clean
+    const git_status_result = try std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "git", "status" },
+        .cwd = .{ .path = our_dir },
+    });
+    defer {
+        allocator.free(git_status_result.stdout);
+        allocator.free(git_status_result.stderr);
+    }
+
+    switch (git_status_result.term) {
+        .exited => |code| {
+            try std.testing.expectEqual(@as(u32, 0), code);
+        },
+        .signal => return error.ProcessSignaled,
+        else => unreachable,
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, git_status_result.stdout, "nothing to commit, working tree clean") != null);
 }
 
 test "should produce same commit structure as git" {

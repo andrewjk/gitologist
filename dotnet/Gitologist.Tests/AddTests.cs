@@ -211,7 +211,9 @@ public class AddTests
 
         var indexPath = Path.Combine(_testDir, ".git", "index");
         var index = await Utils.GetIndex(indexPath);
-        var expectedHash = Utils.HashString("content");
+        // The index stores the git blob hash (with "blob <size>\0" header)
+        var blobContent = "blob 7\0content";
+        var expectedHash = Utils.HashString(blobContent);
 
         Assert.IsTrue(index.ContainsKey("test.txt"));
         Assert.AreEqual(expectedHash, index["test.txt"].Sha);

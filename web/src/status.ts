@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 
 import { IgnoreParser } from "./IgnoreParser.ts";
 import type { StatusInfo } from "./types/StatusInfo.ts";
-import { getIndex, hashFile } from "./utils.ts";
+import { getIndex, hashFileAsBlob } from "./utils.ts";
 
 export async function status(path: string): Promise<StatusInfo> {
 	const gitDir = join(path, ".git");
@@ -58,7 +58,7 @@ export async function status(path: string): Promise<StatusInfo> {
 		if (!existsSync(fullPath)) {
 			deleted.push(filePath);
 		} else if (statSync(fullPath).isFile()) {
-			const currentHash = await hashFile(fullPath);
+			const currentHash = await hashFileAsBlob(fullPath);
 			if (entry.sha !== currentHash) {
 				modified.push(filePath);
 			}

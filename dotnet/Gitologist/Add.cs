@@ -34,7 +34,9 @@ public static class Add
                 continue;
             }
 
-            var hash = await Utils.HashFile(fullPath);
+            var content = await File.ReadAllTextAsync(fullPath);
+            // Write blob object to .git/objects and get hash
+            var hash = await Utils.HashObject(gitDir, content, "blob");
             var fileInfo = new FileInfo(fullPath);
 
             var ctimeSeconds = (uint)fileInfo.CreationTime.ToUniversalTime().Subtract(DateTime.UnixEpoch).TotalSeconds;

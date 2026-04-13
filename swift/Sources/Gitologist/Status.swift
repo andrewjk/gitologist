@@ -76,7 +76,7 @@ func status(at path: String) async throws -> StatusInfo {
 			var isDirectory: ObjCBool = false
 			FileManager.default.fileExists(atPath: fullPath.path, isDirectory: &isDirectory)
 			if !isDirectory.boolValue {
-				let currentHash = try await hashFile(at: fullPath.path)
+				let currentHash = try await hashFileAsBlob(at: fullPath.path)
 				if entry.sha != currentHash {
 					modified.append(filePath)
 				}

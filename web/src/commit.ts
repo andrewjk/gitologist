@@ -1,11 +1,17 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { status } from "./status.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
-import { getCurrentBranch, getCurrentCommit, getIndex, hashObject, updateBranch } from "./utils.ts";
+import {
+	getCurrentBranch,
+	getCurrentCommit,
+	getIndex,
+	hashObject,
+	hashObjectBuffer,
+	updateBranch,
+} from "./utils.ts";
 
 export async function commit(path: string, message: string): Promise<string> {
 	const gitDir = join(path, ".git");
@@ -67,11 +73,10 @@ async function createTreeRecursive(
 
 	for (const path of paths) {
 		const entry = index.get(path)!;
-		const content = await readFile(join(gitDir, "..", path), "utf-8");
-		const blobSha = await hashObject(gitDir, content, "blob");
+		// Use the SHA from the index entry directly - it was computed during add
 		treeEntries.push({
 			path: prefix === "" ? path : path.slice(prefix.length + 1),
-			sha: blobSha,
+			sha: entry.sha,
 			mode: entry.mode,
 			type: "blob",
 		});
@@ -115,12 +120,25 @@ async function createTreeRecursive(
 		});
 	}
 
-	let treeContent = "";
+	// Sort entries by path (Git requires this)
+	treeEntries.sort((a, b) => a.path.localeCompare(b.path));
+
+	// Build tree content as binary buffer
+	// Format: <mode> <name>\0<20-byte SHA> for each entry
+	const entryBuffers: Buffer[] = [];
 	for (const entry of treeEntries) {
-		treeContent += `${entry.mode} ${entry.type} ${entry.sha}\t${entry.path}\0`;
+		const mode = entry.mode;
+		const name = entry.path;
+		const shaBuffer = Buffer.from(entry.sha, "hex");
+		const entryStr = `${mode} ${name}\0`;
+		entryBuffers.push(Buffer.from(entryStr, "utf-8"));
+		entryBuffers.push(shaBuffer);
 	}
 
-	return hashObject(gitDir, treeContent, "tree");
+	const treeContent = Buffer.concat(entryBuffers);
+
+	// Use a special version of hashObject that accepts Buffer
+	return hashObjectBuffer(gitDir, treeContent, "tree");
 }
 
 async function createCommit(

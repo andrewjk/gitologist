@@ -7,8 +7,12 @@ const status = @import("gitologist").status;
 const utils = @import("gitologist").utils;
 
 fn hashString(allocator: std.mem.Allocator, content: []const u8) ![]const u8 {
+    // Git blob hash format: "blob <size>\0<content>"
+    const blob_header = try std.fmt.allocPrint(allocator, "blob {d}\x00{s}", .{ content.len, content });
+    defer allocator.free(blob_header);
+
     var hasher = std.crypto.hash.Sha1.init(.{});
-    hasher.update(content);
+    hasher.update(blob_header);
     var hash: [20]u8 = undefined;
     hasher.final(&hash);
 

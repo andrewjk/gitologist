@@ -103,9 +103,11 @@ async function updateIndexRecursive(
 		if (entry.type === "blob") {
 			const blobData = await readObject(gitDir, entry.sha);
 			const fileContent = extractContentFromBlob(blobData);
+			// Use git blob hash format (with "blob <size>\0" header)
 			const crypto = await import("node:crypto");
+			const blobHeader = `blob ${fileContent.length}\0${fileContent}`;
 			const hash = crypto.createHash("sha1");
-			hash.update(fileContent);
+			hash.update(blobHeader);
 			const sha = hash.digest("hex");
 			content += `${prefix ? `${prefix}/${entry.path}` : entry.path} ${sha}\n`;
 		} else if (entry.type === "tree") {

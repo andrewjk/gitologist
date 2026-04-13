@@ -8,6 +8,14 @@ func hashFile(at path: String) async throws -> String {
 	return sha1.compactMap { String(format: "%02x", $0) }.joined()
 }
 
+func hashFileAsBlob(at path: String) async throws -> String {
+	let content = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+	let header = "blob \(content.count)\0\(content)"
+	let data = header.data(using: .utf8)!
+	let sha1 = Insecure.SHA1.hash(data: data)
+	return sha1.compactMap { String(format: "%02x", $0) }.joined()
+}
+
 func getIndex(at path: String) async throws -> [String: IndexEntry] {
 	var index: [String: IndexEntry] = [:]
 
@@ -203,7 +211,7 @@ func getCurrentCommit(at gitDir: String) async throws -> String? {
 }
 
 func hashObject(at gitDir: String, content: String, type: String) async throws -> String {
-	let header = "\(type) \(content.utf8.count)\0\(content)"
+	let header = "\(type) \(content.count)\0\(content)"
 	let data = header.data(using: .utf8)!
 	let sha1 = Insecure.SHA1.hash(data: data)
 	let sha = sha1.compactMap { String(format: "%02x", $0) }.joined()
@@ -217,6 +225,26 @@ func hashObject(at gitDir: String, content: String, type: String) async throws -
 
 	try FileManager.default.createDirectory(at: objectDir, withIntermediateDirectories: true)
 	let compressedData = try compressData(data)
+	try compressedData.write(to: objectPath)
+
+	return sha
+}
+
+func hashObject(at gitDir: String, data: Data, type: String) async throws -> String {
+	let header = "\(type) \(data.count)\0"
+	let fullData = header.data(using: .utf8)! + data
+	let sha1 = Insecure.SHA1.hash(data: fullData)
+	let sha = sha1.compactMap { String(format: "%02x", $0) }.joined()
+
+	let objectDir = URL(fileURLWithPath: gitDir).appendingPathComponent("objects").appendingPathComponent(String(sha.prefix(2)))
+	let objectPath = objectDir.appendingPathComponent(String(sha.dropFirst(2)))
+
+	guard !FileManager.default.fileExists(atPath: objectPath.path) else {
+		return sha
+	}
+
+	try FileManager.default.createDirectory(at: objectDir, withIntermediateDirectories: true)
+	let compressedData = try compressData(fullData)
 	try compressedData.write(to: objectPath)
 
 	return sha
@@ -285,7 +313,33 @@ func readObject(at gitDir: String, sha: String) async throws -> String {
 
 	let compressedData = try Data(contentsOf: objectPath)
 	let data = try decompressData(compressedData)
-	return String(data: data, encoding: .utf8)!
+
+	// Find the null byte separating header from content
+	guard let nullIndex = data.firstIndex(of: 0) else {
+		throw GitError.invalidIndexFile("Invalid object format")
+	}
+
+	let headerData = data.prefix(upTo: nullIndex)
+	let contentData = data.suffix(from: data.index(after: nullIndex))
+
+	guard let header = String(data: headerData, encoding: .utf8) else {
+		throw GitError.invalidIndexFile("Invalid header encoding")
+	}
+
+	// For tree objects, we need to preserve binary content
+	// Return hex-encoded binary content for trees
+	if header.hasPrefix("tree ") {
+		let hexContent = contentData.map { String(format: "%02x", $0) }.joined()
+		return "\(header)\n\(hexContent)"
+	}
+
+	// For blobs, preserve the null byte and return as string
+	let fullData = headerData + Data([0]) + contentData
+	guard let result = String(data: fullData, encoding: .utf8) else {
+		throw GitError.invalidIndexFile("Invalid blob encoding")
+	}
+
+	return result
 }
 
 private func decompressData(_ data: Data) throws -> Data {
@@ -372,80 +426,84 @@ func extractTreeFromCommit(_ commitData: String) throws -> String {
 }
 
 func parseTreeEntries(_ treeData: String) throws -> [TreeEntry] {
-	guard let nullIndex = treeData.firstIndex(of: "\0") else {
+	guard let firstNullIndex = treeData.firstIndex(of: "\n") else {
 		return []
 	}
 
 	var entries: [TreeEntry] = []
 
-	// Skip header by starting after first null
-	var currentIndex = treeData.index(after: nullIndex)
+	// Skip header by starting after first newline
+	let lines = treeData.split(separator: "\n", maxSplits: 1)
+	guard lines.count >= 2, let header = lines.first, header.hasPrefix("tree ") else {
+		return []
+	}
 
-	while currentIndex < treeData.endIndex {
-		// Find mode end (space)
-		guard let spaceIndex = treeData[currentIndex...].firstIndex(of: " ") else {
+	// Get the hex-encoded binary content
+	guard let hexContent = lines.last, !hexContent.isEmpty else {
+		return []
+	}
+
+	// Convert hex back to Data
+	var content = Data()
+	var i = hexContent.startIndex
+	while i < hexContent.endIndex {
+		let nextIndex = hexContent.index(i, offsetBy: 2, limitedBy: hexContent.endIndex)!
+		let byteString = String(hexContent[i ..< nextIndex])
+		if let byte = UInt8(byteString, radix: 16) {
+			content.append(byte)
+		}
+		i = nextIndex
+	}
+
+	var offset = 0
+	while offset < content.count {
+		let startIndex = content.startIndex.advanced(by: offset)
+
+		// Find space after mode
+		guard let spaceIndex = content[startIndex...].firstIndex(of: 0x20) else {
 			break
 		}
 
-		// Find type end (next space)
-		guard spaceIndex > currentIndex else { break }
-		let afterSpaceIndex = treeData.index(after: spaceIndex)
-		guard afterSpaceIndex < treeData.endIndex else { break }
-
-		guard let nextSpaceIndex = treeData[afterSpaceIndex...].firstIndex(of: " ") else {
+		// Find null after filename
+		let afterSpaceIndex = content.index(after: spaceIndex)
+		guard let nullIndex = content[afterSpaceIndex...].firstIndex(of: 0x00) else {
 			break
 		}
-		guard nextSpaceIndex > afterSpaceIndex else { break }
 
-		// Find tab before path
-		let afterNextSpaceIndex = treeData.index(after: nextSpaceIndex)
-		guard afterNextSpaceIndex < treeData.endIndex else { break }
-
-		guard let tabIndex = treeData[afterNextSpaceIndex...].firstIndex(of: "\t") else {
+		// Extract mode (e.g., "100644")
+		let modeData = content[startIndex ..< spaceIndex]
+		guard let mode = String(data: modeData, encoding: .utf8) else {
 			break
 		}
-		guard tabIndex > afterNextSpaceIndex else { break }
 
-		// Find null after path
-		let afterTabIndex = treeData.index(after: tabIndex)
-		guard afterTabIndex < treeData.endIndex else { break }
-
-		guard let nextNullIndex = treeData[afterTabIndex...].firstIndex(of: "\0") else {
+		// Extract filename
+		let nameData = content[afterSpaceIndex ..< nullIndex]
+		guard let name = String(data: nameData, encoding: .utf8) else {
 			break
 		}
-		guard nextNullIndex > afterTabIndex else { break }
 
-		// Extract components
-		let modeEnd = spaceIndex
-		let mode = String(treeData[currentIndex ..< modeEnd])
-
-		let typeEnd = nextSpaceIndex
-		let type = String(treeData[afterSpaceIndex ..< typeEnd])
-
-		let shaStart = afterNextSpaceIndex
-		let shaEnd = tabIndex
-		let sha = String(treeData[shaStart ..< shaEnd])
-
-		let pathStart = afterTabIndex
-		let pathEnd = nextNullIndex
-		let path = String(treeData[pathStart ..< pathEnd])
-
-		guard type == "blob" || type == "tree" else {
+		// Extract 20-byte SHA
+		let shaStart = content.index(after: nullIndex)
+		guard let shaEnd = content.index(shaStart, offsetBy: 20, limitedBy: content.endIndex) else {
 			break
 		}
+		guard shaEnd <= content.endIndex else {
+			break
+		}
+		let shaData = content[shaStart ..< shaEnd]
+		let sha = shaData.map { String(format: "%02x", $0) }.joined()
+
+		// Determine type from mode
+		let type: TreeEntryType = mode == "040000" ? .tree : .blob
 
 		entries.append(TreeEntry(
-			path: path,
+			path: name,
 			sha: sha,
 			mode: mode,
-			type: type == "blob" ? .blob : .tree
+			type: type
 		))
 
-		// Move to next entry
-		let afterNextNullIndex = treeData.index(after: nextNullIndex)
-		guard afterNextNullIndex <= treeData.endIndex else { break }
-
-		currentIndex = afterNextNullIndex
+		offset = content.distance(from: content.startIndex, to: shaEnd)
 	}
 
 	return entries

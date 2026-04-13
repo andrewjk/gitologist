@@ -154,6 +154,11 @@ struct GitCompatTests {
 		let gitLog = try runGit(args: ["log", "--oneline"], in: ourDir)
 
 		#expect(gitLog.contains("Test commit"))
+
+		// Check `git status`
+		let gitStatus = try runGit(args: ["status"], in: ourDir)
+
+		#expect(gitStatus.contains("nothing to commit, working tree clean"))
 	}
 
 	@Test func shouldProduceSameCommitStructureAsGit() async throws {

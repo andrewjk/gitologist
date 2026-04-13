@@ -137,7 +137,9 @@ private func updateIndexRecursive(
 		case .blob:
 			let blobData = try await readObject(at: gitDir, sha: entry.sha)
 			let fileContent = try extractContentFromBlob(blobData)
-			let sha = Insecure.SHA1.hash(data: Data(fileContent.utf8))
+			// Use git blob hash format (with "blob <size>\0" header)
+			let blobHeader = "blob \(fileContent.count)\0\(fileContent)"
+			let sha = Insecure.SHA1.hash(data: Data(blobHeader.utf8))
 				.compactMap { String(format: "%02x", $0) }
 				.joined()
 			let path = prefix.isEmpty ? entry.path : "\(prefix)/\(entry.path)"

@@ -15,6 +15,13 @@ public static class Utils
         return HashString(content);
     }
 
+    public static async Task<string> HashFileAsBlob(string filePath)
+    {
+        var content = await File.ReadAllTextAsync(filePath);
+        var blobContent = $"blob {content.Length}\0{content}";
+        return HashString(blobContent);
+    }
+
     public static string HashString(string content)
     {
         using var sha1 = SHA1.Create();
@@ -240,6 +247,33 @@ public static class Utils
         return sha;
     }
 
+    public static async Task<string> HashObject(string gitDir, byte[] data, string type)
+    {
+        var headerBytes = Encoding.UTF8.GetBytes($"{type} {data.Length}\0");
+        var fullData = headerBytes.Concat(data).ToArray();
+        var hash = HashBytes(fullData);
+        var sha = hash;
+
+        var objectDir = Path.Combine(gitDir, "objects", sha.Substring(0, 2));
+        var objectPath = Path.Combine(objectDir, sha.Substring(2));
+
+        if (!File.Exists(objectPath))
+        {
+            Directory.CreateDirectory(objectDir);
+            var compressed = CompressBytes(fullData);
+            await File.WriteAllBytesAsync(objectPath, compressed);
+        }
+
+        return sha;
+    }
+
+    public static string HashBytes(byte[] data)
+    {
+        using var sha1 = SHA1.Create();
+        var hashBytes = sha1.ComputeHash(data);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
     public static byte[] Compress(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -247,6 +281,16 @@ public static class Utils
         using (var zlib = new ZLibStream(output, CompressionLevel.Optimal))
         {
             zlib.Write(bytes, 0, bytes.Length);
+        }
+        return output.ToArray();
+    }
+
+    public static byte[] CompressBytes(byte[] data)
+    {
+        using var output = new MemoryStream();
+        using (var zlib = new ZLibStream(output, CompressionLevel.Optimal))
+        {
+            zlib.Write(data, 0, data.Length);
         }
         return output.ToArray();
     }
@@ -297,6 +341,25 @@ public static class Utils
         var objectPath = Path.Combine(gitDir, "objects", sha.Substring(0, 2), sha.Substring(2));
         var compressed = await File.ReadAllBytesAsync(objectPath);
         var decompressed = Decompress(compressed);
+
+        // Find the null byte separating header from content
+        var nullIndex = Array.IndexOf(decompressed, (byte)0);
+        if (nullIndex == -1)
+        {
+            throw new InvalidOperationException("Invalid object format: no null byte");
+        }
+
+        var header = Encoding.UTF8.GetString(decompressed, 0, nullIndex);
+
+        // For tree objects, return hex-encoded binary content
+        if (header.StartsWith("tree "))
+        {
+            var contentData = decompressed[(nullIndex + 1)..];
+            var hexContent = Convert.ToHexString(contentData).ToLowerInvariant();
+            return $"{header}\n{hexContent}";
+        }
+
+        // For blobs, preserve the null byte
         return Encoding.UTF8.GetString(decompressed);
     }
 
@@ -339,50 +402,79 @@ public static class Utils
     public static List<TreeEntry> ParseTreeEntries(string treeData)
     {
         var entries = new List<TreeEntry>();
-        // Git object format: "tree <size>\0<content>"
-        var headerEnd = treeData.IndexOf('\0');
-        if (headerEnd == -1)
+
+        // Split by first newline to get header and hex content
+        var lines = treeData.Split(new[] { '\n' }, 2);
+        if (lines.Length < 2)
         {
             return entries;
         }
 
-        var contentStart = headerEnd + 1;
-
-        while (contentStart < treeData.Length)
+        var header = lines[0];
+        if (!header.StartsWith("tree "))
         {
-            var firstSpaceIndex = treeData.IndexOf(' ', contentStart);
-            if (firstSpaceIndex == -1) break;
+            return entries;
+        }
 
-            var secondSpaceIndex = treeData.IndexOf(' ', firstSpaceIndex + 1);
-            if (secondSpaceIndex == -1) break;
+        var hexContent = lines[1];
+        if (string.IsNullOrEmpty(hexContent))
+        {
+            return entries;
+        }
 
-            var tabIndex = treeData.IndexOf('\t', secondSpaceIndex + 1);
-            if (tabIndex == -1) break;
+        // Convert hex back to bytes
+        var content = Convert.FromHexString(hexContent);
 
-            var entryNullIndex = treeData.IndexOf('\0', tabIndex);
-            if (entryNullIndex == -1) break;
-
-            var mode = treeData.Substring(contentStart, firstSpaceIndex - contentStart);
-            var type = treeData.Substring(firstSpaceIndex + 1, secondSpaceIndex - firstSpaceIndex - 1);
-            var sha = treeData.Substring(secondSpaceIndex + 1, tabIndex - secondSpaceIndex - 1);
-            var path = treeData.Substring(tabIndex + 1, entryNullIndex - tabIndex - 1);
-
-            if (type != "blob" && type != "tree")
+        var offset = 0;
+        while (offset < content.Length)
+        {
+            // Find space after mode
+            var spaceIndex = Array.IndexOf(content, (byte)' ', offset);
+            if (spaceIndex == -1 || spaceIndex < offset)
             {
                 break;
             }
 
+            // Find null after filename
+            var afterSpaceIndex = spaceIndex + 1;
+            var nullIndex = Array.IndexOf(content, (byte)0, afterSpaceIndex);
+            if (nullIndex == -1 || nullIndex < afterSpaceIndex)
+            {
+                break;
+            }
+
+            // Extract mode
+            var mode = Encoding.UTF8.GetString(content, offset, spaceIndex - offset);
+
+            // Extract filename
+            var nameLength = nullIndex - afterSpaceIndex;
+            var name = Encoding.UTF8.GetString(content, afterSpaceIndex, nameLength);
+
+            // Extract 20-byte SHA
+            var shaStart = nullIndex + 1;
+            var shaEnd = shaStart + 20;
+            if (shaEnd > content.Length)
+            {
+                break;
+            }
+            var shaBytes = new byte[20];
+            Array.Copy(content, shaStart, shaBytes, 0, 20);
+            var sha = Convert.ToHexString(shaBytes).ToLowerInvariant();
+
+            // Determine type from mode
+            var type = mode == "040000" ? "tree" : "blob";
+
             entries.Add(
                 new TreeEntry
                 {
-                    Path = path,
+                    Path = name,
                     Sha = sha,
                     Mode = mode,
                     Type = type,
                 }
             );
 
-            contentStart = entryNullIndex + 1;
+            offset = shaEnd;
         }
 
         return entries;

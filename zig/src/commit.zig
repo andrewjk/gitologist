@@ -130,20 +130,13 @@ fn createTreeRecursive(
 
     for (paths.items) |path| {
         const entry = index.get(path).?;
-        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "..", path });
-        defer allocator.free(full_path);
-
-        const cwd = std.Io.Dir.cwd();
-        const content = try cwd.readFileAlloc(io, full_path, allocator, .unlimited);
-        defer allocator.free(content);
-
-        const blob_sha = try utils.hashObject(io, allocator, git_dir_path, content, "blob");
+        // Use the SHA from the index entry directly - it was computed during add
 
         const entry_path = if (prefix.len == 0) path else path[prefix.len + 1 ..];
 
         try tree_entries.append(allocator, .{
             .path = try allocator.dupe(u8, entry_path),
-            .sha = blob_sha,
+            .sha = try allocator.dupe(u8, entry.sha),
             .mode = try allocator.dupe(u8, entry.mode),
             .entry_type = try allocator.dupe(u8, "blob"),
         });
@@ -201,21 +194,35 @@ fn createTreeRecursive(
         });
     }
 
+    // Sort entries by path (Git requires this)
+    std.sort.insertion(utils.TreeEntry, tree_entries.items, {}, struct {
+        fn lessThan(_: void, a: utils.TreeEntry, b: utils.TreeEntry) bool {
+            return std.mem.lessThan(u8, a.path, b.path);
+        }
+    }.lessThan);
+
+    // Build tree content as binary data
+    // Format: <mode> <name>\0<20-byte SHA> for each entry
     var tree_content = std.ArrayList(u8).initCapacity(allocator, 100) catch unreachable;
     defer tree_content.deinit(allocator);
 
     for (tree_entries.items) |entry| {
         try tree_content.appendSlice(allocator, entry.mode);
         try tree_content.appendSlice(allocator, " ");
-        try tree_content.appendSlice(allocator, entry.entry_type);
-        try tree_content.appendSlice(allocator, " ");
-        try tree_content.appendSlice(allocator, entry.sha);
-        try tree_content.append(allocator, 0);
         try tree_content.appendSlice(allocator, entry.path);
         try tree_content.append(allocator, 0);
+
+        // Convert hex SHA back to bytes
+        var sha_bytes: [20]u8 = undefined;
+        for (0..20) |i| {
+            const byte_high = std.fmt.charToDigit(entry.sha[2 * i], 16) catch 0;
+            const byte_low = std.fmt.charToDigit(entry.sha[2 * i + 1], 16) catch 0;
+            sha_bytes[i] = byte_high * 16 + byte_low;
+        }
+        try tree_content.appendSlice(allocator, &sha_bytes);
     }
 
-    return utils.hashObject(io, allocator, git_dir_path, tree_content.items, "tree");
+    return utils.hashObjectBinary(io, allocator, git_dir_path, tree_content.items, "tree");
 }
 
 fn shouldIncludeInTree(path: []const u8, prefix: []const u8) bool {
