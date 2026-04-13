@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { status } from "./status.js";
+import { status } from "./status.ts";
 import {
 	extractContentFromBlob,
 	extractTreeFromCommit,

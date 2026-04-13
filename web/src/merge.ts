@@ -9,7 +9,7 @@ import {
 	hashObject,
 	readObject,
 	updateBranch,
-} from "./utils.js";
+} from "./utils.ts";
 
 export async function merge(
 	path: string,

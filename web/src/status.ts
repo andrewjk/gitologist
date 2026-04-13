@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 
 import { IgnoreParser } from "./IgnoreParser.ts";
 import type { StatusInfo } from "./types/StatusInfo.ts";
-import { getIndex, hashFile } from "./utils.js";
+import { getIndex, hashFile } from "./utils.ts";
 
 export async function status(path: string): Promise<StatusInfo> {
 	const gitDir = join(path, ".git");

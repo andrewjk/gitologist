@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { init } from "./init.js";
-import { remoteAdd } from "./remote.js";
+import { init } from "./init.ts";
+import { remoteAdd } from "./remote.ts";
 
 export async function clone(url: string, targetPath?: string): Promise<string> {
 	const repoName = extractRepoName(url);

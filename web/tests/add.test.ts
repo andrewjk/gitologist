@@ -130,7 +130,7 @@ describe("add", () => {
 		await writeFile(join(testDir, "test.txt"), "content");
 		await add(testDir, ["test.txt"]);
 
-		const { getIndex } = await import("../src/utils.js");
+		const { getIndex } = await import("../src/utils.ts");
 		const indexPath = join(testDir, ".git", "index");
 		const index = await getIndex(indexPath);
 		const crypto = await import("node:crypto");

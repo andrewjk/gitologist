@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
-import { status } from "./status.js";
+import { status } from "./status.ts";
 import { getCurrentBranch } from "./utils.ts";
 
 export async function push(path: string, remote?: string, branch?: string): Promise<void> {

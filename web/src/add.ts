@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { stat } from "node:fs/promises";
+import { join } from "node:path";
 
 import { IgnoreParser } from "./IgnoreParser.ts";
-import { status } from "./status.js";
-import { getIndex, hashFile, writeIndex } from "./utils.js";
+import { status } from "./status.ts";
+import { getIndex, hashFile, writeIndex } from "./utils.ts";
 
 export async function add(path: string, files: string[]): Promise<void> {
 	const gitDir = join(path, ".git");

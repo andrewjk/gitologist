@@ -2,10 +2,10 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { status } from "./status.js";
+import { status } from "./status.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
-import { getCurrentBranch, getCurrentCommit, getIndex, hashObject, updateBranch } from "./utils.js";
+import { getCurrentBranch, getCurrentCommit, getIndex, hashObject, updateBranch } from "./utils.ts";
 
 export async function commit(path: string, message: string): Promise<string> {
 	const gitDir = join(path, ".git");
