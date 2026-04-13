@@ -7,6 +7,60 @@ const log = @import("gitologist").log;
 const clone = @import("gitologist").clone;
 const LogOptions = @import("gitologist").LogOptions;
 
+test "should create an index that git can read" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const our_dir = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-compat-add-ours" });
+    defer allocator.free(our_dir);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, our_dir);
+    defer cwd.deleteTree(io, our_dir) catch {};
+
+    try init(io, allocator, our_dir);
+
+    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ our_dir, "test.txt" });
+    defer allocator.free(test_file_path);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "test content" });
+
+    const test_file2_path = try std.fs.path.join(allocator, &[_][]const u8{ our_dir, "test 2.txt" });
+    defer allocator.free(test_file2_path);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file2_path, .data = "test content 2" });
+
+    try add(io, allocator, our_dir, &[_][]const u8{ "test.txt", "test 2.txt" });
+
+    const git_status_result = try std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "git", "status" },
+        .cwd = .{ .path = our_dir },
+    });
+    defer {
+        allocator.free(git_status_result.stdout);
+        allocator.free(git_status_result.stderr);
+    }
+
+    // Check git command succeeded
+    switch (git_status_result.term) {
+        .exited => |code| {
+            if (code != 0) {
+                std.debug.print("git status failed with exit code {d}. stderr: {s}\n", .{ code, git_status_result.stderr });
+            }
+            try std.testing.expectEqual(@as(u32, 0), code);
+        },
+        .signal => |sig| {
+            std.debug.print("git status killed by signal {d}. stderr: {s}\n", .{ sig, git_status_result.stderr });
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, git_status_result.stdout, "new file:   test.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, git_status_result.stdout, "new file:   test 2.txt") != null);
+}
+
 test "should create valid commit structure" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
@@ -47,6 +101,33 @@ test "should create valid commit structure" {
     // The object file should exist (rest of SHA as filename)
     const obj_file = try obj_dir.openFile(io, commit_sha[2..], .{});
     obj_file.close(io);
+
+    // Verify git can read our commit
+    const git_log_result = try std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "git", "log", "--oneline" },
+        .cwd = .{ .path = our_dir },
+    });
+    defer {
+        allocator.free(git_log_result.stdout);
+        allocator.free(git_log_result.stderr);
+    }
+
+    // Check git command succeeded
+    switch (git_log_result.term) {
+        .exited => |code| {
+            if (code != 0) {
+                std.debug.print("git log failed with exit code {d}. stderr: {s}\n", .{ code, git_log_result.stderr });
+            }
+            try std.testing.expectEqual(@as(u32, 0), code);
+        },
+        .signal => |sig| {
+            std.debug.print("git log killed by signal {d}. stderr: {s}\n", .{ sig, git_log_result.stderr });
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, git_log_result.stdout, "Test commit") != null);
 
     // Verify our log can read the commit
     const log_result = try log(io, allocator, our_dir, null);
@@ -107,6 +188,15 @@ test "should produce same commit structure as git" {
         allocator.free(init_result.stderr);
     }
 
+    switch (init_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git init killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
     const their_file_path = try std.fs.path.join(allocator, &[_][]const u8{ their_dir, "file.txt" });
     defer allocator.free(their_file_path);
 
@@ -121,6 +211,15 @@ test "should produce same commit structure as git" {
         allocator.free(add_result.stderr);
     }
 
+    switch (add_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git add killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
     const commit_result = try std.process.run(allocator, io, .{
         .argv = &[_][]const u8{ "git", "commit", "-m", "Same message" },
         .cwd = .{ .path = their_dir },
@@ -128,6 +227,15 @@ test "should produce same commit structure as git" {
     defer {
         allocator.free(commit_result.stdout);
         allocator.free(commit_result.stderr);
+    }
+
+    switch (commit_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git commit killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
     }
 
     // Both should have valid commit SHAs (40 hex characters)
@@ -159,6 +267,15 @@ test "should produce same commit structure as git" {
     defer {
         allocator.free(their_log_result.stdout);
         allocator.free(their_log_result.stderr);
+    }
+
+    switch (their_log_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git log killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
     }
 
     try std.testing.expectEqual(@as(usize, 1), our_log.len);
@@ -224,6 +341,34 @@ test "should show commits in reverse chronological order" {
     try std.testing.expect(our_log[0].parent != null);
     try std.testing.expect(our_log[1].parent != null);
     try std.testing.expect(our_log[2].parent == null);
+
+    // Verify git log shows same order
+    const git_log_result = try std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "git", "log", "--oneline" },
+        .cwd = .{ .path = our_dir },
+    });
+    defer {
+        allocator.free(git_log_result.stdout);
+        allocator.free(git_log_result.stderr);
+    }
+
+    switch (git_log_result.term) {
+        .exited => |code| {
+            if (code != 0) {
+                std.debug.print("git log failed with exit code {d}. stderr: {s}\n", .{ code, git_log_result.stderr });
+            }
+            try std.testing.expectEqual(@as(u32, 0), code);
+        },
+        .signal => |sig| {
+            std.debug.print("git log killed by signal {d}. stderr: {s}\n", .{ sig, git_log_result.stderr });
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, git_log_result.stdout, "Third commit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, git_log_result.stdout, "Second commit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, git_log_result.stdout, "First commit") != null);
 }
 
 test "should create repo structure like git clone" {
@@ -254,6 +399,15 @@ test "should create repo structure like git clone" {
         allocator.free(bare_init_result.stderr);
     }
 
+    switch (bare_init_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git init --bare killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
     // Create initial content in the remote using a temporary clone
     const temp_clone = try std.fs.path.join(allocator, &[_][]const u8{ base_dir, "temp-clone" });
     defer allocator.free(temp_clone);
@@ -265,6 +419,15 @@ test "should create repo structure like git clone" {
     defer {
         allocator.free(clone_result.stdout);
         allocator.free(clone_result.stderr);
+    }
+
+    switch (clone_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git clone killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
     }
 
     const readme_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_clone, "README.md" });
@@ -281,6 +444,15 @@ test "should create repo structure like git clone" {
         allocator.free(add_result.stderr);
     }
 
+    switch (add_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git add killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
     const commit_result = try std.process.run(allocator, io, .{
         .argv = &[_][]const u8{ "git", "commit", "-m", "Initial commit" },
         .cwd = .{ .path = temp_clone },
@@ -290,6 +462,15 @@ test "should create repo structure like git clone" {
         allocator.free(commit_result.stderr);
     }
 
+    switch (commit_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git commit killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
     const push_result = try std.process.run(allocator, io, .{
         .argv = &[_][]const u8{ "git", "push", "origin", "main" },
         .cwd = .{ .path = temp_clone },
@@ -297,6 +478,15 @@ test "should create repo structure like git clone" {
     defer {
         allocator.free(push_result.stdout);
         allocator.free(push_result.stderr);
+    }
+
+    switch (push_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git push killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
     }
 
     // Clean up temp clone
@@ -331,4 +521,32 @@ test "should create repo structure like git clone" {
 
     try std.testing.expect(std.mem.indexOf(u8, config, "[remote \"origin\"]") != null);
     try std.testing.expect(std.mem.indexOf(u8, config, remote_dir) != null);
+
+    // Compare with git clone output
+    const their_clone = try std.fs.path.join(allocator, &[_][]const u8{ base_dir, "their-clone" });
+    defer allocator.free(their_clone);
+
+    const git_clone_result = try std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "git", "clone", remote_dir, "their-clone" },
+        .cwd = .{ .path = base_dir },
+    });
+    defer {
+        allocator.free(git_clone_result.stdout);
+        allocator.free(git_clone_result.stderr);
+    }
+
+    switch (git_clone_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git clone killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
+    // Verify git clone succeeded
+    try std.testing.expect(std.mem.indexOf(u8, git_clone_result.stderr, "Cloning into") != null);
+
+    // Clean up git clone
+    try cwd.deleteTree(io, their_clone);
 }

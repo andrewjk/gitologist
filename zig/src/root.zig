@@ -14,6 +14,7 @@ pub const push = @import("push.zig").push;
 pub const pull = @import("pull.zig").pull;
 pub const log = @import("log.zig").log;
 pub const merge = @import("merge.zig").merge;
+pub const utils = @import("utils.zig");
 
 pub const IgnoreParser = @import("ignore_parser.zig").IgnoreParser;
 pub const IgnorePattern = @import("ignore_parser.zig").IgnorePattern;

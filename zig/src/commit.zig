@@ -42,7 +42,6 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
             allocator.free(value.path);
             allocator.free(value.sha);
             allocator.free(value.mode);
-            allocator.free(entry.key_ptr.*);
         }
         index.deinit();
     }

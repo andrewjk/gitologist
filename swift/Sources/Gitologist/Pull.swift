@@ -141,7 +141,20 @@ private func updateIndexRecursive(
 				.compactMap { String(format: "%02x", $0) }
 				.joined()
 			let path = prefix.isEmpty ? entry.path : "\(prefix)/\(entry.path)"
-			newIndex[path] = IndexEntry(path: path, sha: sha, mode: entry.mode)
+			newIndex[path] = IndexEntry(
+				path: path,
+				sha: sha,
+				mode: entry.mode,
+				size: UInt32(fileContent.utf8.count),
+				ctimeSeconds: 0,
+				ctimeNanos: 0,
+				mtimeSeconds: 0,
+				mtimeNanos: 0,
+				dev: 0,
+				ino: 0,
+				uid: 0,
+				gid: 0
+			)
 
 		case .tree:
 			let newPrefix = prefix.isEmpty ? entry.path : "\(prefix)/\(entry.path)"

@@ -88,9 +88,8 @@ struct StatusTests {
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
 		try await initRepo(at: testDirPath.path)
 
-		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
-		let originalHash = sha1Hash(of: "original")
-		try "test.txt\t\(originalHash)\t100644\n".write(to: indexPath, atomically: true, encoding: .utf8)
+		try "original".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
 
 		try "modified content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
 
@@ -106,12 +105,10 @@ struct StatusTests {
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
 		try await initRepo(at: testDirPath.path)
 
-		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
-		let hash = sha1Hash(of: "content")
-		try "test.txt\t\(hash)\t100644\n".write(to: indexPath, atomically: true, encoding: .utf8)
+		try "content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
 
 		let testFile = testDirPath.appendingPathComponent("test.txt")
-		try "content".write(to: testFile, atomically: true, encoding: .utf8)
 		try? fileManager.removeItem(at: testFile)
 
 		let result = try await status(at: testDirPath.path)
@@ -180,11 +177,8 @@ struct StatusTests {
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
 		try await initRepo(at: testDirPath.path)
 
-		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
-		let hash = sha1Hash(of: "content")
-		try "test.txt\t\(hash)\t100644\n".write(to: indexPath, atomically: true, encoding: .utf8)
-
 		try "content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
 
 		let result = try await status(at: testDirPath.path)
 		#expect(result.modified == [])

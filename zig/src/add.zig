@@ -31,7 +31,6 @@ pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []
             allocator.free(value.path);
             allocator.free(value.sha);
             allocator.free(value.mode);
-            allocator.free(entry.key_ptr.*);
         }
         index.deinit();
     }
@@ -44,7 +43,6 @@ pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []
             return error.FileNotFound;
         }
 
-        // Skip ignored files
         if (gitignore.isIgnored(file, false)) {
             continue;
         }
@@ -57,7 +55,6 @@ pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []
 
         const old_entry = index.fetchRemove(file);
         if (old_entry) |entry| {
-            allocator.free(entry.key);
             allocator.free(entry.value.path);
             allocator.free(entry.value.sha);
             allocator.free(entry.value.mode);
@@ -65,9 +62,18 @@ pub fn add(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files: []
 
         const file_copy = try allocator.dupe(u8, file);
         try index.put(file_copy, .{
-            .path = try allocator.dupe(u8, file),
+            .path = file_copy,
             .sha = hash_copy,
             .mode = mode_copy,
+            .size = 0,
+            .ctime_seconds = 0,
+            .ctime_nanos = 0,
+            .mtime_seconds = 0,
+            .mtime_nanos = 0,
+            .dev = 0,
+            .ino = 0,
+            .uid = 0,
+            .gid = 0,
         });
     }
 

@@ -118,6 +118,25 @@ struct GitCompatTests {
 
 	// MARK: - Add and Commit Tests
 
+	@Test func shouldCreateAnIndexThatGitCanRead() async throws {
+		let baseDirPath = baseDir
+		try fileManager.createDirectory(at: baseDirPath, withIntermediateDirectories: true)
+		defer { try? fileManager.removeItem(at: baseDirPath) }
+
+		let ourDir = baseDirPath.appendingPathComponent("our-add")
+		try fileManager.createDirectory(at: ourDir, withIntermediateDirectories: true)
+		try await initRepo(at: ourDir.path)
+
+		try "test content".write(to: ourDir.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try "test content 2".write(to: ourDir.appendingPathComponent("test 2.txt"), atomically: true, encoding: .utf8)
+		try await add(at: ourDir.path, files: ["test.txt", "test 2.txt"])
+
+		let gitStatus = try runGit(args: ["status"], in: ourDir)
+
+		#expect(gitStatus.contains("new file:   test.txt"))
+		#expect(gitStatus.contains("new file:   test 2.txt"))
+	}
+
 	@Test func shouldCreateCommitsThatGitCanRead() async throws {
 		let baseDirPath = baseDir
 		try fileManager.createDirectory(at: baseDirPath, withIntermediateDirectories: true)

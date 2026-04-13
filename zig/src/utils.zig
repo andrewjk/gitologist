@@ -54,23 +54,127 @@ pub fn getIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8
         offset += bytes_read;
     }
 
-    var iter = std.mem.splitScalar(u8, content.items, '\n');
-    while (iter.next()) |line| {
-        if (line.len == 0) continue;
+    if (content.items.len < 12) {
+        return index;
+    }
 
-        var parts = std.mem.splitScalar(u8, line, '\t');
-        const path = parts.first();
-        const sha = parts.next() orelse continue;
-        const mode = parts.next() orelse "100644";
+    const signature = content.items[0..4];
+    if (!std.mem.eql(u8, signature, "DIRC")) {
+        return index;
+    }
 
-        const path_copy = try allocator.dupe(u8, path);
-        const sha_copy = try allocator.dupe(u8, sha);
-        const mode_copy = try allocator.dupe(u8, mode);
+    const num_entries = std.mem.readInt(u32, content.items[8..12], .big);
 
-        try index.put(path_copy, .{
-            .path = try allocator.dupe(u8, path),
-            .sha = sha_copy,
-            .mode = mode_copy,
+    var entry_offset: usize = 12;
+
+    for (0..num_entries) |_| {
+        if (entry_offset + 62 > content.items.len) {
+            break;
+        }
+
+        const ctime_seconds = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset],
+            content.items[entry_offset + 1],
+            content.items[entry_offset + 2],
+            content.items[entry_offset + 3],
+        }));
+        const ctime_nanos = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 4],
+            content.items[entry_offset + 5],
+            content.items[entry_offset + 6],
+            content.items[entry_offset + 7],
+        }));
+        const mtime_seconds = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 8],
+            content.items[entry_offset + 9],
+            content.items[entry_offset + 10],
+            content.items[entry_offset + 11],
+        }));
+        const mtime_nanos = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 12],
+            content.items[entry_offset + 13],
+            content.items[entry_offset + 14],
+            content.items[entry_offset + 15],
+        }));
+        const dev = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 16],
+            content.items[entry_offset + 17],
+            content.items[entry_offset + 18],
+            content.items[entry_offset + 19],
+        }));
+        const ino = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 20],
+            content.items[entry_offset + 21],
+            content.items[entry_offset + 22],
+            content.items[entry_offset + 23],
+        }));
+        const mode_value = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 24],
+            content.items[entry_offset + 25],
+            content.items[entry_offset + 26],
+            content.items[entry_offset + 27],
+        }));
+        const uid = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 28],
+            content.items[entry_offset + 29],
+            content.items[entry_offset + 30],
+            content.items[entry_offset + 31],
+        }));
+        const gid = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 32],
+            content.items[entry_offset + 33],
+            content.items[entry_offset + 34],
+            content.items[entry_offset + 35],
+        }));
+        const size = std.mem.bigToNative(u32, @bitCast([4]u8{
+            content.items[entry_offset + 36],
+            content.items[entry_offset + 37],
+            content.items[entry_offset + 38],
+            content.items[entry_offset + 39],
+        }));
+
+        const sha_bytes = content.items[entry_offset + 40 .. entry_offset + 60];
+        var sha: [40]u8 = undefined;
+        for (0..20) |i| {
+            const byte = sha_bytes[i];
+            sha[2 * i] = "0123456789abcdef"[byte >> 4];
+            sha[2 * i + 1] = "0123456789abcdef"[byte & 0x0f];
+        }
+        const sha_str = try allocator.dupe(u8, &sha);
+
+        const flags = std.mem.bigToNative(u16, @bitCast([2]u8{
+            content.items[entry_offset + 60],
+            content.items[entry_offset + 61],
+        }));
+        const path_len = flags & 0x0FFF;
+
+        if (entry_offset + 62 + path_len > content.items.len) {
+            allocator.free(sha_str);
+            break;
+        }
+
+        const path_bytes = content.items[entry_offset + 62 .. entry_offset + 62 + path_len];
+        const path = try allocator.dupe(u8, path_bytes);
+
+        const mode = try std.fmt.allocPrint(allocator, "{o}", .{mode_value});
+
+        const entry_length = 62 + path_len + 1;
+        const padding_length = (8 - (entry_length % 8)) % 8;
+        entry_offset += entry_length + padding_length;
+
+        try index.put(path, .{
+            .path = path,
+            .sha = sha_str,
+            .mode = mode,
+            .size = size,
+            .ctime_seconds = ctime_seconds,
+            .ctime_nanos = ctime_nanos,
+            .mtime_seconds = mtime_seconds,
+            .mtime_nanos = mtime_nanos,
+            .dev = dev,
+            .ino = ino,
+            .uid = uid,
+            .gid = gid,
         });
     }
 
@@ -78,16 +182,84 @@ pub fn getIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8
 }
 
 pub fn writeIndex(io: std.Io, allocator: std.mem.Allocator, index_path: []const u8, index: std.StringHashMap(IndexEntry)) !void {
-    var content = std.ArrayList(u8).initCapacity(allocator, 100) catch unreachable;
-    defer content.deinit(allocator);
+    var entries = std.ArrayList(IndexEntry).initCapacity(allocator, index.count()) catch unreachable;
+    defer entries.deinit(allocator);
 
     var iter = index.iterator();
     while (iter.next()) |entry| {
-        const value = entry.value_ptr.*;
-        const line = try std.fmt.allocPrint(allocator, "{s}\t{s}\t{s}\n", .{ value.path, value.sha, value.mode });
-        defer allocator.free(line);
-        try content.appendSlice(allocator, line);
+        try entries.append(allocator, entry.value_ptr.*);
     }
+
+    std.sort.block(IndexEntry, entries.items, {}, struct {
+        fn compare(_: void, a: IndexEntry, b: IndexEntry) bool {
+            return std.mem.lessThan(u8, a.path, b.path);
+        }
+    }.compare);
+
+    var content = std.ArrayList(u8).initCapacity(allocator, 100) catch unreachable;
+    defer content.deinit(allocator);
+
+    try content.appendSlice(allocator, "DIRC");
+    try content.appendSlice(allocator, &[_]u8{ 0, 0, 0, 2 });
+    const num_entries: u32 = @intCast(entries.items.len);
+    const num_entries_bytes = std.mem.nativeToBig(u32, num_entries);
+    try content.appendSlice(allocator, &@as([4]u8, @bitCast(num_entries_bytes)));
+
+    for (entries.items) |entry| {
+        const entry_start = content.items.len;
+
+        try content.appendNTimes(allocator, 0, 62);
+
+        const ctime_bytes = std.mem.nativeToBig(u32, entry.ctime_seconds);
+        @memcpy(content.items[entry_start .. entry_start + 4], &@as([4]u8, @bitCast(ctime_bytes)));
+        const ctime_nanos_bytes = std.mem.nativeToBig(u32, entry.ctime_nanos);
+        @memcpy(content.items[entry_start + 4 .. entry_start + 8], &@as([4]u8, @bitCast(ctime_nanos_bytes)));
+        const mtime_seconds_bytes = std.mem.nativeToBig(u32, entry.mtime_seconds);
+        @memcpy(content.items[entry_start + 8 .. entry_start + 12], &@as([4]u8, @bitCast(mtime_seconds_bytes)));
+        const mtime_nanos_bytes = std.mem.nativeToBig(u32, entry.mtime_nanos);
+        @memcpy(content.items[entry_start + 12 .. entry_start + 16], &@as([4]u8, @bitCast(mtime_nanos_bytes)));
+        const dev_bytes = std.mem.nativeToBig(u32, entry.dev);
+        @memcpy(content.items[entry_start + 16 .. entry_start + 20], &@as([4]u8, @bitCast(dev_bytes)));
+        const ino_bytes = std.mem.nativeToBig(u32, entry.ino);
+        @memcpy(content.items[entry_start + 20 .. entry_start + 24], &@as([4]u8, @bitCast(ino_bytes)));
+
+        const mode_value = std.fmt.parseUnsigned(u32, entry.mode, 8) catch 0o100644;
+        const mode_bytes = std.mem.nativeToBig(u32, mode_value);
+        @memcpy(content.items[entry_start + 24 .. entry_start + 28], &@as([4]u8, @bitCast(mode_bytes)));
+
+        const uid_bytes = std.mem.nativeToBig(u32, entry.uid);
+        @memcpy(content.items[entry_start + 28 .. entry_start + 32], &@as([4]u8, @bitCast(uid_bytes)));
+        const gid_bytes = std.mem.nativeToBig(u32, entry.gid);
+        @memcpy(content.items[entry_start + 32 .. entry_start + 36], &@as([4]u8, @bitCast(gid_bytes)));
+        const size_bytes = std.mem.nativeToBig(u32, entry.size);
+        @memcpy(content.items[entry_start + 36 .. entry_start + 40], &@as([4]u8, @bitCast(size_bytes)));
+
+        var sha_bytes: [20]u8 = undefined;
+        for (0..20) |i| {
+            const byte_high = std.fmt.charToDigit(entry.sha[2 * i], 16) catch 0;
+            const byte_low = std.fmt.charToDigit(entry.sha[2 * i + 1], 16) catch 0;
+            sha_bytes[i] = byte_high * 16 + byte_low;
+        }
+        @memcpy(content.items[entry_start + 40 .. entry_start + 60], &sha_bytes);
+
+        const flags: u16 = @intCast(@min(entry.path.len, 0xFFF));
+        const flags_bytes = std.mem.nativeToBig(u16, flags);
+        @memcpy(content.items[entry_start + 60 .. entry_start + 62], &@as([2]u8, @bitCast(flags_bytes)));
+
+        try content.appendSlice(allocator, entry.path);
+        try content.append(allocator, 0);
+
+        const entry_length = 62 + entry.path.len + 1;
+        const padding_length = (8 - (entry_length % 8)) % 8;
+        try content.appendNTimes(allocator, 0, padding_length);
+    }
+
+    var hasher = std.crypto.hash.Sha1.init(.{});
+    hasher.update(content.items);
+    var checksum: [20]u8 = undefined;
+    hasher.final(&checksum);
+
+    try content.appendSlice(allocator, &checksum);
 
     const cwd = std.Io.Dir.cwd();
     try cwd.writeFile(io, .{ .sub_path = index_path, .data = content.items });
@@ -125,13 +297,21 @@ pub fn hashObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
     const obj_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ obj_dir, hex_hash[2..] });
     defer allocator.free(obj_path);
 
-    var compressed = std.ArrayList(u8).initCapacity(allocator, content.len + 100) catch unreachable;
-    defer compressed.deinit(allocator);
+    // Compress the object data with zlib (required by git)
+    const flate = std.compress.flate;
 
-    try compressed.appendSlice(allocator, header);
-    try compressed.appendSlice(allocator, content);
+    var file = try cwd.createFile(io, obj_path, .{});
+    defer file.close(io);
 
-    try cwd.writeFile(io, .{ .sub_path = obj_path, .data = compressed.items });
+    var write_buffer: [flate.max_window_len]u8 = undefined;
+    var file_writer = std.Io.File.Writer.init(file, io, &write_buffer);
+    var flate_buffer: [flate.max_window_len]u8 = undefined;
+    var compress = try flate.Compress.init(&file_writer.interface, &flate_buffer, .zlib, .default);
+    try compress.writer.writeAll(header);
+    try compress.writer.writeAll(content);
+    try compress.writer.flush();
+    try compress.finish();
+    try file_writer.interface.flush();
 
     return hex_hash;
 }
@@ -196,6 +376,15 @@ pub const IndexEntry = struct {
     path: []const u8,
     sha: []const u8,
     mode: []const u8,
+    size: u32,
+    ctime_seconds: u32,
+    ctime_nanos: u32,
+    mtime_seconds: u32,
+    mtime_nanos: u32,
+    dev: u32,
+    ino: u32,
+    uid: u32,
+    gid: u32,
 };
 
 pub const TreeEntry = struct {
@@ -213,9 +402,20 @@ pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
     defer allocator.free(obj_path);
 
     const cwd = std.Io.Dir.cwd();
-    const content = try cwd.readFileAlloc(io, obj_path, allocator, .unlimited);
+    var file = try cwd.openFile(io, obj_path, .{});
+    defer file.close(io);
 
-    return content;
+    const flate = std.compress.flate;
+
+    var read_buffer: [flate.max_window_len]u8 = undefined;
+    var file_reader = std.Io.File.Reader.init(file, io, &read_buffer);
+    var flate_buffer: [flate.max_window_len]u8 = undefined;
+    var decompress = flate.Decompress.init(&file_reader.interface, .zlib, &flate_buffer);
+    var writer: std.Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
+    _ = try decompress.reader.streamRemaining(&writer.writer);
+
+    return writer.toOwnedSlice();
 }
 
 pub fn extractContentFromBlob(blob_data: []const u8) []const u8 {

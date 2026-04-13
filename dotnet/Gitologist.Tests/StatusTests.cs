@@ -95,9 +95,8 @@ public class StatusTests
     public async Task ShouldDetectModifiedFiles()
     {
         await Init.InitRepo(_testDir);
-        var indexPath = Path.Combine(_testDir, ".git", "index");
-        var originalHash = Utils.HashString("original");
-        await File.WriteAllTextAsync(indexPath, $"test.txt\t{originalHash}\t100644\n");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "original");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
 
         await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified content");
 
@@ -110,11 +109,9 @@ public class StatusTests
     public async Task ShouldDetectDeletedFilesAsModified()
     {
         await Init.InitRepo(_testDir);
-        var indexPath = Path.Combine(_testDir, ".git", "index");
-        var hash = Utils.HashString("content");
-        await File.WriteAllTextAsync(indexPath, $"test.txt	{hash}	100644\n");
-
         await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+
         File.Delete(Path.Combine(_testDir, "test.txt"));
 
         var result = await Status.GetStatus(_testDir);
@@ -188,11 +185,8 @@ public class StatusTests
     public async Task ShouldCorrectlyIdentifyFilesMatchingIndex()
     {
         await Init.InitRepo(_testDir);
-        var indexPath = Path.Combine(_testDir, ".git", "index");
-        var hash = Utils.HashString("content");
-        await File.WriteAllTextAsync(indexPath, $"test.txt	{hash}	100644\n");
-
         await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
 
         var result = await Status.GetStatus(_testDir);
         Assert.AreEqual(0, result.Modified.Length);

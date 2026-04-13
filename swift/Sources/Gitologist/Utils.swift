@@ -9,45 +9,170 @@ func hashFile(at path: String) async throws -> String {
 }
 
 func getIndex(at path: String) async throws -> [String: IndexEntry] {
-	guard FileManager.default.fileExists(atPath: path) else {
-		return [:]
-	}
-
-	// Try to read as UTF-8 text (our custom format)
-	// If that fails (e.g., binary git index), return empty index
-	guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
-		// File exists but isn't valid UTF-8 text (probably binary git index or corrupted)
-		// Return empty index to start fresh
-		return [:]
-	}
-
 	var index: [String: IndexEntry] = [:]
 
-	let lines = content.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines)
+	guard FileManager.default.fileExists(atPath: path) else {
+		return index
+	}
 
-	for line in lines where !line.isEmpty {
-		let parts = line.components(separatedBy: "\t")
-		guard parts.count >= 2 else { continue }
+	guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+		return index
+	}
 
-		let filePath = parts[0]
-		let sha = parts[1]
-		let mode = parts.count >= 3 ? parts[2] : "100644"
+	guard data.count >= 12 else {
+		return index
+	}
 
-		index[filePath] = IndexEntry(path: filePath, sha: sha, mode: mode)
+	let signature = String(data: data[0 ..< 4], encoding: .ascii)
+	guard signature == "DIRC" else {
+		return index
+	}
+
+	let numEntries = data.withUnsafeBytes { rawPtr in
+		rawPtr.loadUnaligned(fromByteOffset: 8, as: UInt32.self).bigEndian
+	}
+
+	var offset = 12
+
+	for _ in 0 ..< numEntries {
+		guard offset + 62 <= data.count else {
+			break
+		}
+
+		let ctimeSeconds = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset, as: UInt32.self).bigEndian
+		}
+		let ctimeNanos = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self).bigEndian
+		}
+		let mtimeSeconds = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 8, as: UInt32.self).bigEndian
+		}
+		let mtimeNanos = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 12, as: UInt32.self).bigEndian
+		}
+		let dev = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 16, as: UInt32.self).bigEndian
+		}
+		let ino = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 20, as: UInt32.self).bigEndian
+		}
+		let modeValue = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 24, as: UInt32.self).bigEndian
+		}
+		let mode = String(format: "%o", modeValue)
+		let uid = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 28, as: UInt32.self).bigEndian
+		}
+		let gid = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 32, as: UInt32.self).bigEndian
+		}
+		let size = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 36, as: UInt32.self).bigEndian
+		}
+
+		let shaData = data.subdata(in: offset + 40 ..< (offset + 60))
+		let sha = shaData.map { String(format: "%02x", $0) }.joined()
+
+		let flags = data.withUnsafeBytes { rawPtr in
+			rawPtr.loadUnaligned(fromByteOffset: offset + 60, as: UInt16.self).bigEndian
+		}
+
+		let pathLength = Int(flags & 0x0FFF)
+		guard offset + 62 + pathLength <= data.count else {
+			break
+		}
+
+		let pathData = data.subdata(in: offset + 62 ..< (offset + 62 + pathLength))
+		guard let path = String(data: pathData, encoding: .utf8) else {
+			break
+		}
+
+		let entryLength = 62 + pathLength + 1
+		let paddingLength = (8 - (entryLength % 8)) % 8
+		offset = offset + entryLength + paddingLength
+
+		index[path] = IndexEntry(
+			path: path,
+			sha: sha,
+			mode: mode,
+			size: size,
+			ctimeSeconds: ctimeSeconds,
+			ctimeNanos: ctimeNanos,
+			mtimeSeconds: mtimeSeconds,
+			mtimeNanos: mtimeNanos,
+			dev: dev,
+			ino: ino,
+			uid: uid,
+			gid: gid
+		)
 	}
 
 	return index
 }
 
 func writeIndex(at path: String, index: [String: IndexEntry]) async throws {
-	var lines: [String] = []
+	let entries = index.values.sorted { $0.path < $1.path }
 
-	for entry in index.values {
-		lines.append("\(entry.path)\t\(entry.sha)\t\(entry.mode)")
+	var header = Data()
+	header.append("DIRC".data(using: .ascii)!)
+	header.append(withUnsafeBytes(of: UInt32(2).bigEndian) { Data($0) })
+	header.append(withUnsafeBytes(of: UInt32(entries.count).bigEndian) { Data($0) })
+
+	var entryBuffers: [Data] = []
+
+	for entry in entries {
+		var entryData = Data(count: 62 + entry.path.count + 1)
+
+		entryData.withUnsafeMutableBytes { rawPtr in
+			rawPtr.storeBytes(of: entry.ctimeSeconds.bigEndian, toByteOffset: 0, as: UInt32.self)
+			rawPtr.storeBytes(of: entry.ctimeNanos.bigEndian, toByteOffset: 4, as: UInt32.self)
+			rawPtr.storeBytes(of: entry.mtimeSeconds.bigEndian, toByteOffset: 8, as: UInt32.self)
+			rawPtr.storeBytes(of: entry.mtimeNanos.bigEndian, toByteOffset: 12, as: UInt32.self)
+			rawPtr.storeBytes(of: entry.dev.bigEndian, toByteOffset: 16, as: UInt32.self)
+			rawPtr.storeBytes(of: entry.ino.bigEndian, toByteOffset: 20, as: UInt32.self)
+
+			let modeValue = UInt32(strtoul(entry.mode, nil, 8))
+			rawPtr.storeBytes(of: modeValue.bigEndian, toByteOffset: 24, as: UInt32.self)
+
+			rawPtr.storeBytes(of: entry.uid.bigEndian, toByteOffset: 28, as: UInt32.self)
+			rawPtr.storeBytes(of: entry.gid.bigEndian, toByteOffset: 32, as: UInt32.self)
+			rawPtr.storeBytes(of: entry.size.bigEndian, toByteOffset: 36, as: UInt32.self)
+		}
+
+		var shaBytes: [UInt8] = []
+		for i in stride(from: 0, to: entry.sha.count, by: 2) {
+			let start = entry.sha.index(entry.sha.startIndex, offsetBy: i)
+			let end = entry.sha.index(entry.sha.startIndex, offsetBy: i + 2)
+			let byteString = String(entry.sha[start ..< end])
+			if let byte = UInt8(byteString, radix: 16) {
+				shaBytes.append(byte)
+			}
+		}
+		let shaData = Data(shaBytes)
+		entryData.replaceSubrange(40 ..< 60, with: shaData)
+
+		let flags = UInt16(min(entry.path.count, 0x0FFF))
+		entryData.withUnsafeMutableBytes { rawPtr in
+			rawPtr.storeBytes(of: flags.bigEndian, toByteOffset: 60, as: UInt16.self)
+		}
+
+		entryData.replaceSubrange(62 ..< (62 + entry.path.count), with: entry.path.data(using: .utf8)!)
+		entryData[62 + entry.path.count] = 0
+
+		let entryLength = 62 + entry.path.count + 1
+		let paddingLength = (8 - (entryLength % 8)) % 8
+		let padding = Data(count: paddingLength)
+
+		entryBuffers.append(entryData + padding)
 	}
 
-	let content = lines.joined(separator: "\n") + "\n"
-	try content.write(to: URL(fileURLWithPath: path), atomically: true, encoding: .utf8)
+	let content = header + entryBuffers.reduce(Data(), +)
+
+	let sha1 = Insecure.SHA1.hash(data: content)
+	let checksum = Data(sha1)
+
+	try (content + checksum).write(to: URL(fileURLWithPath: path))
 }
 
 func getCurrentBranch(at gitDir: String) async throws -> String {

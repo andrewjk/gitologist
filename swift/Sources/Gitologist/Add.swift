@@ -35,14 +35,40 @@ func add(at path: String, files: [String]) async throws {
 			throw AddError.fileNotFound(file)
 		}
 
-		// Skip ignored files
 		if await gitignore.isIgnored(filePath: file) {
 			continue
 		}
 
 		let hash = try await hashFile(at: fullPath.path)
+		let attributes = try FileManager.default.attributesOfItem(atPath: fullPath.path)
 
-		index[file] = IndexEntry(path: file, sha: hash, mode: "100644")
+		let fileSize = attributes[.size] as! UInt32
+		let modificationDate = attributes[.modificationDate] as! Date
+		let creationDate = attributes[.creationDate] as! Date
+		let fileSystemFileNumber = attributes[.systemFileNumber] as! UInt32
+		let fileSystemNumber = attributes[.systemNumber] as! UInt32
+		let ownerAccountID = attributes[.ownerAccountID] as! UInt32
+		let groupOwnerAccountID = attributes[.groupOwnerAccountID] as! UInt32
+
+		let ctimeSeconds = UInt32(creationDate.timeIntervalSince1970)
+		let ctimeNanos = UInt32((creationDate.timeIntervalSince1970.truncatingRemainder(dividingBy: 1)) * 1_000_000_000)
+		let mtimeSeconds = UInt32(modificationDate.timeIntervalSince1970)
+		let mtimeNanos = UInt32((modificationDate.timeIntervalSince1970.truncatingRemainder(dividingBy: 1)) * 1_000_000_000)
+
+		index[file] = IndexEntry(
+			path: file,
+			sha: hash,
+			mode: "100644",
+			size: fileSize,
+			ctimeSeconds: ctimeSeconds,
+			ctimeNanos: ctimeNanos,
+			mtimeSeconds: mtimeSeconds,
+			mtimeNanos: mtimeNanos,
+			dev: fileSystemNumber,
+			ino: fileSystemFileNumber,
+			uid: ownerAccountID,
+			gid: groupOwnerAccountID
+		)
 	}
 
 	try await writeIndex(at: indexPath.path, index: index)

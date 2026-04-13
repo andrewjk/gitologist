@@ -69,7 +69,7 @@ public static class Status
             {
                 deleted.Add(filePath);
             }
-            else
+            else if (!Directory.Exists(fullPath))
             {
                 var currentHash = await Utils.HashFile(fullPath);
                 if (entry.Sha != currentHash)

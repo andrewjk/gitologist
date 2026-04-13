@@ -210,10 +210,12 @@ public class AddTests
         await Add.AddFiles(_testDir, new[] { "test.txt" });
 
         var indexPath = Path.Combine(_testDir, ".git", "index");
-        var indexContent = await File.ReadAllTextAsync(indexPath);
+        var index = await Utils.GetIndex(indexPath);
         var expectedHash = Utils.HashString("content");
 
-        StringAssert.Contains(indexContent, $"test.txt {expectedHash} 100644");
+        Assert.IsTrue(index.ContainsKey("test.txt"));
+        Assert.AreEqual(expectedHash, index["test.txt"].Sha);
+        Assert.AreEqual("100644", index["test.txt"].Mode);
     }
 
     [TestMethod]

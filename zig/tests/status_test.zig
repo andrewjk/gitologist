@@ -220,23 +220,15 @@ test "should detect modified files" {
 
     try init(io, allocator, tmp_path);
 
-    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
-    defer allocator.free(git_dir_path);
-
     const cwd = std.Io.Dir.cwd();
-
-    const original_hash = try hashString(allocator, "original");
-    defer allocator.free(original_hash);
-
-    const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
-    defer allocator.free(index_path);
-
-    const index_data = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644\n", .{original_hash});
-    defer allocator.free(index_data);
-    try cwd.writeFile(io, .{ .sub_path = index_path, .data = index_data });
 
     const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
     defer allocator.free(test_file_path);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "original" });
+
+    const add_func = @import("gitologist").add;
+    try add_func(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified content" });
 
@@ -269,25 +261,15 @@ test "should detect deleted files as deleted" {
 
     try init(io, allocator, tmp_path);
 
-    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
-    defer allocator.free(git_dir_path);
-
     const cwd = std.Io.Dir.cwd();
-
-    const hash = try hashString(allocator, "content");
-    defer allocator.free(hash);
-
-    const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
-    defer allocator.free(index_path);
-
-    const index_data = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644\n", .{hash});
-    defer allocator.free(index_data);
-    try cwd.writeFile(io, .{ .sub_path = index_path, .data = index_data });
 
     const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
     defer allocator.free(test_file_path);
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
+
+    const add_func = @import("gitologist").add;
+    try add_func(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
 
     try cwd.deleteFile(io, test_file_path);
 
@@ -446,9 +428,6 @@ test "should correctly identify files matching index" {
 
     try init(io, allocator, tmp_path);
 
-    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
-    defer allocator.free(git_dir_path);
-
     const cwd = std.Io.Dir.cwd();
 
     const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
@@ -456,15 +435,8 @@ test "should correctly identify files matching index" {
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
 
-    const hash = try hashString(allocator, "content");
-    defer allocator.free(hash);
-
-    const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
-    defer allocator.free(index_path);
-
-    const index_data = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644\n", .{hash});
-    defer allocator.free(index_data);
-    try cwd.writeFile(io, .{ .sub_path = index_path, .data = index_data });
+    const add_func = @import("gitologist").add;
+    try add_func(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
 
     const result = try status(io, allocator, tmp_path);
 

@@ -29,7 +29,6 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
             allocator.free(value.path);
             allocator.free(value.sha);
             allocator.free(value.mode);
-            allocator.free(entry.key_ptr.*);
         }
         index.deinit();
     }
@@ -75,6 +74,9 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
         defer allocator.free(full_path);
 
         if (cwd.access(io, full_path, .{})) |_| {
+            const file = cwd.openFile(io, full_path, .{}) catch continue;
+            defer file.close(io);
+
             const current_hash = try utils.hashFile(io, allocator, full_path);
             defer allocator.free(current_hash);
 

@@ -29,15 +29,34 @@ public static class Add
                 throw new FileNotFoundException($"File not found: {file}");
             }
 
-            // Skip ignored files
             if (gitignore.IsIgnored(file))
             {
                 continue;
             }
 
             var hash = await Utils.HashFile(fullPath);
+            var fileInfo = new FileInfo(fullPath);
 
-            index[file] = new IndexEntry { Path = file, Sha = hash, Mode = "100644" };
+            var ctimeSeconds = (uint)fileInfo.CreationTime.ToUniversalTime().Subtract(DateTime.UnixEpoch).TotalSeconds;
+            var ctimeNanos = (uint)((fileInfo.CreationTime.ToUniversalTime().Subtract(DateTime.UnixEpoch).TotalSeconds % 1) * 1_000_000_000);
+            var mtimeSeconds = (uint)fileInfo.LastWriteTime.ToUniversalTime().Subtract(DateTime.UnixEpoch).TotalSeconds;
+            var mtimeNanos = (uint)((fileInfo.LastWriteTime.ToUniversalTime().Subtract(DateTime.UnixEpoch).TotalSeconds % 1) * 1_000_000_000);
+
+            index[file] = new IndexEntry
+            {
+                Path = file,
+                Sha = hash,
+                Mode = "100644",
+                Size = (uint)fileInfo.Length,
+                CtimeSeconds = ctimeSeconds,
+                CtimeNanos = ctimeNanos,
+                MtimeSeconds = mtimeSeconds,
+                MtimeNanos = mtimeNanos,
+                Dev = 0,
+                Ino = 0,
+                Uid = 0,
+                Gid = 0
+            };
         }
 
         await Utils.WriteIndex(indexPath, index);

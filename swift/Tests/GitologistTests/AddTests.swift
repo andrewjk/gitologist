@@ -182,10 +182,12 @@ struct AddTests {
 		try await add(at: testDirPath.path, files: ["test.txt"])
 
 		let indexPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("index")
-		let indexContent = try String(contentsOf: indexPath, encoding: .utf8)
+		let index = try await getIndex(at: indexPath.path)
 		let expectedHash = sha1Hash(of: "content")
 
-		#expect(indexContent.contains("test.txt\t\(expectedHash)\t100644"))
+		#expect(index["test.txt"] != nil)
+		#expect(index["test.txt"]?.sha == expectedHash)
+		#expect(index["test.txt"]?.mode == "100644")
 
 		try? fileManager.removeItem(at: testDirPath)
 	}

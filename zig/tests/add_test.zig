@@ -4,6 +4,7 @@ const init = @import("gitologist").init;
 const add = @import("gitologist").add;
 const addAll = @import("gitologist").addAll;
 const status = @import("gitologist").status;
+const utils = @import("gitologist").utils;
 
 fn hashString(allocator: std.mem.Allocator, content: []const u8) ![]const u8 {
     var hasher = std.crypto.hash.Sha1.init(.{});
@@ -346,16 +347,24 @@ test "should verify file hash in index" {
     const index_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "index" });
     defer allocator.free(index_path);
 
-    const index_content = cwd.readFileAlloc(io, index_path, allocator, .unlimited) catch unreachable;
-    defer allocator.free(index_content);
+    var index = try utils.getIndex(io, allocator, index_path);
+    defer {
+        var iter = index.iterator();
+        while (iter.next()) |entry| {
+            allocator.free(entry.value_ptr.path);
+            allocator.free(entry.value_ptr.sha);
+            allocator.free(entry.value_ptr.mode);
+        }
+        index.deinit();
+    }
 
     const expected_hash = try hashString(allocator, "content");
     defer allocator.free(expected_hash);
 
-    const expected_line = try std.fmt.allocPrint(allocator, "test.txt\t{s}\t100644", .{expected_hash});
-    defer allocator.free(expected_line);
-
-    try std.testing.expect(std.mem.indexOf(u8, index_content, expected_line) != null);
+    try std.testing.expect(index.contains("test.txt"));
+    const entry = index.get("test.txt").?;
+    try std.testing.expectEqualStrings(expected_hash, entry.sha);
+    try std.testing.expectEqualStrings("100644", entry.mode);
 }
 
 test "should preserve existing index entries when adding new files" {

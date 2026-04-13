@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.IO.Compression;
+using System.Linq;
 using Gitologist.Types;
 
 namespace Gitologist;
@@ -33,22 +34,74 @@ public static class Utils
 
         try
         {
-            var content = await File.ReadAllTextAsync(indexPath);
-            var lines = content.Trim().Split('\n');
+            var data = await File.ReadAllBytesAsync(indexPath);
 
-            foreach (var line in lines)
+            if (data.Length < 12)
             {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
+                return index;
+            }
 
-                var parts = line.Split('\t');
-                if (parts.Length >= 2)
+            var signature = Encoding.ASCII.GetString(data, 0, 4);
+            if (signature != "DIRC")
+            {
+                return index;
+            }
+
+            var numEntries = BitConverter.ToUInt32(data.Skip(8).Take(4).Reverse().ToArray(), 0);
+
+            var offset = 12;
+
+            for (var i = 0; i < numEntries; i++)
+            {
+                if (offset + 62 > data.Length)
                 {
-                    var path = parts[0];
-                    var sha = parts[1];
-                    var mode = parts.Length >= 3 ? parts[2] : "100644";
-                    index[path] = new IndexEntry { Path = path, Sha = sha, Mode = mode };
+                    break;
                 }
+
+                var ctimeSeconds = BitConverter.ToUInt32(data.Skip(offset).Take(4).Reverse().ToArray(), 0);
+                var ctimeNanos = BitConverter.ToUInt32(data.Skip(offset + 4).Take(4).Reverse().ToArray(), 0);
+                var mtimeSeconds = BitConverter.ToUInt32(data.Skip(offset + 8).Take(4).Reverse().ToArray(), 0);
+                var mtimeNanos = BitConverter.ToUInt32(data.Skip(offset + 12).Take(4).Reverse().ToArray(), 0);
+                var dev = BitConverter.ToUInt32(data.Skip(offset + 16).Take(4).Reverse().ToArray(), 0);
+                var ino = BitConverter.ToUInt32(data.Skip(offset + 20).Take(4).Reverse().ToArray(), 0);
+                var modeValue = BitConverter.ToUInt32(data.Skip(offset + 24).Take(4).Reverse().ToArray(), 0);
+                var mode = Convert.ToString(modeValue, 8);
+                var uid = BitConverter.ToUInt32(data.Skip(offset + 28).Take(4).Reverse().ToArray(), 0);
+                var gid = BitConverter.ToUInt32(data.Skip(offset + 32).Take(4).Reverse().ToArray(), 0);
+                var size = BitConverter.ToUInt32(data.Skip(offset + 36).Take(4).Reverse().ToArray(), 0);
+
+                var shaBytes = data.Skip(offset + 40).Take(20).ToArray();
+                var sha = Convert.ToHexString(shaBytes).ToLowerInvariant();
+
+                var flags = BitConverter.ToUInt16(data.Skip(offset + 60).Take(2).Reverse().ToArray(), 0);
+                var pathLength = flags & 0x0FFF;
+
+                if (offset + 62 + pathLength > data.Length)
+                {
+                    break;
+                }
+
+                var path = Encoding.UTF8.GetString(data, offset + 62, pathLength);
+
+                var entryLength = 62 + pathLength + 1;
+                var paddingLength = (8 - (entryLength % 8)) % 8;
+                offset += entryLength + paddingLength;
+
+                index[path] = new IndexEntry
+                {
+                    Path = path,
+                    Sha = sha,
+                    Mode = mode,
+                    Size = size,
+                    CtimeSeconds = ctimeSeconds,
+                    CtimeNanos = ctimeNanos,
+                    MtimeSeconds = mtimeSeconds,
+                    MtimeNanos = mtimeNanos,
+                    Dev = dev,
+                    Ino = ino,
+                    Uid = uid,
+                    Gid = gid
+                };
             }
         }
         catch
@@ -60,14 +113,74 @@ public static class Utils
 
     public static async Task WriteIndex(string indexPath, Dictionary<string, IndexEntry> index)
     {
-        var lines = new List<string>();
+        var entries = index.Values.OrderBy(e => e.Path).ToList();
 
-        foreach (var entry in index.Values)
+        var header = new List<byte>();
+        header.AddRange(Encoding.ASCII.GetBytes("DIRC"));
+        header.AddRange(BitConverter.GetBytes(2).Reverse());
+        header.AddRange(BitConverter.GetBytes(entries.Count).Reverse());
+
+        var entryBuffers = new List<byte[]>();
+
+        foreach (var entry in entries)
         {
-            lines.Add($"{entry.Path}\t{entry.Sha}\t{entry.Mode}");
+            var entryData = new byte[62 + entry.Path.Length + 1];
+
+            var ctimeSecondsBytes = BitConverter.GetBytes(entry.CtimeSeconds).Reverse().ToArray();
+            var ctimeNanosBytes = BitConverter.GetBytes(entry.CtimeNanos).Reverse().ToArray();
+            var mtimeSecondsBytes = BitConverter.GetBytes(entry.MtimeSeconds).Reverse().ToArray();
+            var mtimeNanosBytes = BitConverter.GetBytes(entry.MtimeNanos).Reverse().ToArray();
+            var devBytes = BitConverter.GetBytes(entry.Dev).Reverse().ToArray();
+            var inoBytes = BitConverter.GetBytes(entry.Ino).Reverse().ToArray();
+            var modeValue = Convert.ToUInt32(entry.Mode, 8);
+            var modeBytes = BitConverter.GetBytes(modeValue).Reverse().ToArray();
+            var uidBytes = BitConverter.GetBytes(entry.Uid).Reverse().ToArray();
+            var gidBytes = BitConverter.GetBytes(entry.Gid).Reverse().ToArray();
+            var sizeBytes = BitConverter.GetBytes(entry.Size).Reverse().ToArray();
+
+            Array.Copy(ctimeSecondsBytes, 0, entryData, 0, 4);
+            Array.Copy(ctimeNanosBytes, 0, entryData, 4, 4);
+            Array.Copy(mtimeSecondsBytes, 0, entryData, 8, 4);
+            Array.Copy(mtimeNanosBytes, 0, entryData, 12, 4);
+            Array.Copy(devBytes, 0, entryData, 16, 4);
+            Array.Copy(inoBytes, 0, entryData, 20, 4);
+            Array.Copy(modeBytes, 0, entryData, 24, 4);
+            Array.Copy(uidBytes, 0, entryData, 28, 4);
+            Array.Copy(gidBytes, 0, entryData, 32, 4);
+            Array.Copy(sizeBytes, 0, entryData, 36, 4);
+
+            var shaBytes = Convert.FromHexString(entry.Sha);
+            Array.Copy(shaBytes, 0, entryData, 40, 20);
+
+            var flags = (ushort)Math.Min(entry.Path.Length, 0x0FFF);
+            var flagsBytes = BitConverter.GetBytes(flags).Reverse().ToArray();
+            Array.Copy(flagsBytes, 0, entryData, 60, 2);
+
+            var pathBytes = Encoding.UTF8.GetBytes(entry.Path);
+            Array.Copy(pathBytes, 0, entryData, 62, pathBytes.Length);
+            entryData[62 + pathBytes.Length] = 0;
+
+            var entryLength = 62 + entry.Path.Length + 1;
+            var paddingLength = (8 - (entryLength % 8)) % 8;
+            var padding = new byte[paddingLength];
+
+            var paddedEntry = new byte[entryData.Length + padding.Length];
+            Array.Copy(entryData, 0, paddedEntry, 0, entryData.Length);
+            Array.Copy(padding, 0, paddedEntry, entryData.Length, padding.Length);
+
+            entryBuffers.Add(paddedEntry);
         }
 
-        await File.WriteAllTextAsync(indexPath, string.Join('\n', lines) + '\n');
+        var content = header.Concat(entryBuffers.SelectMany(b => b)).ToArray();
+
+        using var sha1 = SHA1.Create();
+        var checksum = sha1.ComputeHash(content);
+
+        var finalBuffer = new byte[content.Length + checksum.Length];
+        Array.Copy(content, 0, finalBuffer, 0, content.Length);
+        Array.Copy(checksum, 0, finalBuffer, content.Length, checksum.Length);
+
+        await File.WriteAllBytesAsync(indexPath, finalBuffer);
     }
 
     public static List<string> GetWorkingFiles(string path, IgnoreParser? gitignore = null)

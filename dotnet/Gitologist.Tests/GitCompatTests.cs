@@ -276,6 +276,42 @@ public class GitCompatTests
     }
 
     [TestMethod]
+    public async Task ShouldCreateAnIndexThatGitCanRead()
+    {
+        var ourDir = Path.Combine(_baseDir, "our-add");
+        Directory.CreateDirectory(ourDir);
+        await Init.InitRepo(ourDir);
+
+        await File.WriteAllTextAsync(Path.Combine(ourDir, "test.txt"), "test content");
+        await File.WriteAllTextAsync(Path.Combine(ourDir, "test 2.txt"), "test content 2");
+        await Add.AddFiles(ourDir, new[] { "test.txt", "test 2.txt" });
+
+        string? gitStatus = null;
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "status",
+                WorkingDirectory = ourDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var process = Process.Start(psi);
+            gitStatus = process?.StandardOutput.ReadToEnd();
+            process?.WaitForExit();
+        }
+        catch
+        {
+        }
+
+        Assert.IsNotNull(gitStatus);
+        Assert.IsTrue(gitStatus.Contains("new file:   test.txt"));
+        Assert.IsTrue(gitStatus.Contains("new file:   test 2.txt"));
+    }
+
+    [TestMethod]
     public async Task ShouldCreateCommitsThatGitCanRead()
     {
         var ourDir = Path.Combine(_baseDir, "our-commit");
