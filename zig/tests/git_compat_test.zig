@@ -570,3 +570,136 @@ test "should create repo structure like git clone" {
     // Clean up git clone
     try cwd.deleteTree(io, their_clone);
 }
+
+test "should create same directory structure as git init" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const our_dir = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-compat-init-ours" });
+    defer allocator.free(our_dir);
+
+    const their_dir = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-compat-init-theirs" });
+    defer allocator.free(their_dir);
+
+    const cwd = std.Io.Dir.cwd();
+
+    // Our implementation
+    try cwd.createDirPath(io, our_dir);
+    defer cwd.deleteTree(io, our_dir) catch {};
+
+    try init(io, allocator, our_dir);
+
+    // Real git
+    try cwd.createDirPath(io, their_dir);
+    defer cwd.deleteTree(io, their_dir) catch {};
+
+    const init_result = try std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "git", "init" },
+        .cwd = .{ .path = their_dir },
+    });
+    defer {
+        allocator.free(init_result.stdout);
+        allocator.free(init_result.stderr);
+    }
+
+    switch (init_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git init killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
+    const our_git_dir = try std.fs.path.join(allocator, &[_][]const u8{ our_dir, ".git" });
+    defer allocator.free(our_git_dir);
+
+    const their_git_dir = try std.fs.path.join(allocator, &[_][]const u8{ their_dir, ".git" });
+    defer allocator.free(their_git_dir);
+
+    // Both should have .git directory
+    const our_git = try cwd.openDir(io, our_git_dir, .{});
+    defer our_git.close(io);
+
+    const their_git = try cwd.openDir(io, their_git_dir, .{});
+    defer their_git.close(io);
+
+    // Both should have objects directory
+    const our_objects = try our_git.openDir(io, "objects", .{});
+    defer our_objects.close(io);
+
+    const their_objects = try their_git.openDir(io, "objects", .{});
+    defer their_objects.close(io);
+
+    // Both should have refs/heads directory
+    var our_refs = try our_git.openDir(io, "refs", .{});
+    defer our_refs.close(io);
+
+    var their_refs = try their_git.openDir(io, "refs", .{});
+    defer their_refs.close(io);
+
+    _ = try our_refs.openDir(io, "heads", .{});
+    _ = try their_refs.openDir(io, "heads", .{});
+
+    // Both should have refs/tags directory
+    _ = try our_refs.openDir(io, "tags", .{});
+    _ = try their_refs.openDir(io, "tags", .{});
+}
+
+test "should create HEAD pointing to same ref format as git init" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const our_dir = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-compat-head-ours" });
+    defer allocator.free(our_dir);
+
+    const their_dir = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-compat-head-theirs" });
+    defer allocator.free(their_dir);
+
+    const cwd = std.Io.Dir.cwd();
+
+    // Our implementation
+    try cwd.createDirPath(io, our_dir);
+    defer cwd.deleteTree(io, our_dir) catch {};
+
+    try init(io, allocator, our_dir);
+
+    // Real git
+    try cwd.createDirPath(io, their_dir);
+    defer cwd.deleteTree(io, their_dir) catch {};
+
+    const init_result = try std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "git", "init" },
+        .cwd = .{ .path = their_dir },
+    });
+    defer {
+        allocator.free(init_result.stdout);
+        allocator.free(init_result.stderr);
+    }
+
+    switch (init_result.term) {
+        .exited => |code| try std.testing.expectEqual(@as(u32, 0), code),
+        .signal => |sig| {
+            std.debug.print("git init killed by signal {d}\n", .{sig});
+            return error.ProcessSignaled;
+        },
+        else => unreachable,
+    }
+
+    const our_head_path = try std.fs.path.join(allocator, &[_][]const u8{ our_dir, ".git", "HEAD" });
+    defer allocator.free(our_head_path);
+
+    const their_head_path = try std.fs.path.join(allocator, &[_][]const u8{ their_dir, ".git", "HEAD" });
+    defer allocator.free(their_head_path);
+
+    const our_head = try cwd.readFileAlloc(io, our_head_path, allocator, .unlimited);
+    defer allocator.free(our_head);
+
+    const their_head = try cwd.readFileAlloc(io, their_head_path, allocator, .unlimited);
+    defer allocator.free(their_head);
+
+    // Both should point to a branch (usually main or master)
+    try std.testing.expect(std.mem.startsWith(u8, our_head, "ref: refs/heads/"));
+    try std.testing.expect(std.mem.startsWith(u8, their_head, "ref: refs/heads/"));
+}
+
