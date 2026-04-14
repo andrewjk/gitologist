@@ -309,4 +309,138 @@ public class PushTests
 
         Assert.AreEqual(localSha, remoteSha);
     }
+
+    [TestMethod]
+    public async Task ShouldCreateNewBranchSectionWithRemoteAndMergeSettings()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+
+        await Push.SetUpstreamBranch(_testDir, "origin", "feature");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("[branch \"feature\"]"));
+        Assert.IsTrue(configContent.Contains("remote = origin"));
+        Assert.IsTrue(configContent.Contains("merge = refs/heads/feature"));
+    }
+
+    [TestMethod]
+    public async Task ShouldAddRemoteAndMergeSettingsToExistingBranchSection()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        await File.WriteAllTextAsync(
+            configPath,
+            "[branch \"feature\"]\n\tdescription = test branch\n"
+        );
+
+        await Push.SetUpstreamBranch(_testDir, "upstream", "feature");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("[branch \"feature\"]"));
+        Assert.IsTrue(configContent.Contains("description = test branch"));
+        Assert.IsTrue(configContent.Contains("remote = upstream"));
+        Assert.IsTrue(configContent.Contains("merge = refs/heads/feature"));
+    }
+
+    [TestMethod]
+    public async Task ShouldUpdateExistingRemoteAndMergeSettings()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        await File.WriteAllTextAsync(
+            configPath,
+            "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n"
+        );
+
+        await Push.SetUpstreamBranch(_testDir, "upstream", "main");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("[branch \"main\"]"));
+        Assert.IsTrue(configContent.Contains("remote = upstream"));
+        Assert.IsTrue(configContent.Contains("merge = refs/heads/main"));
+    }
+
+    [TestMethod]
+    public async Task ShouldHandleMultipleBranchesCorrectly()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        await File.WriteAllTextAsync(
+            configPath,
+            "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n"
+        );
+
+        await Push.SetUpstreamBranch(_testDir, "upstream", "feature");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("[branch \"main\"]"));
+        Assert.IsTrue(configContent.Contains("remote = origin"));
+        Assert.IsTrue(configContent.Contains("[branch \"feature\"]"));
+        Assert.IsTrue(configContent.Contains("remote = upstream"));
+        Assert.IsTrue(configContent.Contains("merge = refs/heads/feature"));
+    }
+
+    [TestMethod]
+    public async Task ShouldPreserveOtherConfigSections()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        await File.WriteAllTextAsync(
+            configPath,
+            "[core]\n\trepositoryformatversion = 0\n\n[remote \"origin\"]\n\turl = test.git\n"
+        );
+
+        await Push.SetUpstreamBranch(_testDir, "origin", "main");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("[core]"));
+        Assert.IsTrue(configContent.Contains("repositoryformatversion = 0"));
+        Assert.IsTrue(configContent.Contains("[remote \"origin\"]"));
+        Assert.IsTrue(configContent.Contains("url = test.git"));
+        Assert.IsTrue(configContent.Contains("[branch \"main\"]"));
+    }
+
+    [TestMethod]
+    public async Task ShouldHandleEmptyConfigFile()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        await File.WriteAllTextAsync(configPath, "");
+
+        await Push.SetUpstreamBranch(_testDir, "origin", "main");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("[branch \"main\"]"));
+        Assert.IsTrue(configContent.Contains("remote = origin"));
+        Assert.IsTrue(configContent.Contains("merge = refs/heads/main"));
+    }
+
+    [TestMethod]
+    public async Task ShouldHandleMissingConfigFile()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        File.Delete(configPath);
+
+        await Push.SetUpstreamBranch(_testDir, "origin", "main");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("[branch \"main\"]"));
+        Assert.IsTrue(configContent.Contains("remote = origin"));
+        Assert.IsTrue(configContent.Contains("merge = refs/heads/main"));
+    }
+
+    [TestMethod]
+    public async Task ShouldUseTabsForIndentation()
+    {
+        await Init.InitRepo(_testDir);
+        var configPath = Path.Combine(_testDir, ".git", "config");
+
+        await Push.SetUpstreamBranch(_testDir, "origin", "main");
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        Assert.IsTrue(configContent.Contains("\tremote = origin"));
+        Assert.IsTrue(configContent.Contains("\tmerge = refs/heads/main"));
+    }
 }

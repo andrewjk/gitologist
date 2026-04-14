@@ -182,3 +182,71 @@ private func buildPushRequest(oldSha: String, newSha: String, branchName: String
 
 	return lines.reduce(Data(), +)
 }
+
+func setUpstreamBranch(at path: String, remoteName: String, branchName: String) async throws {
+	let configPath = URL(fileURLWithPath: path).appendingPathComponent(".git").appendingPathComponent("config")
+
+	var configContent = ""
+	if FileManager.default.fileExists(atPath: configPath.path) {
+		configContent = try String(contentsOf: configPath, encoding: .utf8)
+	}
+
+	let lines = configContent.split(separator: "\n", omittingEmptySubsequences: false)
+
+	var inBranchSection = false
+	var foundBranchSection = false
+	var insertIndex = -1
+
+	for (index, line) in lines.enumerated() {
+		let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+		guard let branchRegex = try? NSRegularExpression(pattern: "^\\[branch \"([^\"]+)\"\\]$") else {
+			continue
+		}
+		let nsRange = NSRange(trimmed.startIndex..., in: trimmed)
+
+		if let match = branchRegex.firstMatch(in: trimmed, options: [], range: nsRange) {
+			if let nameRange = Range(match.range(at: 1), in: trimmed) {
+				let name = String(trimmed[nameRange])
+				if name == branchName {
+					inBranchSection = true
+					foundBranchSection = true
+				} else {
+					inBranchSection = false
+				}
+			}
+			continue
+		}
+
+		if inBranchSection {
+			if trimmed.hasPrefix("remote =") || trimmed.hasPrefix("merge =") {
+				continue
+			}
+			if insertIndex == -1 {
+				insertIndex = index
+			}
+		} else {
+			if trimmed.hasPrefix("["), insertIndex == -1 {
+				insertIndex = index
+			}
+		}
+	}
+
+	var outputLines: [String] = lines.map { String($0) }
+
+	if !foundBranchSection {
+		outputLines.append("")
+		outputLines.append("[branch \"\(branchName)\"]")
+		outputLines.append("\tremote = \(remoteName)")
+		outputLines.append("\tmerge = refs/heads/\(branchName)")
+	} else {
+		if insertIndex == -1 {
+			insertIndex = outputLines.count
+		}
+		outputLines.insert("\tremote = \(remoteName)", at: insertIndex)
+		outputLines.insert("\tmerge = refs/heads/\(branchName)", at: insertIndex + 1)
+	}
+
+	let newConfigContent = outputLines.joined(separator: "\n")
+	try newConfigContent.write(to: configPath, atomically: true, encoding: .utf8)
+}

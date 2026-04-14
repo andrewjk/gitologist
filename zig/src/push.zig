@@ -336,3 +336,93 @@ fn buildPushRequest(allocator: std.mem.Allocator, old_sha: []const u8, new_sha: 
 
     return result.toOwnedSlice(allocator);
 }
+
+pub fn setUpstreamBranch(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name: []const u8, branch_name: []const u8) !void {
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    var config_content: []u8 = "";
+    var free_config_content = false;
+
+    if (cwd.access(io, config_path, .{})) |_| {
+        config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+        free_config_content = true;
+    } else |err| {
+        if (err != error.FileNotFound) {
+            return err;
+        }
+    }
+    defer if (free_config_content) allocator.free(config_content);
+
+    var lines = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable;
+    defer {
+        for (lines.items) |line| allocator.free(line);
+        lines.deinit(allocator);
+    }
+
+    var line_iter = std.mem.splitScalar(u8, config_content, '\n');
+    while (line_iter.next()) |line| {
+        try lines.append(allocator, try allocator.dupe(u8, line));
+    }
+
+    var in_branch_section = false;
+    var found_branch_section = false;
+    var insert_index: ?usize = null;
+
+    const branch_section_pattern = try std.fmt.allocPrint(allocator, "[branch \"{s}\"]", .{branch_name});
+    defer allocator.free(branch_section_pattern);
+
+    for (lines.items, 0..) |line, i| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+
+        if (std.mem.eql(u8, trimmed, branch_section_pattern)) {
+            in_branch_section = true;
+            found_branch_section = true;
+            continue;
+        }
+
+        if (in_branch_section) {
+            if (std.mem.startsWith(u8, trimmed, "remote =") or std.mem.startsWith(u8, trimmed, "merge =")) {
+                continue;
+            }
+            if (insert_index == null) {
+                insert_index = i;
+            }
+        } else {
+            if (std.mem.startsWith(u8, trimmed, "[") and insert_index == null) {
+                insert_index = i;
+            }
+        }
+    }
+
+    const remote_line = try std.fmt.allocPrint(allocator, "\tremote = {s}", .{remote_name});
+    defer allocator.free(remote_line);
+
+    const merge_line = try std.fmt.allocPrint(allocator, "\tmerge = refs/heads/{s}", .{branch_name});
+    defer allocator.free(merge_line);
+
+    if (!found_branch_section) {
+        try lines.append(allocator, try allocator.dupe(u8, ""));
+        try lines.append(allocator, try allocator.dupe(u8, branch_section_pattern));
+        try lines.append(allocator, try allocator.dupe(u8, remote_line));
+        try lines.append(allocator, try allocator.dupe(u8, merge_line));
+    } else {
+        const idx = insert_index orelse lines.items.len;
+        try lines.insert(allocator, idx, try allocator.dupe(u8, merge_line));
+        try lines.insert(allocator, idx, try allocator.dupe(u8, remote_line));
+    }
+
+    var result = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer result.deinit(allocator);
+
+    for (lines.items, 0..) |line, i| {
+        try result.appendSlice(allocator, line);
+        if (i < lines.items.len - 1) {
+            try result.append(allocator, '\n');
+        }
+    }
+
+    try cwd.writeFile(io, .{ .sub_path = config_path, .data = result.items });
+}

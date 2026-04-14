@@ -169,4 +169,79 @@ public static class Push
 
         return lines.SelectMany(x => x).ToArray();
     }
+
+    public static async Task SetUpstreamBranch(string path, string remoteName, string branchName)
+    {
+        var configPath = Path.Combine(path, ".git", "config");
+
+        string configContent = "";
+        if (File.Exists(configPath))
+        {
+            configContent = await File.ReadAllTextAsync(configPath);
+        }
+
+        var lines = configContent.Split('\n').ToList();
+        var inBranchSection = false;
+        var foundBranchSection = false;
+        var insertIndex = -1;
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            var trimmed = line.Trim();
+
+            var sectionMatch = Regex.Match(trimmed, @"^\[branch\s+""([^""]+)""\]$");
+            if (sectionMatch.Success)
+            {
+                if (sectionMatch.Groups[1].Value == branchName)
+                {
+                    inBranchSection = true;
+                    foundBranchSection = true;
+                }
+                else
+                {
+                    inBranchSection = false;
+                }
+                continue;
+            }
+
+            if (inBranchSection)
+            {
+                if (trimmed.StartsWith("remote =") || trimmed.StartsWith("merge ="))
+                {
+                    continue;
+                }
+                if (insertIndex == -1)
+                {
+                    insertIndex = i;
+                }
+            }
+            else
+            {
+                if (trimmed.StartsWith("[") && insertIndex == -1)
+                {
+                    insertIndex = i;
+                }
+            }
+        }
+
+        if (!foundBranchSection)
+        {
+            lines.Add("");
+            lines.Add($"[branch \"{branchName}\"]");
+            lines.Add($"\tremote = {remoteName}");
+            lines.Add($"\tmerge = refs/heads/{branchName}");
+        }
+        else
+        {
+            if (insertIndex == -1)
+            {
+                insertIndex = lines.Count;
+            }
+            lines.Insert(insertIndex, $"\tmerge = refs/heads/{branchName}");
+            lines.Insert(insertIndex, $"\tremote = {remoteName}");
+        }
+
+        await File.WriteAllTextAsync(configPath, string.Join('\n', lines));
+    }
 }

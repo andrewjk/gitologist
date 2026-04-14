@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import { add } from "../src/add";
 import { commit } from "../src/commit";
 import { init } from "../src/init";
-import { push } from "../src/push";
+import { push, setUpstreamBranch } from "../src/push";
 
 describe("push", () => {
 	let testDir: string;
@@ -163,5 +163,132 @@ describe("push", () => {
 		const localSha = localBranchContent.trim();
 
 		expect(remoteSha).toBe(localSha);
+	});
+});
+
+describe("setUpstreamBranch", () => {
+	let testDir: string;
+
+	beforeEach(async () => {
+		testDir = join(
+			tmpdir(),
+			`gitologist-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		await mkdir(testDir, { recursive: true });
+		await init(testDir);
+	});
+
+	afterEach(async () => {
+		await rm(testDir, { recursive: true, force: true });
+	});
+
+	it("should create new branch section with remote and merge settings", async () => {
+		const configPath = join(testDir, ".git", "config");
+
+		await setUpstreamBranch(testDir, "origin", "feature");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain('[branch "feature"]');
+		expect(configContent).toContain("remote = origin");
+		expect(configContent).toContain("merge = refs/heads/feature");
+	});
+
+	it("should add remote and merge settings to existing branch section", async () => {
+		const configPath = join(testDir, ".git", "config");
+		await writeFile(configPath, '[branch "feature"]\n\tdescription = test branch\n', "utf-8");
+
+		await setUpstreamBranch(testDir, "upstream", "feature");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain('[branch "feature"]');
+		expect(configContent).toContain("description = test branch");
+		expect(configContent).toContain("remote = upstream");
+		expect(configContent).toContain("merge = refs/heads/feature");
+	});
+
+	it("should update existing remote and merge settings", async () => {
+		const configPath = join(testDir, ".git", "config");
+		await writeFile(
+			configPath,
+			'[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/main\n',
+			"utf-8",
+		);
+
+		await setUpstreamBranch(testDir, "upstream", "main");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain('[branch "main"]');
+		expect(configContent).toContain("remote = upstream");
+		expect(configContent).toContain("merge = refs/heads/main");
+	});
+
+	it("should handle multiple branches correctly", async () => {
+		const configPath = join(testDir, ".git", "config");
+		await writeFile(
+			configPath,
+			'[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/main\n',
+			"utf-8",
+		);
+
+		await setUpstreamBranch(testDir, "upstream", "feature");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain('[branch "main"]');
+		expect(configContent).toContain("remote = origin");
+		expect(configContent).toContain('[branch "feature"]');
+		expect(configContent).toContain("remote = upstream");
+		expect(configContent).toContain("merge = refs/heads/feature");
+	});
+
+	it("should preserve other config sections", async () => {
+		const configPath = join(testDir, ".git", "config");
+		await writeFile(
+			configPath,
+			'[core]\n\trepositoryformatversion = 0\n\n[remote "origin"]\n\turl = test.git\n',
+			"utf-8",
+		);
+
+		await setUpstreamBranch(testDir, "origin", "main");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain("[core]");
+		expect(configContent).toContain("repositoryformatversion = 0");
+		expect(configContent).toContain('[remote "origin"]');
+		expect(configContent).toContain("url = test.git");
+		expect(configContent).toContain('[branch "main"]');
+	});
+
+	it("should handle empty config file", async () => {
+		const configPath = join(testDir, ".git", "config");
+		await writeFile(configPath, "", "utf-8");
+
+		await setUpstreamBranch(testDir, "origin", "main");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain('[branch "main"]');
+		expect(configContent).toContain("remote = origin");
+		expect(configContent).toContain("merge = refs/heads/main");
+	});
+
+	it("should handle missing config file", async () => {
+		const configPath = join(testDir, ".git", "config");
+		await rm(configPath, { force: true });
+
+		await setUpstreamBranch(testDir, "origin", "main");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain('[branch "main"]');
+		expect(configContent).toContain("remote = origin");
+		expect(configContent).toContain("merge = refs/heads/main");
+	});
+
+	it("should use tabs for indentation", async () => {
+		const configPath = join(testDir, ".git", "config");
+
+		await setUpstreamBranch(testDir, "origin", "main");
+
+		const configContent = await readFile(configPath, "utf-8");
+		expect(configContent).toContain("\tremote = origin");
+		expect(configContent).toContain("\tmerge = refs/heads/main");
 	});
 });

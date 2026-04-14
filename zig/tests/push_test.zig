@@ -4,6 +4,7 @@ const init = @import("gitologist").init;
 const add = @import("gitologist").add;
 const commit = @import("gitologist").commit;
 const push = @import("gitologist").push;
+const setUpstreamBranch = @import("gitologist").setUpstreamBranch;
 
 test "should push to default remote and branch" {
     const io = std.testing.io;
@@ -417,4 +418,236 @@ test "should handle multiple pushes to same branch" {
     const local_sha = std.mem.trim(u8, local_branch_content, &std.ascii.whitespace);
 
     try std.testing.expectEqualStrings(remote_sha, local_sha);
+}
+
+test "should create new branch section with remote and merge settings" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-1" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try setUpstreamBranch(io, allocator, tmp_path, "origin", "feature");
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"feature\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "remote = origin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "merge = refs/heads/feature") != null);
+}
+
+test "should add remote and merge settings to existing branch section" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-2" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    try cwd.writeFile(io, .{ .sub_path = config_path, .data = "[branch \"feature\"]\n\tdescription = test branch\n" });
+
+    try setUpstreamBranch(io, allocator, tmp_path, "upstream", "feature");
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"feature\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "description = test branch") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "remote = upstream") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "merge = refs/heads/feature") != null);
+}
+
+test "should update existing remote and merge settings" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-3" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    try cwd.writeFile(io, .{ .sub_path = config_path, .data = "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n" });
+
+    try setUpstreamBranch(io, allocator, tmp_path, "upstream", "main");
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"main\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "remote = upstream") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "merge = refs/heads/main") != null);
+}
+
+test "should handle multiple branches correctly" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-4" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    try cwd.writeFile(io, .{ .sub_path = config_path, .data = "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n" });
+
+    try setUpstreamBranch(io, allocator, tmp_path, "upstream", "feature");
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"main\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "remote = origin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"feature\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "remote = upstream") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "merge = refs/heads/feature") != null);
+}
+
+test "should preserve other config sections" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-5" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    try cwd.writeFile(io, .{ .sub_path = config_path, .data = "[core]\n\trepositoryformatversion = 0\n\n[remote \"origin\"]\n\turl = test.git\n" });
+
+    try setUpstreamBranch(io, allocator, tmp_path, "origin", "main");
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[core]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "repositoryformatversion = 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[remote \"origin\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "url = test.git") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"main\"]") != null);
+}
+
+test "should handle empty config file" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-6" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    try cwd.writeFile(io, .{ .sub_path = config_path, .data = "" });
+
+    try setUpstreamBranch(io, allocator, tmp_path, "origin", "main");
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"main\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "remote = origin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "merge = refs/heads/main") != null);
+}
+
+test "should handle missing config file" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-7" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    try cwd.deleteFile(io, config_path);
+
+    try setUpstreamBranch(io, allocator, tmp_path, "origin", "main");
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "[branch \"main\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "remote = origin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "merge = refs/heads/main") != null);
+}
+
+test "should use tabs for indentation" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-push-test-setupupstream-8" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try setUpstreamBranch(io, allocator, tmp_path, "origin", "main");
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "config" });
+    defer allocator.free(config_path);
+
+    const config_content = try cwd.readFileAlloc(io, config_path, allocator, .unlimited);
+    defer allocator.free(config_content);
+
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "\tremote = origin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_content, "\tmerge = refs/heads/main") != null);
 }

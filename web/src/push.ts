@@ -161,6 +161,67 @@ function buildPushRequest(
 	return Buffer.concat(lines);
 }
 
+export async function setUpstreamBranch(
+	path: string,
+	remoteName: string,
+	branchName: string,
+): Promise<void> {
+	const configPath = join(path, ".git", "config");
+
+	let configContent = "";
+	if (existsSync(configPath)) {
+		configContent = await readFile(configPath, "utf-8");
+	}
+
+	const lines = configContent.split("\n");
+	let inBranchSection = false;
+	let foundBranchSection = false;
+	let insertIndex = -1;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const trimmed = line.trim();
+
+		const sectionMatch = trimmed.match(/^\[branch\s+"([^"]+)"\]$/);
+		if (sectionMatch) {
+			if (sectionMatch[1] === branchName) {
+				inBranchSection = true;
+				foundBranchSection = true;
+			} else {
+				inBranchSection = false;
+			}
+			continue;
+		}
+
+		if (inBranchSection) {
+			if (trimmed.startsWith("remote =") || trimmed.startsWith("merge =")) {
+				continue;
+			}
+			if (insertIndex === -1) {
+				insertIndex = i;
+			}
+		} else {
+			if (trimmed.startsWith("[") && insertIndex === -1) {
+				insertIndex = i;
+			}
+		}
+	}
+
+	if (!foundBranchSection) {
+		lines.push("");
+		lines.push(`[branch "${branchName}"]`);
+		lines.push(`\tremote = ${remoteName}`);
+		lines.push(`\tmerge = refs/heads/${branchName}`);
+	} else {
+		if (insertIndex === -1) {
+			insertIndex = lines.length;
+		}
+		lines.splice(insertIndex, 0, `\tremote = ${remoteName}`, `\tmerge = refs/heads/${branchName}`);
+	}
+
+	await writeFile(configPath, lines.join("\n"), "utf-8");
+}
+
 async function getRemoteUrl(gitDir: string, remoteName: string): Promise<string | null> {
 	const configPath = join(gitDir, "config");
 

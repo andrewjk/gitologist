@@ -6,7 +6,7 @@ import { IgnoreParser } from "./IgnoreParser.ts";
 import { init } from "./init.ts";
 import { merge } from "./merge.ts";
 import { pull } from "./pull.ts";
-import { push } from "./push.ts";
+import { push, setUpstreamBranch } from "./push.ts";
 import { hasRemote, remoteAdd } from "./remote.ts";
 import { restore } from "./restore.ts";
 import { status } from "./status.ts";
@@ -20,6 +20,7 @@ export {
 	merge,
 	pull,
 	push,
+	setUpstreamBranch,
 	hasRemote,
 	remoteAdd,
 	restore,

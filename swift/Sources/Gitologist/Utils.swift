@@ -426,7 +426,7 @@ func extractTreeFromCommit(_ commitData: String) throws -> String {
 }
 
 func parseTreeEntries(_ treeData: String) throws -> [TreeEntry] {
-	guard let firstNullIndex = treeData.firstIndex(of: "\n") else {
+	guard let _ = treeData.firstIndex(of: "\n") else {
 		return []
 	}
 

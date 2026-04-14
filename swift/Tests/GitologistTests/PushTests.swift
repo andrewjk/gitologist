@@ -213,3 +213,167 @@ struct PushTests {
 		try? fileManager.removeItem(at: testDirPath)
 	}
 }
+
+struct SetUpstreamBranchTests {
+	var testDir: URL {
+		let tempDir = FileManager.default.temporaryDirectory
+		let testName = "gitologist-test-\(Date().timeIntervalSince1970)-\(UUID().uuidString.prefix(8))"
+		return tempDir.appendingPathComponent(testName)
+	}
+
+	let fileManager = FileManager.default
+
+	init() {}
+
+	@Test func shouldCreateNewBranchSectionWithRemoteAndMergeSettings() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "origin", branchName: "feature")
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("[branch \"feature\"]"))
+		#expect(configContent.contains("remote = origin"))
+		#expect(configContent.contains("merge = refs/heads/feature"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldAddRemoteAndMergeSettingsToExistingBranchSection() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		try "[branch \"feature\"]\n\tdescription = test branch\n".write(to: configPath, atomically: true, encoding: .utf8)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "upstream", branchName: "feature")
+
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("[branch \"feature\"]"))
+		#expect(configContent.contains("description = test branch"))
+		#expect(configContent.contains("remote = upstream"))
+		#expect(configContent.contains("merge = refs/heads/feature"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldUpdateExistingRemoteAndMergeSettings() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		try "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n".write(to: configPath, atomically: true, encoding: .utf8)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "upstream", branchName: "main")
+
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("[branch \"main\"]"))
+		#expect(configContent.contains("remote = upstream"))
+		#expect(configContent.contains("merge = refs/heads/main"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldHandleMultipleBranchesCorrectly() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		try "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n".write(to: configPath, atomically: true, encoding: .utf8)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "upstream", branchName: "feature")
+
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("[branch \"main\"]"))
+		#expect(configContent.contains("remote = origin"))
+		#expect(configContent.contains("[branch \"feature\"]"))
+		#expect(configContent.contains("remote = upstream"))
+		#expect(configContent.contains("merge = refs/heads/feature"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldPreserveOtherConfigSections() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		try "[core]\n\trepositoryformatversion = 0\n\n[remote \"origin\"]\n\turl = test.git\n".write(to: configPath, atomically: true, encoding: .utf8)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "origin", branchName: "main")
+
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("[core]"))
+		#expect(configContent.contains("repositoryformatversion = 0"))
+		#expect(configContent.contains("[remote \"origin\"]"))
+		#expect(configContent.contains("url = test.git"))
+		#expect(configContent.contains("[branch \"main\"]"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldHandleEmptyConfigFile() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		try "".write(to: configPath, atomically: true, encoding: .utf8)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "origin", branchName: "main")
+
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("[branch \"main\"]"))
+		#expect(configContent.contains("remote = origin"))
+		#expect(configContent.contains("merge = refs/heads/main"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldHandleMissingConfigFile() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		try? fileManager.removeItem(at: configPath)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "origin", branchName: "main")
+
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("[branch \"main\"]"))
+		#expect(configContent.contains("remote = origin"))
+		#expect(configContent.contains("merge = refs/heads/main"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldUseTabsForIndentation() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try await setUpstreamBranch(at: testDirPath.path, remoteName: "origin", branchName: "main")
+
+		let configPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("config")
+		let configContent = try String(contentsOf: configPath, encoding: .utf8)
+
+		#expect(configContent.contains("\tremote = origin"))
+		#expect(configContent.contains("\tmerge = refs/heads/main"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+}
