@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 
 import { init } from "../src/init";
-import { remoteAdd } from "../src/remote";
+import { remoteAdd, hasRemote } from "../src/remote";
 
 describe("remote", () => {
 	let testDir: string;
@@ -95,5 +95,29 @@ describe("remote", () => {
 
 		expect(newConfig).toContain(originalConfig.trim());
 		expect(newConfig).toContain('[remote "origin"]');
+	});
+
+	it("should return false when not a git repository", () => {
+		const nonGitDir = join(tmpdir(), `not-a-repo-${Date.now()}`);
+		expect(hasRemote(nonGitDir)).toBe(false);
+	});
+
+	it("should return false when remote does not exist", () => {
+		expect(hasRemote(testDir, "nonexistent")).toBe(false);
+	});
+
+	it("should return true when origin remote exists", async () => {
+		await remoteAdd(testDir, "origin", "https://github.com/user/repo.git");
+		expect(hasRemote(testDir)).toBe(true);
+	});
+
+	it("should return true when custom named remote exists", async () => {
+		await remoteAdd(testDir, "upstream", "https://github.com/original/repo.git");
+		expect(hasRemote(testDir, "upstream")).toBe(true);
+	});
+
+	it("should return false for different remote name", async () => {
+		await remoteAdd(testDir, "origin", "https://github.com/user/repo.git");
+		expect(hasRemote(testDir, "upstream")).toBe(false);
 	});
 });

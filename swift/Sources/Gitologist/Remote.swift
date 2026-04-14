@@ -47,6 +47,30 @@ func remoteAdd(at path: String, name: String, url: String) async throws {
 	try configContent.write(to: configPath, atomically: true, encoding: .utf8)
 }
 
+func hasRemote(at path: String, name: String = "origin") -> Bool {
+	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+
+	guard FileManager.default.fileExists(atPath: gitDir.path) else {
+		return false
+	}
+
+	let configPath = gitDir.appendingPathComponent("config")
+
+	guard FileManager.default.fileExists(atPath: configPath.path),
+	      let configContent = try? String(contentsOf: configPath, encoding: .utf8)
+	else {
+		return false
+	}
+
+	let remotePattern = "\\[remote \"\(name)\"\\]"
+	guard let regex = try? NSRegularExpression(pattern: remotePattern, options: []) else {
+		return false
+	}
+
+	let range = NSRange(location: 0, length: configContent.utf16.count)
+	return regex.firstMatch(in: configContent, options: [], range: range) != nil
+}
+
 func getRemoteUrl(at gitDir: String, remoteName: String) async -> String? {
 	let configPath = URL(fileURLWithPath: gitDir).appendingPathComponent("config")
 

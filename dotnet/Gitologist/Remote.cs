@@ -39,6 +39,37 @@ public static class Remote
         await File.WriteAllTextAsync(configPath, configContent);
     }
 
+    public static bool HasRemote(string path, string name = "origin")
+    {
+        var gitDir = Path.Combine(path, ".git");
+
+        if (!Directory.Exists(gitDir))
+        {
+            return false;
+        }
+
+        var configPath = Path.Combine(gitDir, "config");
+
+        if (!File.Exists(configPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var configContent = File.ReadAllText(configPath);
+            var remotePattern = new Regex(
+                $@"\[remote\s+""{name}""\]",
+                RegexOptions.Multiline
+            );
+            return remotePattern.IsMatch(configContent);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static async Task<string?> GetRemoteUrl(string gitDir, string remoteName)
     {
         var configPath = Path.Combine(gitDir, "config");

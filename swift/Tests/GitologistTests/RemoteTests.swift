@@ -123,4 +123,53 @@ struct RemoteTests {
 
 		try? fileManager.removeItem(at: testDirPath)
 	}
+
+	@Test func shouldReturnFalseWhenNotAGitRepository() {
+		let tempDir = FileManager.default.temporaryDirectory
+		let nonGitDir = tempDir.appendingPathComponent("not-a-repo-\(Date().timeIntervalSince1970)")
+		#expect(hasRemote(at: nonGitDir.path) == false)
+	}
+
+	@Test func shouldReturnFalseWhenRemoteDoesNotExist() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		#expect(hasRemote(at: testDirPath.path, name: "nonexistent") == false)
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldReturnTrueWhenOriginRemoteExists() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+		try await remoteAdd(at: testDirPath.path, name: "origin", url: "https://github.com/user/repo.git")
+
+		#expect(hasRemote(at: testDirPath.path) == true)
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldReturnTrueWhenCustomNamedRemoteExists() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+		try await remoteAdd(at: testDirPath.path, name: "upstream", url: "https://github.com/original/repo.git")
+
+		#expect(hasRemote(at: testDirPath.path, name: "upstream") == true)
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldReturnFalseForDifferentRemoteName() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+		try await remoteAdd(at: testDirPath.path, name: "origin", url: "https://github.com/user/repo.git")
+
+		#expect(hasRemote(at: testDirPath.path, name: "upstream") == false)
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
 }

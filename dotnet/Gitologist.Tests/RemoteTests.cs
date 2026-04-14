@@ -177,4 +177,57 @@ public class RemoteTests
         StringAssert.Contains(newConfig, originalConfig.Trim());
         StringAssert.Contains(newConfig, "[remote \"origin\"]");
     }
+
+    [TestMethod]
+    public void ShouldReturnFalseWhenNotAGitRepository()
+    {
+        var nonGitDir = Path.Combine(
+            Path.GetTempPath(),
+            $"not-a-repo-{DateTime.UtcNow.Ticks}"
+        );
+        Assert.IsFalse(Remote.HasRemote(nonGitDir));
+    }
+
+    [TestMethod]
+    public async Task ShouldReturnFalseWhenRemoteDoesNotExist()
+    {
+        await Init.InitRepo(_testDir);
+        Assert.IsFalse(Remote.HasRemote(_testDir, "nonexistent"));
+    }
+
+    [TestMethod]
+    public async Task ShouldReturnTrueWhenOriginRemoteExists()
+    {
+        await Init.InitRepo(_testDir);
+        await Remote.AddRemote(
+            _testDir,
+            "origin",
+            "https://github.com/user/repo.git"
+        );
+        Assert.IsTrue(Remote.HasRemote(_testDir));
+    }
+
+    [TestMethod]
+    public async Task ShouldReturnTrueWhenCustomNamedRemoteExists()
+    {
+        await Init.InitRepo(_testDir);
+        await Remote.AddRemote(
+            _testDir,
+            "upstream",
+            "https://github.com/original/repo.git"
+        );
+        Assert.IsTrue(Remote.HasRemote(_testDir, "upstream"));
+    }
+
+    [TestMethod]
+    public async Task ShouldReturnFalseForDifferentRemoteName()
+    {
+        await Init.InitRepo(_testDir);
+        await Remote.AddRemote(
+            _testDir,
+            "origin",
+            "https://github.com/user/repo.git"
+        );
+        Assert.IsFalse(Remote.HasRemote(_testDir, "upstream"));
+    }
 }

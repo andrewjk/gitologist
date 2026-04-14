@@ -7,8 +7,21 @@ import { init } from "./init.ts";
 import { merge } from "./merge.ts";
 import { pull } from "./pull.ts";
 import { push } from "./push.ts";
-import { remoteAdd } from "./remote.ts";
+import { hasRemote, remoteAdd } from "./remote.ts";
 import { restore } from "./restore.ts";
 import { status } from "./status.ts";
 
-export { add, commit, IgnoreParser, init, log, merge, pull, push, remoteAdd, restore, status };
+export {
+  add,
+  commit,
+  IgnoreParser,
+  init,
+  log,
+  merge,
+  pull,
+  push,
+  hasRemote,
+  remoteAdd,
+  restore,
+  status,
+};

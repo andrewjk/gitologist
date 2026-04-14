@@ -59,6 +59,41 @@ pub fn remoteAdd(io: std.Io, allocator: std.mem.Allocator, path: []const u8, nam
     try cwd.writeFile(io, .{ .sub_path = config_path, .data = result.items });
 }
 
+pub fn hasRemote(io: std.Io, allocator: std.mem.Allocator, path: []const u8, name: []const u8) bool {
+    const git_dir_path = std.fs.path.join(allocator, &[_][]const u8{ path, ".git" }) catch return false;
+    defer allocator.free(git_dir_path);
+
+    const cwd = std.Io.Dir.cwd();
+    if (cwd.access(io, git_dir_path, .{})) |_| {} else |err| {
+        if (err == error.FileNotFound) {
+            return false;
+        }
+        return false;
+    }
+
+    const config_path = std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "config" }) catch return false;
+    defer allocator.free(config_path);
+
+    if (cwd.access(io, config_path, .{})) |_| {} else |err| {
+        if (err == error.FileNotFound) {
+            return false;
+        }
+        return false;
+    }
+
+    const config_content = cwd.readFileAlloc(io, config_path, allocator, .unlimited) catch return false;
+    defer allocator.free(config_content);
+
+    const remote_pattern = std.fmt.allocPrint(allocator, "[remote \"{s}\"]", .{name}) catch return false;
+    defer allocator.free(remote_pattern);
+
+    if (std.mem.indexOf(u8, config_content, remote_pattern)) |_| {
+        return true;
+    }
+
+    return false;
+}
+
 pub fn getRemoteUrl(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, remote_name: []const u8) !?[]const u8 {
     const config_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "config" });
     defer allocator.free(config_path);

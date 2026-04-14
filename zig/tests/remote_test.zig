@@ -2,6 +2,7 @@ const std = @import("std");
 
 const init = @import("gitologist").init;
 const remoteAdd = @import("gitologist").remoteAdd;
+const hasRemote = @import("gitologist").hasRemote;
 
 fn trimRight(comptime T: type, slice: []const T) []const T {
     var end = slice.len;
@@ -192,4 +193,88 @@ test "should append to existing config file" {
 
     try std.testing.expect(std.mem.indexOf(u8, new_config, original_config_trimmed) != null);
     try std.testing.expect(std.mem.indexOf(u8, new_config, "[remote \"origin\"]") != null);
+}
+
+test "should return false when not a git repository" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-not-repo-2" });
+    defer allocator.free(tmp_path);
+
+    try std.testing.expect(!hasRemote(io, allocator, tmp_path, "origin"));
+}
+
+test "should return false when remote does not exist" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-no-remote" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try std.testing.expect(!hasRemote(io, allocator, tmp_path, "nonexistent"));
+}
+
+test "should return true when origin remote exists" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-origin" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try remoteAdd(io, allocator, tmp_path, "origin", "https://github.com/user/repo.git");
+
+    try std.testing.expect(hasRemote(io, allocator, tmp_path, "origin"));
+}
+
+test "should return true when custom named remote exists" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-custom" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try remoteAdd(io, allocator, tmp_path, "upstream", "https://github.com/original/repo.git");
+
+    try std.testing.expect(hasRemote(io, allocator, tmp_path, "upstream"));
+}
+
+test "should return false for different remote name" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-different" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try remoteAdd(io, allocator, tmp_path, "origin", "https://github.com/user/repo.git");
+
+    try std.testing.expect(!hasRemote(io, allocator, tmp_path, "upstream"));
 }
