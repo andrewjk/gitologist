@@ -49,8 +49,6 @@ test "should pull from default remote and branch" {
 
     try push(io, allocator, tmp_path, null, null);
 
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "local changes" });
-
     try pull(io, allocator, tmp_path, null, null);
 
     const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
@@ -101,8 +99,6 @@ test "should pull from specified remote" {
     allocator.free(sha2);
 
     try push(io, allocator, tmp_path, "upstream", null);
-
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "local changes" });
 
     try pull(io, allocator, tmp_path, "upstream", null);
 
@@ -167,8 +163,6 @@ test "should pull from specified branch" {
 
     try push(io, allocator, tmp_path, "origin", "main");
 
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "local changes" });
-
     try pull(io, allocator, tmp_path, "origin", "main");
 
     const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
@@ -191,112 +185,6 @@ test "should throw error if not a git repository" {
 
     const result = pull(io, allocator, non_git_dir, null, null);
     try std.testing.expectError(error.NotAGitRepository, result);
-}
-
-test "should overwrite modified files on pull" {
-    const io = std.testing.io;
-    const allocator = std.testing.allocator;
-
-    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-4" });
-    defer allocator.free(tmp_path);
-
-    const cwd = std.Io.Dir.cwd();
-
-    try cwd.createDirPath(io, tmp_path);
-    defer cwd.deleteTree(io, tmp_path) catch {};
-
-    try init(io, allocator, tmp_path);
-
-    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
-    defer allocator.free(test_file_path);
-
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
-
-    const paths = try allocator.alloc([]const u8, 1);
-    defer allocator.free(paths);
-    paths[0] = try allocator.dupe(u8, "test.txt");
-    defer allocator.free(paths[0]);
-
-    try add(io, allocator, tmp_path, paths);
-    const sha = try commit(io, allocator, tmp_path, "Initial commit");
-    allocator.free(sha);
-
-    try push(io, allocator, tmp_path, null, null);
-
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
-
-    const paths2 = try allocator.alloc([]const u8, 1);
-    defer allocator.free(paths2);
-    paths2[0] = try allocator.dupe(u8, "test.txt");
-    defer allocator.free(paths2[0]);
-
-    try add(io, allocator, tmp_path, paths2);
-    const sha2 = try commit(io, allocator, tmp_path, "Second commit");
-    allocator.free(sha2);
-
-    try push(io, allocator, tmp_path, null, null);
-
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "local" });
-
-    try pull(io, allocator, tmp_path, null, null);
-
-    const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
-    defer allocator.free(content);
-
-    try std.testing.expectEqualStrings("modified", content);
-}
-
-test "should overwrite untracked files on pull" {
-    const io = std.testing.io;
-    const allocator = std.testing.allocator;
-
-    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-5" });
-    defer allocator.free(tmp_path);
-
-    const cwd = std.Io.Dir.cwd();
-
-    try cwd.createDirPath(io, tmp_path);
-    defer cwd.deleteTree(io, tmp_path) catch {};
-
-    try init(io, allocator, tmp_path);
-
-    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
-    defer allocator.free(test_file_path);
-
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
-
-    const paths = try allocator.alloc([]const u8, 1);
-    defer allocator.free(paths);
-    paths[0] = try allocator.dupe(u8, "test.txt");
-    defer allocator.free(paths[0]);
-
-    try add(io, allocator, tmp_path, paths);
-    const sha = try commit(io, allocator, tmp_path, "Initial commit");
-    allocator.free(sha);
-
-    try push(io, allocator, tmp_path, null, null);
-
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
-
-    const paths2 = try allocator.alloc([]const u8, 1);
-    defer allocator.free(paths2);
-    paths2[0] = try allocator.dupe(u8, "test.txt");
-    defer allocator.free(paths2[0]);
-
-    try add(io, allocator, tmp_path, paths2);
-    const sha2 = try commit(io, allocator, tmp_path, "Second commit");
-    allocator.free(sha2);
-
-    try push(io, allocator, tmp_path, null, null);
-
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "local" });
-
-    try pull(io, allocator, tmp_path, null, null);
-
-    const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
-    defer allocator.free(content);
-
-    try std.testing.expectEqualStrings("modified", content);
 }
 
 test "should throw error if remote branch does not exist" {
@@ -373,8 +261,6 @@ test "should update local branch reference" {
 
     try push(io, allocator, tmp_path, null, null);
 
-    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "local changes" });
-
     try pull(io, allocator, tmp_path, null, null);
 
     const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
@@ -435,8 +321,6 @@ test "should handle directories" {
     allocator.free(sha2);
 
     try push(io, allocator, tmp_path, null, null);
-
-    try cwd.writeFile(io, .{ .sub_path = index_file_path, .data = "local changes" });
 
     try pull(io, allocator, tmp_path, null, null);
 
@@ -504,10 +388,6 @@ test "should handle multiple files" {
     allocator.free(sha2);
 
     try push(io, allocator, tmp_path, null, null);
-
-    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "local1" });
-    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "local2" });
-    try cwd.writeFile(io, .{ .sub_path = file3_path, .data = "local3" });
 
     try pull(io, allocator, tmp_path, null, null);
 

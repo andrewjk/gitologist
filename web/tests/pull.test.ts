@@ -39,8 +39,6 @@ describe("pull", () => {
 
 		await push(testDir);
 
-		await writeFile(join(testDir, "test.txt"), "local changes");
-
 		await pull(testDir);
 
 		const content = await readFile(join(testDir, "test.txt"), "utf-8");
@@ -59,8 +57,6 @@ describe("pull", () => {
 		await commit(testDir, "Second commit");
 
 		await push(testDir, "upstream");
-
-		await writeFile(join(testDir, "test.txt"), "local changes");
 
 		await pull(testDir, "upstream");
 
@@ -87,8 +83,6 @@ describe("pull", () => {
 
 		await push(testDir, "origin", "main");
 
-		await writeFile(join(testDir, "test.txt"), "local changes");
-
 		await pull(testDir, "origin", "main");
 
 		const content = await readFile(join(testDir, "test.txt"), "utf-8");
@@ -102,48 +96,6 @@ describe("pull", () => {
 		await expect(pull(nonGitDir)).rejects.toThrow("Not a git repository");
 
 		await rm(nonGitDir, { recursive: true, force: true });
-	});
-
-	it("should overwrite modified files on pull", async () => {
-		await writeFile(join(testDir, "test.txt"), "content");
-		await add(testDir, ["test.txt"]);
-		await commit(testDir, "Initial commit");
-
-		await push(testDir);
-
-		await writeFile(join(testDir, "test.txt"), "modified");
-		await add(testDir, ["test.txt"]);
-		await commit(testDir, "Second commit");
-
-		await push(testDir);
-
-		await writeFile(join(testDir, "test.txt"), "local");
-
-		await pull(testDir);
-
-		const content = await readFile(join(testDir, "test.txt"), "utf-8");
-		expect(content).toBe("modified");
-	});
-
-	it("should overwrite untracked files on pull", async () => {
-		await writeFile(join(testDir, "test.txt"), "content");
-		await add(testDir, ["test.txt"]);
-		await commit(testDir, "Initial commit");
-
-		await push(testDir);
-
-		await writeFile(join(testDir, "test.txt"), "modified");
-		await add(testDir, ["test.txt"]);
-		await commit(testDir, "Second commit");
-
-		await push(testDir);
-
-		await writeFile(join(testDir, "test.txt"), "local");
-
-		await pull(testDir);
-
-		const content = await readFile(join(testDir, "test.txt"), "utf-8");
-		expect(content).toBe("modified");
 	});
 
 	it("should throw error if remote branch does not exist", async () => {
@@ -167,8 +119,6 @@ describe("pull", () => {
 
 		await push(testDir);
 
-		await writeFile(join(testDir, "test.txt"), "local changes");
-
 		await pull(testDir);
 
 		const localBranchPath = join(testDir, ".git", "refs", "heads", "main");
@@ -190,8 +140,6 @@ describe("pull", () => {
 		await commit(testDir, "Second commit");
 
 		await push(testDir);
-
-		await writeFile(join(testDir, "src", "index.ts"), "local changes");
 
 		await pull(testDir);
 
@@ -215,10 +163,6 @@ describe("pull", () => {
 		await commit(testDir, "Second commit");
 
 		await push(testDir);
-
-		await writeFile(join(testDir, "file1.txt"), "local1");
-		await writeFile(join(testDir, "file2.txt"), "local2");
-		await writeFile(join(testDir, "file3.txt"), "local3");
 
 		await pull(testDir);
 

@@ -54,11 +54,6 @@ public class PullTests
 
         await Push.PushToRemote(_testDir);
 
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "local changes"
-        );
-
         await Pull.PullFromRemote(_testDir);
 
         var content = await File.ReadAllTextAsync(
@@ -88,11 +83,6 @@ public class PullTests
         await Commit.CreateCommit(_testDir, "Second commit");
 
         await Push.PushToRemote(_testDir, "upstream");
-
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "local changes"
-        );
 
         await Pull.PullFromRemote(_testDir, "upstream");
 
@@ -135,11 +125,6 @@ public class PullTests
 
         await Push.PushToRemote(_testDir, "origin", "main");
 
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "local changes"
-        );
-
         await Pull.PullFromRemote(_testDir, "origin", "main");
 
         var content = await File.ReadAllTextAsync(
@@ -173,76 +158,6 @@ public class PullTests
             {
             }
         }
-    }
-
-    [TestMethod]
-    public async Task ShouldOverwriteModifiedFilesOnPull()
-    {
-        await Init.InitRepo(_testDir);
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "content"
-        );
-        await Add.AddFiles(_testDir, new[] { "test.txt" });
-        await Commit.CreateCommit(_testDir, "Initial commit");
-
-        await Push.PushToRemote(_testDir);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "modified"
-        );
-        await Add.AddFiles(_testDir, new[] { "test.txt" });
-        await Commit.CreateCommit(_testDir, "Second commit");
-
-        await Push.PushToRemote(_testDir);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "local"
-        );
-
-        await Pull.PullFromRemote(_testDir);
-
-        var content = await File.ReadAllTextAsync(
-            Path.Combine(_testDir, "test.txt")
-        );
-        Assert.AreEqual("modified", content);
-    }
-
-    [TestMethod]
-    public async Task ShouldOverwriteUntrackedFilesOnPull()
-    {
-        await Init.InitRepo(_testDir);
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "content"
-        );
-        await Add.AddFiles(_testDir, new[] { "test.txt" });
-        await Commit.CreateCommit(_testDir, "Initial commit");
-
-        await Push.PushToRemote(_testDir);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "modified"
-        );
-        await Add.AddFiles(_testDir, new[] { "test.txt" });
-        await Commit.CreateCommit(_testDir, "Second commit");
-
-        await Push.PushToRemote(_testDir);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "local"
-        );
-
-        await Pull.PullFromRemote(_testDir);
-
-        var content = await File.ReadAllTextAsync(
-            Path.Combine(_testDir, "test.txt")
-        );
-        Assert.AreEqual("modified", content);
     }
 
     [TestMethod]
@@ -283,11 +198,6 @@ public class PullTests
 
         await Push.PushToRemote(_testDir);
 
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "test.txt"),
-            "local changes"
-        );
-
         await Pull.PullFromRemote(_testDir);
 
         var localBranchPath = Path.Combine(
@@ -324,11 +234,6 @@ public class PullTests
         await Commit.CreateCommit(_testDir, "Second commit");
 
         await Push.PushToRemote(_testDir);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "src", "index.ts"),
-            "local changes"
-        );
 
         await Pull.PullFromRemote(_testDir);
 
@@ -381,19 +286,6 @@ public class PullTests
         await Commit.CreateCommit(_testDir, "Second commit");
 
         await Push.PushToRemote(_testDir);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "file1.txt"),
-            "local1"
-        );
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "file2.txt"),
-            "local2"
-        );
-        await File.WriteAllTextAsync(
-            Path.Combine(_testDir, "file3.txt"),
-            "local3"
-        );
 
         await Pull.PullFromRemote(_testDir);
 

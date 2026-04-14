@@ -51,24 +51,186 @@ func pull(at path: String, remote: String? = nil, branch: String? = nil) async t
 
 	let remoteCommitSha = try String(contentsOf: remoteBranchPath, encoding: .utf8)
 		.trimmingCharacters(in: .whitespacesAndNewlines)
+	let currentCommitSha = try await getCurrentCommit(at: gitDir.path)
 
-	let localBranchPath = gitDir
-		.appendingPathComponent("refs")
-		.appendingPathComponent("heads")
-		.appendingPathComponent(branchName)
+	guard let currentCommitSha = currentCommitSha else {
+		try await updateBranch(at: gitDir.path, branchName: branchName, commitSha: remoteCommitSha)
+		let commitData = try await readObject(at: gitDir.path, sha: remoteCommitSha)
+		let treeSha = try extractTreeFromCommit(commitData)
 
-	try FileManager.default.createDirectory(
-		at: localBranchPath.deletingLastPathComponent(),
-		withIntermediateDirectories: true
+		try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
+		try await updateIndex(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
+		return
+	}
+
+	guard currentCommitSha != remoteCommitSha else {
+		return
+	}
+
+	let isAncestor = try await isAncestorOf(gitDir: gitDir.path, ancestorSha: currentCommitSha, descendantSha: remoteCommitSha)
+
+	if isAncestor {
+		try await updateBranch(at: gitDir.path, branchName: branchName, commitSha: remoteCommitSha)
+		let commitData = try await readObject(at: gitDir.path, sha: remoteCommitSha)
+		let treeSha = try extractTreeFromCommit(commitData)
+
+		try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
+		try await updateIndex(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
+		return
+	}
+
+	let mergeBase = try await findMergeBase(gitDir: gitDir.path, sha1: currentCommitSha, sha2: remoteCommitSha)
+
+	guard let mergeBase = mergeBase, mergeBase != remoteCommitSha else {
+		return
+	}
+
+	let mergeCommitSha = try await createMergeCommit(
+		gitDir: gitDir.path,
+		parent1: currentCommitSha,
+		parent2: remoteCommitSha,
+		message: "Merge branch '\(branchName)' of \(remoteName)"
 	)
 
-	try "\(remoteCommitSha)\n".write(to: localBranchPath, atomically: true, encoding: .utf8)
-
-	let commitData = try await readObject(at: gitDir.path, sha: remoteCommitSha)
+	try await updateBranch(at: gitDir.path, branchName: branchName, commitSha: mergeCommitSha)
+	let commitData = try await readObject(at: gitDir.path, sha: mergeCommitSha)
 	let treeSha = try extractTreeFromCommit(commitData)
 
 	try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
 	try await updateIndex(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
+}
+
+private func isAncestorOf(gitDir: String, ancestorSha: String, descendantSha: String) async throws -> Bool {
+	var visited = Set<String>()
+	var queue = [descendantSha]
+
+	while !queue.isEmpty {
+		let current = queue.removeFirst()
+
+		if current == ancestorSha {
+			return true
+		}
+
+		if visited.contains(current) {
+			continue
+		}
+		visited.insert(current)
+
+		let parents = try await getParents(gitDir: gitDir, sha: current)
+		queue.append(contentsOf: parents)
+	}
+
+	return false
+}
+
+private func findMergeBase(gitDir: String, sha1: String, sha2: String) async throws -> String? {
+	if sha1 == sha2 {
+		return sha1
+	}
+
+	let ancestors1 = try await getAllAncestors(gitDir: gitDir, sha: sha1)
+	let ancestors2 = try await getAllAncestors(gitDir: gitDir, sha: sha2)
+
+	var allAncestors1 = ancestors1
+	allAncestors1.insert(sha1)
+
+	var allAncestors2 = ancestors2
+	allAncestors2.insert(sha2)
+
+	for ancestor in allAncestors1 {
+		if allAncestors2.contains(ancestor) {
+			return ancestor
+		}
+	}
+
+	return nil
+}
+
+private func getAllAncestors(gitDir: String, sha: String) async throws -> Set<String> {
+	var ancestors = Set<String>()
+	var queue = [sha]
+
+	while !queue.isEmpty {
+		let current = queue.removeFirst()
+
+		if ancestors.contains(current) {
+			continue
+		}
+
+		let parents = try await getParents(gitDir: gitDir, sha: current)
+		for parent in parents {
+			ancestors.insert(parent)
+			queue.append(parent)
+		}
+	}
+
+	return ancestors
+}
+
+private func getParents(gitDir: String, sha: String) async throws -> [String] {
+	do {
+		let commitData = try await readObject(at: gitDir, sha: sha)
+		var parents: [String] = []
+		let lines = commitData.components(separatedBy: .newlines)
+
+		for line in lines {
+			if line.starts(with: "parent ") {
+				parents.append(String(line.dropFirst(7)))
+			}
+		}
+
+		return parents
+	} catch {
+		return []
+	}
+}
+
+private func getTree(gitDir: String, sha: String) async throws -> String? {
+	do {
+		let commitData = try await readObject(at: gitDir, sha: sha)
+		guard let nullIndex = commitData.firstIndex(of: "\0") else {
+			return nil
+		}
+		let contentIndex = commitData.index(after: nullIndex)
+		guard contentIndex < commitData.endIndex else {
+			return nil
+		}
+		let content = String(commitData[contentIndex...])
+
+		let lines = content.components(separatedBy: .newlines)
+		for line in lines {
+			if line.starts(with: "tree ") {
+				return String(line.dropFirst(5))
+			}
+		}
+		return nil
+	} catch {
+		return nil
+	}
+}
+
+private func createMergeCommit(gitDir: String, parent1: String, parent2: String, message: String) async throws -> String {
+	guard let treeSha = try await getTree(gitDir: gitDir, sha: parent1) else {
+		throw PullError.invalidCommitObject
+	}
+
+	let now = Date()
+	let timestamp = Int(now.timeIntervalSince1970)
+	let offset = TimeZone.current.secondsFromGMT()
+	let hours = abs(offset) / 3600
+	let minutes = (abs(offset) % 3600) / 60
+	let sign = offset >= 0 ? "+" : "-"
+
+	let author = String(format: "User <user@example.com> %d %@%02d%02d", timestamp, sign, hours, minutes)
+
+	var commitContent = "tree \(treeSha)\n"
+	commitContent += "parent \(parent1)\n"
+	commitContent += "parent \(parent2)\n"
+	commitContent += "author \(author)\n"
+	commitContent += "committer \(author)\n"
+	commitContent += "\n\(message)\n"
+
+	return try await hashObject(at: gitDir, content: commitContent, type: "commit")
 }
 
 private func extractTreeToWorkingDirectory(gitDir: String, workingPath: String, treeSha: String) async throws {

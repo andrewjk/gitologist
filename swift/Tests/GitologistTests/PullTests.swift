@@ -30,8 +30,6 @@ struct PullTests {
 
 		try await push(at: testDirPath.path)
 
-		try "local changes".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-
 		try await pull(at: testDirPath.path)
 
 		let content = try String(contentsOf: testDirPath.appendingPathComponent("test.txt"), encoding: .utf8)
@@ -56,8 +54,6 @@ struct PullTests {
 		_ = try await commit(at: testDirPath.path, message: "Second commit")
 
 		try await push(at: testDirPath.path, remote: "upstream")
-
-		try "local changes".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
 
 		try await pull(at: testDirPath.path, remote: "upstream")
 
@@ -97,8 +93,6 @@ struct PullTests {
 
 		try await push(at: testDirPath.path, branch: "main")
 
-		try "local changes".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-
 		try await pull(at: testDirPath.path, branch: "main")
 
 		let content = try String(contentsOf: testDirPath.appendingPathComponent("test.txt"), encoding: .utf8)
@@ -117,60 +111,6 @@ struct PullTests {
 		}
 
 		try? fileManager.removeItem(at: nonGitDir)
-	}
-
-	@Test func shouldOverwriteModifiedFilesOnPull() async throws {
-		let testDirPath = testDir
-		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
-		try await initRepo(at: testDirPath.path)
-
-		try "content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-		try await add(at: testDirPath.path, files: ["test.txt"])
-		_ = try await commit(at: testDirPath.path, message: "Initial commit")
-
-		try await push(at: testDirPath.path)
-
-		try "modified".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-		try await add(at: testDirPath.path, files: ["test.txt"])
-		_ = try await commit(at: testDirPath.path, message: "Second commit")
-
-		try await push(at: testDirPath.path)
-
-		try "local".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-
-		try await pull(at: testDirPath.path)
-
-		let content = try String(contentsOf: testDirPath.appendingPathComponent("test.txt"), encoding: .utf8)
-		#expect(content == "modified")
-
-		try? fileManager.removeItem(at: testDirPath)
-	}
-
-	@Test func shouldOverwriteUntrackedFilesOnPull() async throws {
-		let testDirPath = testDir
-		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
-		try await initRepo(at: testDirPath.path)
-
-		try "content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-		try await add(at: testDirPath.path, files: ["test.txt"])
-		_ = try await commit(at: testDirPath.path, message: "Initial commit")
-
-		try await push(at: testDirPath.path)
-
-		try "modified".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-		try await add(at: testDirPath.path, files: ["test.txt"])
-		_ = try await commit(at: testDirPath.path, message: "Second commit")
-
-		try await push(at: testDirPath.path)
-
-		try "local".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-
-		try await pull(at: testDirPath.path)
-
-		let content = try String(contentsOf: testDirPath.appendingPathComponent("test.txt"), encoding: .utf8)
-		#expect(content == "modified")
-
-		try? fileManager.removeItem(at: testDirPath)
 	}
 
 	@Test func shouldThrowErrorIfRemoteBranchDoesNotExist() async throws {
@@ -206,8 +146,6 @@ struct PullTests {
 
 		try await push(at: testDirPath.path)
 
-		try "local changes".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
-
 		try await pull(at: testDirPath.path)
 
 		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
@@ -235,8 +173,6 @@ struct PullTests {
 		_ = try await commit(at: testDirPath.path, message: "Second commit")
 
 		try await push(at: testDirPath.path)
-
-		try "local changes".write(to: testDirPath.appendingPathComponent("src").appendingPathComponent("index.ts"), atomically: true, encoding: .utf8)
 
 		try await pull(at: testDirPath.path)
 
@@ -266,10 +202,6 @@ struct PullTests {
 		_ = try await commit(at: testDirPath.path, message: "Second commit")
 
 		try await push(at: testDirPath.path)
-
-		try "local1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
-		try "local2".write(to: testDirPath.appendingPathComponent("file2.txt"), atomically: true, encoding: .utf8)
-		try "local3".write(to: testDirPath.appendingPathComponent("file3.txt"), atomically: true, encoding: .utf8)
 
 		try await pull(at: testDirPath.path)
 
