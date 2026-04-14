@@ -96,14 +96,17 @@ func parsePackfile(_ data: Data) throws -> [PackObject] {
 		rawPtr.loadUnaligned(fromByteOffset: 8, as: UInt32.self).bigEndian
 	}
 
+	// Exclude checksum (last 20 bytes) from parsing
+	let dataWithoutChecksum = data.prefix(data.count - 20)
+
 	var objects: [PackObject] = []
 	var offset = 12
 
 	for _ in 0 ..< numObjects {
-		let (type, size, newOffset) = try parseObjectHeader(data, offset)
+		let (type, size, newOffset) = try parseObjectHeader(dataWithoutChecksum, offset)
 		offset = newOffset
 
-		let content = data[offset ..< (offset + size)]
+		let content = dataWithoutChecksum[offset ..< (offset + size)]
 		offset += size
 
 		let inflated = try decompressData(Data(content))

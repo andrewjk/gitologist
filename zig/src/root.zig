@@ -28,6 +28,8 @@ pub const types = struct {
     pub const StatusInfo = @import("types/StatusInfo.zig").StatusInfo;
 };
 
+pub const packfile = @import("packfile.zig");
+
 // Placeholder function for main.zig
 pub fn printAnotherMessage(writer: anytype) !void {
     try writer.writeAll("Hello from Gitologist!\n");

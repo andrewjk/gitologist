@@ -84,15 +84,18 @@ pub fn parsePackfile(allocator: std.mem.Allocator, data: []const u8) !std.ArrayL
 
     const num_objects = std.mem.readInt(u32, data[8..12], .big);
 
+    // Exclude checksum (last 20 bytes) from parsing
+    const data_without_checksum = data[0 .. data.len - 20];
+
     var offset: usize = 12;
 
     for (0..num_objects) |_| {
-        const header_result = try parseObjectHeader(data, offset);
+        const header_result = try parseObjectHeader(data_without_checksum, offset);
         const obj_type_num = header_result.type;
         const size = header_result.size;
         offset = header_result.new_offset;
 
-        const content = data[offset .. offset + size];
+        const content = data_without_checksum[offset .. offset + size];
         offset += size;
 
         // Decompress content
@@ -161,7 +164,7 @@ fn parseObjectHeader(data: []const u8, offset: usize) !ObjectHeader {
     };
 }
 
-fn getObjectType(type_num: usize) ![]const u8 {
+pub fn getObjectType(type_num: usize) ![]const u8 {
     return switch (type_num) {
         1 => "commit",
         2 => "tree",
@@ -198,10 +201,11 @@ pub fn createPackfile(allocator: std.mem.Allocator, objects: std.ArrayList(PackO
 
         // Compress content
         const flate = std.compress.flate;
-        var compressed = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
-        defer compressed.deinit(allocator);
+        var compressed = std.ArrayList(u8).initCapacity(allocator, 128) catch unreachable;
 
         var compressed_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &compressed);
+        defer compressed_writer.deinit();
+
         var flate_buffer: [flate.max_window_len]u8 = undefined;
         var compress = try flate.Compress.init(&compressed_writer.writer, &flate_buffer, .zlib, .default);
         try compress.writer.writeAll(obj.content);
@@ -209,8 +213,11 @@ pub fn createPackfile(allocator: std.mem.Allocator, objects: std.ArrayList(PackO
         try compress.finish();
         try compressed_writer.writer.flush();
 
+        var final_compressed = compressed_writer.toArrayList();
+        defer final_compressed.deinit(allocator);
+
         try packfile.appendSlice(allocator, header);
-        try packfile.appendSlice(allocator, compressed.items);
+        try packfile.appendSlice(allocator, final_compressed.items);
     }
 
     // Add checksum

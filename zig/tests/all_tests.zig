@@ -14,4 +14,5 @@ comptime {
     _ = @import("git_compat_test.zig");
     _ = @import("ignore_parser_test.zig");
     _ = @import("spaces_in_names_test.zig");
+    _ = @import("packfile_test.zig");
 }

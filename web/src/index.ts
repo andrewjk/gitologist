@@ -12,16 +12,16 @@ import { restore } from "./restore.ts";
 import { status } from "./status.ts";
 
 export {
-  add,
-  commit,
-  IgnoreParser,
-  init,
-  log,
-  merge,
-  pull,
-  push,
-  hasRemote,
-  remoteAdd,
-  restore,
-  status,
+	add,
+	commit,
+	IgnoreParser,
+	init,
+	log,
+	merge,
+	pull,
+	push,
+	hasRemote,
+	remoteAdd,
+	restore,
+	status,
 };

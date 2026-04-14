@@ -58,11 +58,14 @@ export function parsePackfile(data: Buffer): PackObject[] {
 	const numObjects = data.readUInt32BE(8);
 	let offset = 12;
 
+	// Exclude checksum (last 20 bytes) from parsing
+	const dataWithoutChecksum = data.slice(0, -20);
+
 	for (let i = 0; i < numObjects; i++) {
-		const { type, size, newOffset } = parseObjectHeader(data, offset);
+		const { type, size, newOffset } = parseObjectHeader(dataWithoutChecksum, offset);
 		offset = newOffset;
 
-		const content = data.slice(offset, offset + size);
+		const content = dataWithoutChecksum.slice(offset, offset + size);
 		offset += size;
 
 		const inflated = inflateSync(content);

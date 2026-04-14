@@ -85,15 +85,18 @@ public static class Packfile
 
         var numObjects = BitConverter.ToInt32(data.Skip(8).Take(4).Reverse().ToArray(), 0);
 
+        // Exclude checksum (last 20 bytes) from parsing
+        var dataWithoutChecksum = data.Take(data.Length - 20).ToArray();
+
         var objects = new List<PackObject>();
         var offset = 12;
 
         for (var i = 0; i < numObjects; i++)
         {
-            var (type, size, newOffset) = ParseObjectHeader(data, offset);
+            var (type, size, newOffset) = ParseObjectHeader(dataWithoutChecksum, offset);
             offset = newOffset;
 
-            var content = data.Skip(offset).Take(size).ToArray();
+            var content = dataWithoutChecksum.Skip(offset).Take(size).ToArray();
             offset += size;
 
             var inflated = Utils.Decompress(content);
