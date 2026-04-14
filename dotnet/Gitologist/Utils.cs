@@ -18,7 +18,8 @@ public static class Utils
     public static async Task<string> HashFileAsBlob(string filePath)
     {
         var content = await File.ReadAllTextAsync(filePath);
-        var blobContent = $"blob {content.Length}\0{content}";
+        var contentBytes = Encoding.UTF8.GetBytes(content);
+        var blobContent = $"blob {contentBytes.Length}\0{content}";
         return HashString(blobContent);
     }
 
@@ -230,7 +231,8 @@ public static class Utils
 
     public static async Task<string> HashObject(string gitDir, string content, string type)
     {
-        var header = $"{type} {content.Length}\0{content}";
+        var contentBytes = Encoding.UTF8.GetBytes(content);
+        var header = $"{type} {contentBytes.Length}\0{content}";
         var hash = HashString(header);
         var sha = hash;
 

@@ -65,7 +65,8 @@ export async function hashFile(filePath: string): Promise<string> {
 export async function hashFileAsBlob(filePath: string): Promise<string> {
 	const crypto = await import("node:crypto");
 	const content = await readFile(filePath, "utf-8");
-	const header = `blob ${content.length}\0${content}`;
+	const contentBytes = Buffer.from(content, "utf-8");
+	const header = `blob ${contentBytes.length}\0${content}`;
 	const hash = crypto.createHash("sha1");
 	hash.update(header);
 	return hash.digest("hex");
@@ -201,7 +202,8 @@ export async function hashObject(
 	const crypto = await import("node:crypto");
 	const zlib = await import("node:zlib");
 
-	const header = `${type} ${content.length}\0${content}`;
+	const contentBytes = Buffer.from(content, "utf-8");
+	const header = `${type} ${contentBytes.length}\0${content}`;
 	const hash = crypto.createHash("sha1");
 	hash.update(header);
 	const sha = hash.digest("hex");

@@ -211,8 +211,10 @@ func getCurrentCommit(at gitDir: String) async throws -> String? {
 }
 
 func hashObject(at gitDir: String, content: String, type: String) async throws -> String {
-	let header = "\(type) \(content.count)\0\(content)"
-	let data = header.data(using: .utf8)!
+	// Convert to data first to get correct byte count
+	let contentData = content.data(using: .utf8)!
+	let header = "\(type) \(contentData.count)\0"
+	let data = header.data(using: .utf8)! + contentData
 	let sha1 = Insecure.SHA1.hash(data: data)
 	let sha = sha1.compactMap { String(format: "%02x", $0) }.joined()
 
