@@ -1,6 +1,6 @@
 # Gitologist - Agent Guidelines
 
-Gitologist is a Git implementation in multiple languages: TypeScript, Swift, and C#.
+Gitologist is a Git implementation in multiple languages: TypeScript, Swift, C#, and Zig.
 
 ## Project Structure
 
@@ -8,7 +8,8 @@ Gitologist is a Git implementation in multiple languages: TypeScript, Swift, and
 /
 ├── web/          # TypeScript implementation (Vite+)
 ├── swift/        # Swift implementation (Swift Package Manager)
-└── dotnet/       # C# implementation (.NET 8)
+├── dotnet/       # C# implementation (.NET 10)
+└── zig/          # Zig implementation (0.16.0-dev+)
 ```
 
 ---
@@ -139,7 +140,7 @@ dotnet format --verify              # Check formatting (CI)
 
 ### Code Style (C#)
 
-- **Target framework**: .NET 8.0
+- **Target framework**: .NET 10.0
 - **Implicit usings**: enabled
 - **Nullable**: enabled
 
@@ -153,11 +154,66 @@ dotnet format --verify              # Check formatting (CI)
 
 ---
 
+## Zig
+
+Uses **Zig 0.16.0-dev** or later.
+
+### Build/Test Commands
+
+All commands run from `zig/` directory:
+
+```bash
+# Build
+zig build              # Build the project
+zig build run          # Run the executable
+
+# Testing
+zig build test         # Run all tests
+```
+
+**Note:** If `zig build test` produces no output, all tests passed successfully. Zig's test runner only outputs information when tests fail or when there are memory leaks.
+
+### Code Style (Zig)
+
+- **Indentation**: Tabs (consistent with other implementations)
+
+**Naming:**
+
+- Functions: camelCase (`initRepo`, `parseCommit`)
+- Types: PascalCase for structs/enums
+- Constants: UPPER_SNAKE_CASE
+
+**Memory Management:**
+
+Always free paths created with `std.fs.path.join`:
+
+```zig
+// DON'T DO THIS - leaks memory
+const dir = try cwd.openDir(io, try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" }), .{});
+
+// DO THIS INSTEAD
+const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
+defer allocator.free(git_dir_path);
+const dir = try cwd.openDir(io, git_dir_path, .{});
+```
+
+### Important API Changes
+
+The Zig standard library APIs have changed:
+
+- **ArrayList**: Use `std.ArrayList(T).initCapacity(allocator, 0)` instead of `.init(allocator)`
+- **Deinit**: Use `list.deinit(allocator)` - allocator is now passed as parameter
+- **Append**: Use `list.append(allocator, item)` - allocator is now passed as parameter
+
+See `zig/AGENTS.md` for more detailed Zig-specific guidance.
+
+---
+
 ## Cross-Language Consistency
 
 This project implements the same Git functionality across languages. When adding features:
 
-1. Implement in all three languages when possible
+1. Implement in all four languages when possible
 2. Keep public APIs similar (same function names where idiomatic)
 3. Types should have equivalent fields across implementations
 4. Tests should cover the same scenarios
