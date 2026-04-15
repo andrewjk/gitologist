@@ -106,13 +106,14 @@ func parsePackfile(_ data: Data) throws -> [PackObject] {
 	var offset = 12
 
 	for _ in 0 ..< numObjects {
-		let (type, size, newOffset) = try parseObjectHeader(dataWithoutChecksum, offset)
+		guard offset < dataWithoutChecksum.count else {
+			throw PackfileError.invalidPackfileSignature
+		}
+
+		let (type, _, newOffset) = try parseObjectHeader(dataWithoutChecksum, offset)
 		offset = newOffset
 
-		let content = dataWithoutChecksum[offset ..< (offset + size)]
-		offset += size
-
-		let inflated = try decompressData(Data(content))
+		let (inflated, bytesConsumed) = try decompressStreamData(dataWithoutChecksum, from: offset)
 
 		guard let objectType = getObjectType(type) else {
 			throw PackfileError.unknownObjectType(type)
@@ -128,6 +129,7 @@ func parsePackfile(_ data: Data) throws -> [PackObject] {
 			.joined()
 
 		objects.append(PackObject(type: objectType, sha: sha, content: inflated))
+		offset += bytesConsumed
 	}
 
 	return objects
@@ -152,9 +154,59 @@ func parseObjectHeader(_ data: Data, _ offset: Int) throws -> (type: Int, size: 
 		size |= Int(nextByte & 0x7F) << shift
 		shift += 7
 		currentOffset += 1
+		if (nextByte & 0x80) == 0 {
+			break
+		}
 	}
 
 	return (type, size, currentOffset)
+}
+
+private func decompressStreamData(_ data: Data, from offset: Int) throws -> (decompressed: Data, bytesConsumed: Int) {
+	var stream = z_stream()
+	stream.zalloc = nil
+	stream.zfree = nil
+	stream.opaque = nil
+
+	let initResult = inflateInit_(&stream, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
+	guard initResult == Z_OK else {
+		throw PackfileError.invalidPackfileSignature
+	}
+	defer { inflateEnd(&stream) }
+
+	var decompressedData = Data()
+	var outputBuffer = [UInt8](repeating: 0, count: 4096)
+
+	let remainingData = data[offset...]
+	let result = remainingData.withUnsafeBytes { sourceBytes in
+		let base = sourceBytes.bindMemory(to: Bytef.self).baseAddress!
+		stream.next_in = UnsafeMutablePointer<Bytef>(mutating: base)
+		stream.avail_in = uInt(remainingData.count)
+
+		var res: Int32 = Z_OK
+		repeat {
+			outputBuffer.withUnsafeMutableBufferPointer { buffer in
+				stream.next_out = buffer.baseAddress!
+				stream.avail_out = uInt(buffer.count)
+			}
+
+			res = inflate(&stream, Z_NO_FLUSH)
+
+			let bytesWritten = outputBuffer.count - Int(stream.avail_out)
+			if bytesWritten > 0 {
+				decompressedData.append(contentsOf: outputBuffer[0 ..< bytesWritten])
+			}
+		} while res == Z_OK
+
+		return res
+	}
+
+	guard result == Z_STREAM_END else {
+		throw PackfileError.invalidPackfileSignature
+	}
+
+	let bytesConsumed = remainingData.count - Int(stream.avail_in)
+	return (decompressedData, bytesConsumed)
 }
 
 func getObjectType(_ typeNum: Int) -> ObjectType? {

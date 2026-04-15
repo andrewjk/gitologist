@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { inflateSync, deflateSync } from "node:zlib";
+import { createInflate, deflateSync } from "node:zlib";
 
 export interface PackObject {
 	type: "commit" | "tree" | "blob" | "tag";
@@ -65,13 +65,14 @@ export function parsePackfile(data: Buffer): PackObject[] {
 	const dataWithoutChecksum = data.slice(0, -20);
 
 	for (let i = 0; i < numObjects; i++) {
-		const { type, size, newOffset } = parseObjectHeader(dataWithoutChecksum, offset);
+		if (offset >= dataWithoutChecksum.length) {
+			throw new Error("Invalid packfile: offset out of bounds");
+		}
+
+		const { type, newOffset } = parseObjectHeader(dataWithoutChecksum, offset);
 		offset = newOffset;
 
-		const content = dataWithoutChecksum.slice(offset, offset + size);
-		offset += size;
-
-		const inflated = inflateSync(content);
+		const { inflated, bytesConsumed } = decompressStreamData(dataWithoutChecksum, offset);
 
 		const objectType = getObjectType(type);
 		const sha = createHash("sha1")
@@ -84,6 +85,8 @@ export function parsePackfile(data: Buffer): PackObject[] {
 			sha,
 			content: inflated,
 		});
+
+		offset += bytesConsumed;
 	}
 
 	return objects;
@@ -107,6 +110,32 @@ function parseObjectHeader(
 	}
 
 	return { type, size, newOffset: currentOffset };
+}
+
+function decompressStreamData(
+	data: Buffer,
+	offset: number,
+): { inflated: Buffer; bytesConsumed: number } {
+	const inflate = createInflate();
+	const chunks: Buffer[] = [];
+	let bytesConsumed = 0;
+
+	inflate.on("data", (chunk: Buffer) => {
+		chunks.push(chunk);
+	});
+
+	inflate.on("error", (err: Error) => {
+		throw err;
+	});
+
+	const remainingData = data.slice(offset);
+	bytesConsumed = remainingData.length;
+
+	inflate.write(remainingData);
+	inflate.end();
+
+	const inflated = Buffer.concat(chunks);
+	return { inflated, bytesConsumed };
 }
 
 const OBJECT_TYPES: Record<number, PackObject["type"]> = {

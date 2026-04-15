@@ -186,13 +186,14 @@ async function discoverRefsV2(remoteUrl: string): Promise<DiscoveredRef[]> {
 	const refs: DiscoveredRef[] = [];
 
 	for (const line of lines) {
-		if (line === "") continue;
+		const trimmed = line.trim();
+		if (trimmed === "") continue;
 
-		const parts = line.split(" ");
+		const parts = trimmed.split(" ");
 		if (parts.length >= 2 && parts[0].match(/^[0-9a-f]{40}$/)) {
 			refs.push({
 				sha: parts[0],
-				ref: parts[1].split("\0")[0],
+				ref: parts[1].trim().split("\0")[0],
 			});
 		}
 	}
@@ -203,12 +204,58 @@ async function discoverRefsV2(remoteUrl: string): Promise<DiscoveredRef[]> {
 function buildLsRefsRequest(): Buffer {
 	const lines: Buffer[] = [];
 
-	lines.push(encodePktLine("command=ls-refs\0peel\0symrefs"));
+	lines.push(encodePktLine("command=ls-refs\n"));
 	lines.push(encodePktLine("0001"));
-	lines.push(encodePktLine("refs/heads/*"));
+	lines.push(encodePktLine("symrefs\n"));
+	lines.push(encodePktLine("peel\n"));
+	lines.push(encodePktLine("ref-prefix refs/heads/\n"));
 	lines.push(encodePktLine(null));
 
 	return Buffer.concat(lines);
+}
+
+function extractPackfileFromSideband(data: Buffer): Buffer {
+	let offset = 0;
+	const packfileData: Buffer[] = [];
+
+	while (offset < data.length) {
+		if (offset + 4 > data.length) {
+			break;
+		}
+
+		const hexLen = data.slice(offset, offset + 4).toString("ascii");
+
+		if (hexLen === "0000") {
+			offset += 4;
+			continue;
+		}
+
+		if (hexLen === "0001") {
+			offset += 4;
+			continue;
+		}
+
+		const length = parseInt(hexLen, 16);
+		if (length <= 0 || offset + length > data.length) {
+			break;
+		}
+
+		const payload = data.slice(offset + 4, offset + length);
+
+		if (payload.length > 0) {
+			const channel = payload[0];
+			if (channel === 1) {
+				packfileData.push(payload.slice(1));
+			} else if (channel === 3) {
+				const errorMsg = payload.slice(1).toString("utf-8");
+				console.error(`Git error: ${errorMsg}`);
+			}
+		}
+
+		offset += length;
+	}
+
+	return Buffer.concat(packfileData);
 }
 
 async function fetchPackfile(
@@ -236,43 +283,30 @@ async function fetchPackfile(
 
 	const buffer = Buffer.from(await response.arrayBuffer());
 
-	const packfileOffset = findPackfileStart(buffer);
-	if (packfileOffset === -1) {
+	const packfileData = extractPackfileFromSideband(buffer);
+	if (packfileData.length === 0) {
 		return [];
 	}
 
-	const packfileData = buffer.slice(packfileOffset);
 	return parsePackfile(packfileData);
 }
 
 function buildFetchRequestV2(wants: string[], haves: string[]): Buffer {
 	const lines: Buffer[] = [];
 
-	lines.push(encodePktLine("command=fetch"));
+	lines.push(encodePktLine("command=fetch\n"));
+	lines.push(encodePktLine("0001"));
 
 	for (const want of wants) {
-		lines.push(encodePktLine(`want ${want}`));
+		lines.push(encodePktLine(`want ${want}\n`));
 	}
 
-	if (haves.length > 0) {
-		for (const have of haves) {
-			lines.push(encodePktLine(`have ${have}`));
-		}
+	for (const have of haves) {
+		lines.push(encodePktLine(`have ${have}\n`));
 	}
 
-	lines.push(encodePktLine("done"));
-	lines.push(encodePktLine("0001"));
+	lines.push(encodePktLine("done\n"));
 	lines.push(encodePktLine(null));
 
 	return Buffer.concat(lines);
-}
-
-function findPackfileStart(buffer: Buffer): number {
-	const signature = Buffer.from("PACK");
-	for (let i = 0; i < buffer.length - 4; i++) {
-		if (buffer.slice(i, i + 4).equals(signature)) {
-			return i;
-		}
-	}
-	return -1;
 }

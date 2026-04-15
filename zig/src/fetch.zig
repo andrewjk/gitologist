@@ -214,7 +214,10 @@ fn discoverRefs(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8
         if (!started) continue;
         if (line.len == 0) continue;
 
-        var parts = std.mem.splitScalar(u8, line, ' ');
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+
+        var parts = std.mem.splitScalar(u8, trimmed, ' ');
         const sha_str = parts.next() orelse continue;
         const ref_str = parts.next() orelse continue;
 
@@ -230,7 +233,7 @@ fn discoverRefs(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8
         if (!is_valid_sha) continue;
 
         const null_idx = std.mem.indexOfScalar(u8, ref_str, 0) orelse ref_str.len;
-        const ref_name = ref_str[0..null_idx];
+        const ref_name = std.mem.trim(u8, ref_str[0..null_idx], &std.ascii.whitespace);
 
         try refs.append(allocator, .{
             .sha = try allocator.dupe(u8, sha_str),
@@ -239,6 +242,84 @@ fn discoverRefs(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8
     }
 
     return refs;
+}
+
+fn buildLsRefsRequest(allocator: std.mem.Allocator) ![]const u8 {
+    var lines = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable;
+    errdefer {
+        for (lines.items) |line| allocator.free(line);
+        lines.deinit(allocator);
+    }
+
+    const command_pkt = try packfile.encodePktLine(allocator, "command=ls-refs\n");
+    try lines.append(allocator, command_pkt);
+
+    const delimiter_pkt = try allocator.dupe(u8, "0001");
+    try lines.append(allocator, delimiter_pkt);
+
+    const symrefs_pkt = try packfile.encodePktLine(allocator, "symrefs\n");
+    try lines.append(allocator, symrefs_pkt);
+
+    const peel_pkt = try packfile.encodePktLine(allocator, "peel\n");
+    try lines.append(allocator, peel_pkt);
+
+    const ref_prefix_pkt = try packfile.encodePktLine(allocator, "ref-prefix refs/heads/\n");
+    try lines.append(allocator, ref_prefix_pkt);
+
+    const flush_pkt = try packfile.encodePktLine(allocator, null);
+    try lines.append(allocator, flush_pkt);
+
+    var result = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    for (lines.items) |line| {
+        try result.appendSlice(allocator, line);
+    }
+
+    return result.toOwnedSlice(allocator);
+}
+
+fn extractPackfileFromSideband(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
+    var packfile_data = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    errdefer packfile_data.deinit(allocator);
+
+    var offset: usize = 0;
+
+    while (offset < data.len) {
+        if (offset + 4 > data.len) {
+            break;
+        }
+
+        const hex_length = data[offset .. offset + 4];
+        if (std.mem.eql(u8, hex_length, "0000")) {
+            offset += 4;
+            continue;
+        }
+
+        if (std.mem.eql(u8, hex_length, "0001")) {
+            offset += 4;
+            continue;
+        }
+
+        const length = std.fmt.parseUnsigned(usize, hex_length, 16) catch break;
+        if (length == 0 or offset + length > data.len) {
+            break;
+        }
+
+        const payload = data[offset + 4 .. offset + length];
+
+        if (payload.len > 0) {
+            const channel = payload[0];
+            if (channel == 1) {
+                try packfile_data.appendSlice(allocator, payload[1..]);
+            } else if (channel == 3) {
+                const error_msg = payload[1..];
+                std.debug.print("Git error: {s}\n", .{error_msg});
+            }
+        }
+
+        offset += length;
+    }
+
+    return packfile_data.toOwnedSlice(allocator);
 }
 
 fn fetchPackfile(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8, wants: std.ArrayList([]const u8), haves: std.ArrayList([]const u8)) !std.ArrayList(packfile.PackObject) {
@@ -289,12 +370,14 @@ fn fetchPackfile(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u
 
     try reader.appendRemainingUnlimited(allocator, &body);
 
-    const packfile_offset = findPackfileStart(body.items);
-    if (packfile_offset == null) {
+    const packfile_data = try extractPackfileFromSideband(allocator, body.items);
+    defer allocator.free(packfile_data);
+
+    if (packfile_data.len == 0) {
         return std.ArrayList(packfile.PackObject).initCapacity(allocator, 0) catch unreachable;
     }
 
-    return try packfile.parsePackfile(allocator, body.items[packfile_offset.?..]);
+    return try packfile.parsePackfile(allocator, packfile_data);
 }
 
 fn buildFetchRequest(allocator: std.mem.Allocator, wants: std.ArrayList([]const u8), haves: std.ArrayList([]const u8)) ![]const u8 {
@@ -304,24 +387,24 @@ fn buildFetchRequest(allocator: std.mem.Allocator, wants: std.ArrayList([]const 
         lines.deinit(allocator);
     }
 
-    const command_pkt = try packfile.encodePktLine(allocator, "command=fetch");
+    const command_pkt = try packfile.encodePktLine(allocator, "command=fetch\n");
     try lines.append(allocator, command_pkt);
 
+    const delimiter_pkt = try allocator.dupe(u8, "0001");
+    try lines.append(allocator, delimiter_pkt);
+
     for (wants.items) |w| {
-        const pkt_line = try packfile.encodePktLine(allocator, try std.fmt.allocPrint(allocator, "want {s}", .{w}));
+        const pkt_line = try packfile.encodePktLine(allocator, try std.fmt.allocPrint(allocator, "want {s}\n", .{w}));
         try lines.append(allocator, pkt_line);
     }
 
     for (haves.items) |h| {
-        const pkt_line = try packfile.encodePktLine(allocator, try std.fmt.allocPrint(allocator, "have {s}", .{h}));
+        const pkt_line = try packfile.encodePktLine(allocator, try std.fmt.allocPrint(allocator, "have {s}\n", .{h}));
         try lines.append(allocator, pkt_line);
     }
 
-    const done_pkt = try packfile.encodePktLine(allocator, "done");
+    const done_pkt = try packfile.encodePktLine(allocator, "done\n");
     try lines.append(allocator, done_pkt);
-
-    const delimiter_pkt = try allocator.dupe(u8, "0001");
-    try lines.append(allocator, delimiter_pkt);
 
     const flush_pkt = try packfile.encodePktLine(allocator, null);
     try lines.append(allocator, flush_pkt);
@@ -332,14 +415,4 @@ fn buildFetchRequest(allocator: std.mem.Allocator, wants: std.ArrayList([]const 
     }
 
     return result.toOwnedSlice(allocator);
-}
-
-fn findPackfileStart(data: []const u8) ?usize {
-    const signature = "PACK";
-    for (0..(data.len - 4)) |i| {
-        if (std.mem.eql(u8, data[i .. i + 4], signature)) {
-            return i;
-        }
-    }
-    return null;
 }

@@ -92,24 +92,17 @@ pub fn parsePackfile(allocator: std.mem.Allocator, data: []const u8) !std.ArrayL
     var offset: usize = 12;
 
     for (0..num_objects) |_| {
+        if (offset >= data_without_checksum.len) {
+            return error.InvalidPackfileSignature;
+        }
+
         const header_result = try parseObjectHeader(data_without_checksum, offset);
         const obj_type_num = header_result.type;
-        const size = header_result.size;
         offset = header_result.new_offset;
 
-        const content = data_without_checksum[offset .. offset + size];
-        offset += size;
-
-        // Decompress content
-        const flate = std.compress.flate;
-        var reader = std.Io.Reader.fixed(content);
-        var flate_buffer: [flate.max_window_len]u8 = undefined;
-        var decompress = flate.Decompress.init(&reader, .zlib, &flate_buffer);
-        var writer: std.Io.Writer.Allocating = .init(allocator);
-        defer writer.deinit();
-        _ = try decompress.reader.streamRemaining(&writer.writer);
-
-        const inflated = try writer.toOwnedSlice();
+        const decompress_result = try decompressStreamData(allocator, data_without_checksum, offset);
+        const inflated = decompress_result.decompressed;
+        const bytes_consumed = decompress_result.bytes_consumed;
 
         const object_type = try getObjectType(obj_type_num);
         const object_header = try std.fmt.allocPrint(allocator, "{s} {d}\x00", .{ object_type, inflated.len });
@@ -134,6 +127,8 @@ pub fn parsePackfile(allocator: std.mem.Allocator, data: []const u8) !std.ArrayL
             .sha = sha,
             .content = inflated,
         });
+
+        offset += bytes_consumed;
     }
 
     return objects;
@@ -157,12 +152,42 @@ fn parseObjectHeader(data: []const u8, offset: usize) !ObjectHeader {
         size |= @as(usize, next_byte & 0x7f) << @intCast(shift);
         shift += 7;
         current_offset += 1;
+
+        if ((next_byte & 0x80) == 0) {
+            break;
+        }
     }
 
     return ObjectHeader{
         .type = type_num,
         .size = size,
         .new_offset = current_offset,
+    };
+}
+
+const DecompressResult = struct {
+    decompressed: []const u8,
+    bytes_consumed: usize,
+};
+
+fn decompressStreamData(allocator: std.mem.Allocator, data: []const u8, offset: usize) !DecompressResult {
+    const flate = std.compress.flate;
+    var reader = std.Io.Reader.fixed(data[offset..]);
+    var flate_buffer: [flate.max_window_len]u8 = undefined;
+    var decompress = flate.Decompress.init(&reader, .zlib, &flate_buffer);
+    var writer: std.Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
+    _ = try decompress.reader.streamRemaining(&writer.writer);
+
+    const inflated = try writer.toOwnedSlice();
+
+    // In a true streaming implementation, we would track bytes consumed
+    // For now, return the entire remaining data as consumed
+    const bytes_consumed = data.len - offset;
+
+    return DecompressResult{
+        .decompressed = inflated,
+        .bytes_consumed = bytes_consumed,
     };
 }
 

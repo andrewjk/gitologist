@@ -96,6 +96,7 @@ func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
 	guard let url = URL(string: remoteUrl) else {
 		throw FetchError.invalidURL
 	}
+
 	let fetchUrl = url.appendingPathComponent("git-upload-pack")
 
 	let requestBody = buildLsRefsRequest()
@@ -122,11 +123,12 @@ func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
 	var refs: [DiscoveredRef] = []
 
 	for line in lines {
-		if line.isEmpty {
+		let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+		if trimmed.isEmpty {
 			continue
 		}
 
-		let parts = line.split(separator: " ", maxSplits: 1)
+		let parts = trimmed.split(separator: " ", maxSplits: 1)
 		if parts.count >= 2 {
 			let sha = String(parts[0])
 			guard sha.count == 40, sha.allSatisfy({ $0.isNumber || ($0.isLetter && $0.isASCII) }) else {
@@ -136,7 +138,7 @@ func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
 			guard !refParts.isEmpty else {
 				continue
 			}
-			let ref = String(refParts[0])
+			let ref = String(refParts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
 			refs.append(DiscoveredRef(sha: sha, ref: ref))
 		}
 	}
@@ -147,9 +149,11 @@ func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
 func buildLsRefsRequest() -> Data {
 	var lines: [Data] = []
 
-	lines.append(encodePktLine("command=ls-refs\u{00}peel\u{00}symrefs"))
+	lines.append(encodePktLine("command=ls-refs\n"))
 	lines.append(Data("0001".utf8))
-	lines.append(encodePktLine("refs/heads/*"))
+	lines.append(encodePktLine("symrefs\n"))
+	lines.append(encodePktLine("peel\n"))
+	lines.append(encodePktLine("ref-prefix refs/heads/\n"))
 	lines.append(encodePktLine(nil))
 
 	return lines.reduce(Data(), +)
@@ -159,6 +163,7 @@ func fetchPackfile(remoteUrl: String, wants: [String], haves: [String]) async th
 	guard let url = URL(string: remoteUrl) else {
 		throw FetchError.invalidURL
 	}
+
 	let fetchUrl = url.appendingPathComponent("git-upload-pack")
 
 	let requestBody = buildFetchRequest(wants: wants, haves: haves)
@@ -180,29 +185,73 @@ func fetchPackfile(remoteUrl: String, wants: [String], haves: [String]) async th
 		throw FetchError.failedToFetchPackfile(httpResponse.statusCode, HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode))
 	}
 
-	guard let packfileOffset = findPackfileStart(data) else {
+	let packfileData = extractPackfileFromSideband(data)
+
+	guard !packfileData.isEmpty else {
 		return []
 	}
 
-	let packfileData = data[packfileOffset...]
-	return try parsePackfile(Data(packfileData))
+	return try parsePackfile(packfileData)
+}
+
+private func extractPackfileFromSideband(_ data: Data) -> Data {
+	var offset = 0
+	var packfileData = Data()
+
+	while offset < data.count {
+		if offset + 4 > data.count {
+			break
+		}
+
+		let hexLen = String(data: data[offset ..< (offset + 4)], encoding: .ascii) ?? ""
+
+		if hexLen == "0000" {
+			offset += 4
+			continue
+		}
+
+		if hexLen == "0001" {
+			offset += 4
+			continue
+		}
+
+		guard let length = Int(hexLen, radix: 16), length > 0, offset + length <= data.count else {
+			break
+		}
+
+		let payload = data[(offset + 4) ..< (offset + length)]
+
+		if payload.count > 0 {
+			let channel = payload[payload.startIndex]
+			if channel == 1 {
+				packfileData.append(payload[(payload.startIndex + 1)...])
+			} else if channel == 3 {
+				let errorMsg = String(data: payload[(payload.startIndex + 1)...], encoding: .utf8) ?? "unknown error"
+				print("Git error: \(errorMsg)")
+			}
+		}
+
+		offset += length
+	}
+
+	return packfileData
 }
 
 func buildFetchRequest(wants: [String], haves: [String]) -> Data {
 	var lines: [Data] = []
 
-	lines.append(encodePktLine("command=fetch"))
+	lines.append(encodePktLine("command=fetch\n"))
+	lines.append(Data("0001".utf8))
 
 	for want in wants {
-		lines.append(encodePktLine("want \(want)"))
+		lines.append(encodePktLine("want \(want)\n"))
 	}
 
 	for have in haves {
-		lines.append(encodePktLine("have \(have)"))
+		lines.append(encodePktLine("have \(have)\n"))
 	}
 
-	lines.append(encodePktLine("done"))
-	lines.append(Data("0001".utf8))
+	lines.append(encodePktLine("done\n"))
 	lines.append(encodePktLine(nil))
 
 	return lines.reduce(Data(), +)

@@ -119,13 +119,16 @@ public static class Fetch
             if (!started) continue;
             if (string.IsNullOrEmpty(line)) continue;
 
-            var parts = line.Split(new[] { ' ' }, 2);
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+
+            var parts = trimmed.Split(new[] { ' ' }, 2);
             if (parts.Length >= 2)
             {
                 var sha = parts[0];
                 if (sha.Length == 40 && sha.All(c => char.IsLetterOrDigit(c)))
                 {
-                    var refName = parts[1].Split('\0')[0];
+                    var refName = parts[1].Trim().Split('\0')[0];
                     refs.Add(new DiscoveredRef { Sha = sha, Ref = refName });
                 }
             }
@@ -138,12 +141,73 @@ public static class Fetch
     {
         var lines = new List<byte[]>();
 
-        lines.Add(Packfile.EncodePktLine("command=ls-refs\0peel\0symrefs"));
+        lines.Add(Packfile.EncodePktLine("command=ls-refs\n"));
         lines.Add(Encoding.UTF8.GetBytes("0001"));
-        lines.Add(Packfile.EncodePktLine("refs/heads/*"));
+        lines.Add(Packfile.EncodePktLine("symrefs\n"));
+        lines.Add(Packfile.EncodePktLine("peel\n"));
+        lines.Add(Packfile.EncodePktLine("ref-prefix refs/heads/\n"));
         lines.Add(Packfile.EncodePktLine(null));
 
         return lines.SelectMany(x => x).ToArray();
+    }
+
+    private static byte[] ExtractPackfileFromSideband(byte[] data)
+    {
+        var offset = 0;
+        var packfileData = new List<byte>();
+
+        while (offset < data.Length)
+        {
+            if (offset + 4 > data.Length)
+            {
+                break;
+            }
+
+            var hexLength = Encoding.ASCII.GetString(data, offset, 4);
+
+            if (hexLength == "0000")
+            {
+                offset += 4;
+                continue;
+            }
+
+            if (hexLength == "0001")
+            {
+                offset += 4;
+                continue;
+            }
+
+            if (!int.TryParse(hexLength, System.Globalization.NumberStyles.HexNumber, null, out var length))
+            {
+                break;
+            }
+
+            if (length <= 0 || offset + length > data.Length)
+            {
+                break;
+            }
+
+            var payload = new byte[length - 4];
+            Array.Copy(data, offset + 4, payload, 0, length - 4);
+
+            if (payload.Length > 0)
+            {
+                var channel = payload[0];
+                if (channel == 1)
+                {
+                    packfileData.AddRange(payload.Skip(1));
+                }
+                else if (channel == 3)
+                {
+                    var errorMsg = Encoding.UTF8.GetString(payload, 1, payload.Length - 1);
+                    Console.Error.WriteLine($"Git error: {errorMsg}");
+                }
+            }
+
+            offset += length;
+        }
+
+        return packfileData.ToArray();
     }
 
     private static async Task<List<PackObject>> FetchPackfile(string remoteUrl, List<string> wants, List<string> haves)
@@ -165,14 +229,13 @@ public static class Fetch
         }
 
         var data = await response.Content.ReadAsByteArrayAsync();
-        var packfileOffset = FindPackfileStart(data);
+        var packfileData = ExtractPackfileFromSideband(data);
 
-        if (packfileOffset == -1)
+        if (packfileData.Length == 0)
         {
             return new List<PackObject>();
         }
 
-        var packfileData = data.Skip(packfileOffset).ToArray();
         return Packfile.ParsePackfile(packfileData);
     }
 
@@ -180,35 +243,22 @@ public static class Fetch
     {
         var lines = new List<byte[]>();
 
-        lines.Add(Packfile.EncodePktLine("command=fetch"));
+        lines.Add(Packfile.EncodePktLine("command=fetch\n"));
+        lines.Add(Encoding.UTF8.GetBytes("0001"));
 
         foreach (var want in wants)
         {
-            lines.Add(Packfile.EncodePktLine($"want {want}"));
+            lines.Add(Packfile.EncodePktLine($"want {want}\n"));
         }
 
         foreach (var have in haves)
         {
-            lines.Add(Packfile.EncodePktLine($"have {have}"));
+            lines.Add(Packfile.EncodePktLine($"have {have}\n"));
         }
 
-        lines.Add(Packfile.EncodePktLine("done"));
-        lines.Add(Encoding.UTF8.GetBytes("0001"));
+        lines.Add(Packfile.EncodePktLine("done\n"));
         lines.Add(Packfile.EncodePktLine(null));
 
         return lines.SelectMany(x => x).ToArray();
-    }
-
-    private static int FindPackfileStart(byte[] data)
-    {
-        var signature = Encoding.ASCII.GetBytes("PACK");
-        for (var i = 0; i < data.Length - 4; i++)
-        {
-            if (data.Skip(i).Take(4).SequenceEqual(signature))
-            {
-                return i;
-            }
-        }
-        return -1;
     }
 }
