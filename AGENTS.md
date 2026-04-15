@@ -90,8 +90,7 @@ swift test --filter InitTests       # Run single test class
 swift test --filter InitTests.shouldCreateGitDirectory  # Run single test
 
 # Linting/Formatting
-swift-format lint --recursive Sources/ Tests/
-swift-format format --recursive --in-place Sources/ Tests/
+swiftformat .
 ```
 
 ### Code Style (Swift)
