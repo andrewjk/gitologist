@@ -42,10 +42,7 @@ func fetchFromRemote(at path: String, remote: String? = nil) async throws -> Fet
 		return FetchResult(remote: remoteName, refs: [])
 	}
 
-	var refs = try await discoverRefs(remoteUrl: remoteUrl)
-	if refs.isEmpty {
-		refs = try await discoverRefsV2(remoteUrl: remoteUrl)
-	}
+	let refs = try await discoverRefs(remoteUrl: remoteUrl)
 	var result = FetchResult(remote: remoteName, refs: [])
 
 	var wants: [String] = []
@@ -96,68 +93,6 @@ struct DiscoveredRef {
 }
 
 func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
-	guard let url = URL(string: remoteUrl) else {
-		throw FetchError.invalidURL
-	}
-	var components = URLComponents(url: url.appendingPathComponent("info/refs"), resolvingAgainstBaseURL: true)
-	components?.queryItems = [URLQueryItem(name: "service", value: "git-upload-pack")]
-
-	guard let fetchUrl = components?.url else {
-		throw FetchError.invalidURL
-	}
-
-	var request = URLRequest(url: fetchUrl)
-	request.httpMethod = "GET"
-	request.setValue("application/x-git-upload-pack-advertisement", forHTTPHeaderField: "Accept")
-	request.setValue("version=2", forHTTPHeaderField: "Git-Protocol")
-
-	let (data, response) = try await URLSession.shared.data(for: request)
-
-	guard let httpResponse = response as? HTTPURLResponse else {
-		throw FetchError.failedToDiscoverRefs(0, "Invalid response")
-	}
-
-	guard httpResponse.statusCode == 200 else {
-		throw FetchError.failedToDiscoverRefs(httpResponse.statusCode, HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode))
-	}
-
-	let lines = decodePktLines(data)
-
-	var refs: [DiscoveredRef] = []
-	var started = false
-
-	for line in lines {
-		if line.contains("# service=git-upload-pack") {
-			started = true
-			continue
-		}
-
-		if !started {
-			continue
-		}
-		if line.isEmpty {
-			continue
-		}
-
-		let parts = line.split(separator: " ", maxSplits: 1)
-		if parts.count >= 2 {
-			let sha = String(parts[0])
-			guard sha.count == 40, sha.allSatisfy({ $0.isNumber || ($0.isLetter && $0.isASCII) }) else {
-				continue
-			}
-			let refParts = String(parts[1]).split(separator: "\0")
-			guard !refParts.isEmpty else {
-				continue
-			}
-			let ref = String(refParts[0])
-			refs.append(DiscoveredRef(sha: sha, ref: ref))
-		}
-	}
-
-	return refs
-}
-
-func discoverRefsV2(remoteUrl: String) async throws -> [DiscoveredRef] {
 	guard let url = URL(string: remoteUrl) else {
 		throw FetchError.invalidURL
 	}
@@ -213,7 +148,7 @@ func buildLsRefsRequest() -> Data {
 	var lines: [Data] = []
 
 	lines.append(encodePktLine("command=ls-refs\u{00}peel\u{00}symrefs"))
-	lines.append(encodePktLine("0001"))
+	lines.append(Data("0001".utf8))
 	lines.append(encodePktLine("refs/heads/*"))
 	lines.append(encodePktLine(nil))
 
@@ -267,7 +202,7 @@ func buildFetchRequest(wants: [String], haves: [String]) -> Data {
 	}
 
 	lines.append(encodePktLine("done"))
-	lines.append(encodePktLine("0001"))
+	lines.append(Data("0001".utf8))
 	lines.append(encodePktLine(nil))
 
 	return lines.reduce(Data(), +)

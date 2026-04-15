@@ -1,20 +1,16 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
 
 export async function readObject(gitDir: string, sha: string): Promise<string> {
-	const zlib = await import("node:zlib");
+	const data = await readObjectData(gitDir, sha);
 
-	const objectPath = join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
-	const compressed = await readFile(objectPath);
-	const decompressed = zlib.inflateSync(compressed);
-
-	const nullIndex = decompressed.indexOf(0);
-	const header = decompressed.slice(0, nullIndex).toString("utf-8");
-	const content = decompressed.slice(nullIndex + 1);
+	const nullIndex = data.indexOf(0);
+	const header = data.slice(0, nullIndex).toString("utf-8");
+	const content = data.slice(nullIndex + 1);
 
 	// For tree objects, we need to return binary content differently
 	// Return header as string, but mark it so we know it's binary
@@ -25,6 +21,14 @@ export async function readObject(gitDir: string, sha: string): Promise<string> {
 	}
 
 	return `${header}\n${content.toString("utf-8")}`;
+}
+
+export async function readObjectData(gitDir: string, sha: string): Promise<Buffer> {
+	const zlib = await import("node:zlib");
+
+	const objectPath = join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
+	const compressed = await readFile(objectPath);
+	return zlib.inflateSync(compressed);
 }
 
 export async function getCurrentBranch(gitDir: string): Promise<string> {
@@ -66,9 +70,11 @@ export async function hashFileAsBlob(filePath: string): Promise<string> {
 	const crypto = await import("node:crypto");
 	const content = await readFile(filePath, "utf-8");
 	const contentBytes = Buffer.from(content, "utf-8");
-	const header = `blob ${contentBytes.length}\0${content}`;
+	const header = `blob ${contentBytes.length}\0`;
+	const headerBytes = Buffer.from(header, "utf-8");
+	const data = Buffer.concat([headerBytes, contentBytes]);
 	const hash = crypto.createHash("sha1");
-	hash.update(header);
+	hash.update(data);
 	return hash.digest("hex");
 }
 
@@ -310,6 +316,47 @@ export function parseTreeEntries(treeData: string): TreeEntry[] {
 	return entries;
 }
 
+export function parseTreeEntriesFromData(content: Buffer): TreeEntry[] {
+	const entries: TreeEntry[] = [];
+	let offset = 0;
+
+	while (offset < content.length) {
+		// Find space after mode
+		const spaceIndex = content.indexOf(0x20, offset);
+		if (spaceIndex === -1) break;
+
+		// Find null after filename
+		const nullIndex = content.indexOf(0x00, spaceIndex + 1);
+		if (nullIndex === -1) break;
+
+		// Extract mode (e.g., "100644")
+		const mode = content.slice(offset, spaceIndex).toString("utf-8");
+
+		// Extract filename
+		const name = content.slice(spaceIndex + 1, nullIndex).toString("utf-8");
+
+		// Extract 20-byte SHA
+		const shaStart = nullIndex + 1;
+		const shaEnd = shaStart + 20;
+		if (shaEnd > content.length) break;
+		const sha = content.slice(shaStart, shaEnd).toString("hex");
+
+		// Determine type from mode
+		const type = mode === "040000" ? "tree" : "blob";
+
+		entries.push({
+			path: name,
+			sha,
+			mode,
+			type,
+		});
+
+		offset = shaEnd;
+	}
+
+	return entries;
+}
+
 export function extractContentFromBlob(blobData: string): string {
 	const lines = blobData.split("\n");
 	const header = lines[0];
@@ -330,4 +377,54 @@ export async function updateBranch(
 	const branchPath = join(gitDir, "refs", "heads", branchName);
 	await mkdir(dirname(branchPath), { recursive: true });
 	await writeFile(branchPath, commitSha + "\n", "utf-8");
+}
+
+export async function updateIndex(
+	gitDir: string,
+	workingPath: string,
+	treeSha: string,
+): Promise<void> {
+	const indexPath = join(gitDir, "index");
+	const treeData = await readObject(gitDir, treeSha);
+	const entries = parseTreeEntries(treeData);
+
+	const newIndex = new Map<string, IndexEntry>();
+
+	for (const entry of entries) {
+		const fullPath = join(workingPath, entry.path);
+		try {
+			const stats = await stat(fullPath);
+			newIndex.set(entry.path, {
+				path: entry.path,
+				sha: entry.sha,
+				mode: entry.mode,
+				size: stats.size,
+				ctimeSeconds: Math.floor(stats.ctimeMs / 1000),
+				ctimeNanos: (stats.ctimeMs % 1000) * 1000000,
+				mtimeSeconds: Math.floor(stats.mtimeMs / 1000),
+				mtimeNanos: (stats.mtimeMs % 1000) * 1000000,
+				dev: stats.dev,
+				ino: stats.ino,
+				uid: stats.uid,
+				gid: stats.gid,
+			});
+		} catch {
+			newIndex.set(entry.path, {
+				path: entry.path,
+				sha: entry.sha,
+				mode: entry.mode,
+				size: 0,
+				ctimeSeconds: 0,
+				ctimeNanos: 0,
+				mtimeSeconds: 0,
+				mtimeNanos: 0,
+				dev: 0,
+				ino: 0,
+				uid: 0,
+				gid: 0,
+			});
+		}
+	}
+
+	await writeIndex(indexPath, newIndex);
 }

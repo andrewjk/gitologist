@@ -16,11 +16,16 @@ public static class Packfile
     {
         if (line == null)
         {
-            return new byte[] { 0x00, 0x00, 0x00, 0x00 };
+            return Encoding.UTF8.GetBytes("0000");
         }
 
         var length = Encoding.UTF8.GetByteCount(line) + 4;
         var hexLength = length.ToString("x4");
+        if (length == 4)
+        {
+            return Encoding.UTF8.GetBytes(hexLength);
+        }
+
         var hexBytes = Encoding.UTF8.GetBytes(hexLength);
         var lineBytes = Encoding.UTF8.GetBytes(line);
 

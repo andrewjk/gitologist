@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import type { PackObject } from "./packfile.ts";
-import { readObject } from "./utils.ts";
+import { parseTreeEntriesFromData, readObject, readObjectData } from "./utils.ts";
 
 export async function enumerateObjects(
 	gitDir: string,
@@ -14,24 +14,36 @@ export async function enumerateObjects(
 	}
 	visited.add(sha);
 
-	const objectData = await readObject(gitDir, sha);
-	const headerEnd = objectData.indexOf("\n");
-	const header = objectData.slice(0, headerEnd);
-	const content = objectData.slice(headerEnd + 1);
+	const objectData = await readObjectData(gitDir, sha);
+	const nullIndex = objectData.indexOf(0);
 
+	if (nullIndex === -1) {
+		return [];
+	}
+
+	const headerData = objectData.subarray(0, nullIndex);
+	const contentData = objectData.subarray(nullIndex + 1);
+
+	const header = headerData.toString("utf-8");
 	const spaceIndex = header.indexOf(" ");
-	const type = header.slice(0, spaceIndex) as PackObject["type"];
+
+	if (spaceIndex === -1) {
+		return [];
+	}
+
+	const typeString = header.slice(0, spaceIndex);
+	const type = typeString as PackObject["type"];
 
 	const objects: PackObject[] = [
 		{
 			type,
 			sha,
-			content: Buffer.from(content, "utf-8"),
+			content: contentData,
 		},
 	];
 
 	if (type === "commit") {
-		// Parse parent commits and tree
+		const content = contentData.toString("utf-8");
 		const lines = content.split("\n");
 		for (const line of lines) {
 			if (line.startsWith("parent ")) {
@@ -45,8 +57,7 @@ export async function enumerateObjects(
 			}
 		}
 	} else if (type === "tree") {
-		// Parse tree entries
-		const entries = parseTreeEntries(content);
+		const entries = parseTreeEntriesFromData(contentData);
 		for (const entry of entries) {
 			const entryObjects = await enumerateObjects(gitDir, entry.sha, visited);
 			objects.push(...entryObjects);
@@ -54,23 +65,6 @@ export async function enumerateObjects(
 	}
 
 	return objects;
-}
-
-function parseTreeEntries(content: string): Array<{ sha: string; type: string }> {
-	const entries: Array<{ sha: string; type: string }> = [];
-	const lines = content.split("\n").filter((line) => line.trim());
-
-	for (const line of lines) {
-		const parts = line.split(" ");
-		if (parts.length >= 3) {
-			const mode = parts[0];
-			const sha = parts[2];
-			const entryType = mode === "040000" ? "tree" : "blob";
-			entries.push({ sha, type: entryType });
-		}
-	}
-
-	return entries;
 }
 
 export async function getAllObjects(gitDir: string): Promise<PackObject[]> {

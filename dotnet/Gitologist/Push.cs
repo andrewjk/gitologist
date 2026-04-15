@@ -30,7 +30,11 @@ public static class Push
 
         var currentStatus = await Status.GetStatus(path);
 
-        if (currentStatus.Modified.Length > 0 || currentStatus.Untracked.Length > 0)
+        if (
+            currentStatus.Modified.Length > 0 ||
+            currentStatus.Untracked.Length > 0 ||
+            currentStatus.Deleted.Length > 0
+        )
         {
             throw new InvalidOperationException(
                 "You have uncommitted changes. Commit or stash them before pushing."
@@ -66,15 +70,27 @@ public static class Push
         string gitDir
     )
     {
-        var remoteRefs = await DiscoverRefsForPush(remoteUrl);
-        var remoteRef = remoteRefs.FirstOrDefault(r => r.Ref == $"refs/heads/{branchName}");
-        var oldSha = remoteRef?.Sha ?? new string('0', 40);
+        var oldSha = new string('0', 40);
+
+        try
+        {
+            var remoteRefs = await DiscoverRefsForPush(remoteUrl);
+            var remoteRef = remoteRefs.FirstOrDefault(r => r.Ref == $"refs/heads/{branchName}");
+            if (remoteRef != null)
+            {
+                oldSha = remoteRef.Sha;
+            }
+        }
+        catch
+        {
+            // If we can't discover refs, assume it's a new branch
+        }
 
         var objects = await Objects.EnumerateObjects(gitDir, commitSha);
 
         var packfile = Packfile.CreatePackfile(objects);
 
-        await UploadPackfile(remoteUrl, oldSha, commitSha, branchName, packfile);
+        await SendPush(remoteUrl, oldSha, commitSha, branchName, packfile);
     }
 
     private static async Task<List<DiscoveredRef>> DiscoverRefsForPush(string remoteUrl)
@@ -86,9 +102,9 @@ public static class Push
         client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         var response = await client.GetAsync(url);
-        if (!response.IsSuccessStatusCode)
+        if (response.StatusCode != System.Net.HttpStatusCode.OK)
         {
-            throw new InvalidOperationException($"Failed to discover refs: {(int)response.StatusCode} {response.ReasonPhrase}");
+            return new List<DiscoveredRef>();
         }
 
         var data = await response.Content.ReadAsByteArrayAsync();
@@ -123,7 +139,7 @@ public static class Push
         return refs;
     }
 
-    private static async Task UploadPackfile(
+    private static async Task SendPush(
         string remoteUrl,
         string oldSha,
         string newSha,
@@ -139,11 +155,13 @@ public static class Push
         using var content = new ByteArrayContent(requestBody);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-git-receive-pack-request");
         client.DefaultRequestHeaders.Add("Accept", "application/x-git-receive-pack-result");
+        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         var response = await client.PostAsync(url, content);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"Push failed: {(int)response.StatusCode} {response.ReasonPhrase}");
+            var errorText = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException($"Push failed: {(int)response.StatusCode} {errorText ?? response.ReasonPhrase}");
         }
 
         var data = await response.Content.ReadAsByteArrayAsync();
@@ -163,7 +181,7 @@ public static class Push
     {
         var lines = new List<byte[]>();
 
-        lines.Add(Packfile.EncodePktLine($"{oldSha} {newSha} refs/heads/{branchName}"));
+        lines.Add(Packfile.EncodePktLine($"{oldSha} {newSha} refs/heads/{branchName}\0report-status agent=gitologist/1.0"));
         lines.Add(Packfile.EncodePktLine(null));
         lines.Add(packfile);
 

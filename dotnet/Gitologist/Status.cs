@@ -83,10 +83,10 @@ public static class Status
         {
             Branch = branch,
             UpToDate = $"Your branch is up to date with 'origin/{branch}'.",
-            Staged = staged.ToArray(),
-            Modified = modified.ToArray(),
-            Untracked = untracked.ToArray(),
-            Deleted = deleted.ToArray(),
+            Staged = staged.OrderBy(x => x).ToArray(),
+            Modified = modified.OrderBy(x => x).ToArray(),
+            Untracked = untracked.OrderBy(x => x).ToArray(),
+            Deleted = deleted.OrderBy(x => x).ToArray(),
         };
     }
 }

@@ -51,32 +51,6 @@ pub fn fetchFromRemote(io: std.Io, allocator: std.mem.Allocator, path: []const u
         refs.deinit(allocator);
     }
 
-    if (refs.items.len == 0) {
-        var v2_refs = try discoverRefsV2(io, allocator, remote_url);
-        defer {
-            for (v2_refs.items) |ref| {
-                allocator.free(ref.sha);
-                allocator.free(ref.ref);
-            }
-            v2_refs.deinit(allocator);
-        }
-        var v2_refs_copy = std.ArrayList(DiscoveredRef).initCapacity(allocator, v2_refs.items.len) catch unreachable;
-        errdefer {
-            for (v2_refs_copy.items) |ref| {
-                allocator.free(ref.sha);
-                allocator.free(ref.ref);
-            }
-            v2_refs_copy.deinit(allocator);
-        }
-        for (v2_refs.items) |ref| {
-            try v2_refs_copy.append(allocator, .{
-                .sha = try allocator.dupe(u8, ref.sha),
-                .ref = try allocator.dupe(u8, ref.ref),
-            });
-        }
-        refs = v2_refs_copy;
-    }
-
     var result = FetchResult{
         .remote = try allocator.dupe(u8, remote_name),
         .refs = std.ArrayList(RefInfo).initCapacity(allocator, 0) catch unreachable,
@@ -267,126 +241,6 @@ fn discoverRefs(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8
     return refs;
 }
 
-fn discoverRefsV2(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8) !std.ArrayList(DiscoveredRef) {
-    var url_parts = std.mem.splitScalar(u8, remote_url, '/');
-    var host: []const u8 = undefined;
-
-    var i: usize = 0;
-    while (url_parts.next()) |part| {
-        if (i == 0) {
-            if (std.mem.startsWith(u8, part, "http://")) {
-                host = part["http://".len..];
-            } else if (std.mem.startsWith(u8, part, "https://")) {
-                host = part["https://".len..];
-            } else {
-                host = part;
-            }
-        }
-        i += 1;
-    }
-
-    const full_url = try std.fmt.allocPrint(allocator, "http://{s}/git-upload-pack", .{host});
-    defer allocator.free(full_url);
-
-    var client: std.http.Client = .{ .allocator = allocator, .io = io };
-    defer client.deinit();
-
-    const uri = try std.Uri.parse(full_url);
-    var request = try client.request(.POST, uri, .{});
-    defer request.deinit();
-
-    const request_body = try buildLsRefsRequest(allocator);
-    defer allocator.free(request_body);
-
-    try request.sendBodyComplete(@constCast(request_body));
-
-    var redirect_buffer: [4096]u8 = undefined;
-    var response = try request.receiveHead(&redirect_buffer);
-
-    if (response.head.status != .ok) {
-        return error.FailedToDiscoverRefsV2;
-    }
-
-    var body = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
-    defer body.deinit(allocator);
-
-    var transfer_buffer: [8192]u8 = undefined;
-    const reader = response.reader(&transfer_buffer);
-
-    try reader.appendRemainingUnlimited(allocator, &body);
-
-    var lines = try packfile.decodePktLines(allocator, body.items);
-    defer {
-        for (lines.items) |line| allocator.free(line);
-        lines.deinit(allocator);
-    }
-
-    var refs = std.ArrayList(DiscoveredRef).initCapacity(allocator, 0) catch unreachable;
-    errdefer {
-        for (refs.items) |ref| {
-            allocator.free(ref.sha);
-            allocator.free(ref.ref);
-        }
-        refs.deinit(allocator);
-    }
-
-    for (lines.items) |line| {
-        if (line.len == 0) continue;
-
-        var parts = std.mem.splitScalar(u8, line, ' ');
-        const sha_str = parts.next() orelse continue;
-        const ref_str = parts.next() orelse continue;
-
-        if (sha_str.len != 40) continue;
-
-        const is_valid_sha = blk: {
-            for (sha_str) |c| {
-                if (!(std.ascii.isDigit(c) or (std.ascii.isHex(c)))) break :blk false;
-            }
-            break :blk true;
-        };
-
-        if (!is_valid_sha) continue;
-
-        const null_idx = std.mem.indexOfScalar(u8, ref_str, 0) orelse ref_str.len;
-        const ref_name = ref_str[0..null_idx];
-
-        try refs.append(allocator, .{
-            .sha = try allocator.dupe(u8, sha_str),
-            .ref = try allocator.dupe(u8, ref_name),
-        });
-    }
-
-    return refs;
-}
-
-fn buildLsRefsRequest(allocator: std.mem.Allocator) ![]const u8 {
-    var lines = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable;
-    errdefer {
-        for (lines.items) |line| allocator.free(line);
-        lines.deinit(allocator);
-    }
-
-    const command_pkt = try packfile.encodePktLine(allocator, "command=ls-refs\x00peel\x00symrefs");
-    try lines.append(allocator, command_pkt);
-
-    const delimiter_pkt = try packfile.encodePktLine(allocator, "0001");
-    try lines.append(allocator, delimiter_pkt);
-
-    const pattern_pkt = try packfile.encodePktLine(allocator, "refs/heads/*");
-    try lines.append(allocator, pattern_pkt);
-
-    const flush_pkt = try packfile.encodePktLine(allocator, null);
-    try lines.append(allocator, flush_pkt);
-
-    var result = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
-    for (lines.items) |line| {
-        try result.appendSlice(allocator, line);
-    }
-
-    return result.toOwnedSlice(allocator);
-}
-
 fn fetchPackfile(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8, wants: std.ArrayList([]const u8), haves: std.ArrayList([]const u8)) !std.ArrayList(packfile.PackObject) {
     var url_parts = std.mem.splitScalar(u8, remote_url, '/');
     var host: []const u8 = undefined;
@@ -466,7 +320,7 @@ fn buildFetchRequest(allocator: std.mem.Allocator, wants: std.ArrayList([]const 
     const done_pkt = try packfile.encodePktLine(allocator, "done");
     try lines.append(allocator, done_pkt);
 
-    const delimiter_pkt = try packfile.encodePktLine(allocator, "0001");
+    const delimiter_pkt = try allocator.dupe(u8, "0001");
     try lines.append(allocator, delimiter_pkt);
 
     const flush_pkt = try packfile.encodePktLine(allocator, null);

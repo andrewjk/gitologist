@@ -95,42 +95,66 @@ pub fn addAll(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void 
     defer git_dir.close(io);
 
     const current_status = try status_module.status(io, allocator, path);
-
-    const total_files = current_status.untracked.len + current_status.modified.len;
-    if (total_files == 0) {
+    defer {
         allocator.free(current_status.branch);
         allocator.free(current_status.up_to_date);
         for (current_status.staged) |item| allocator.free(item);
         allocator.free(current_status.staged);
-        for (current_status.modified) |item| allocator.free(item);
-        allocator.free(current_status.modified);
-        for (current_status.untracked) |item| allocator.free(item);
-        allocator.free(current_status.untracked);
-        return;
+        for (current_status.deleted) |item| allocator.free(item);
+        allocator.free(current_status.deleted);
     }
 
-    var files_to_add = std.ArrayList([]const u8).initCapacity(allocator, total_files) catch unreachable;
+    const total_files = current_status.untracked.len + current_status.modified.len;
+    if (total_files > 0) {
+        var files_to_add = std.ArrayList([]const u8).initCapacity(allocator, total_files) catch unreachable;
 
-    for (current_status.untracked) |file| {
-        try files_to_add.append(allocator, file);
-    }
-    for (current_status.modified) |file| {
-        try files_to_add.append(allocator, file);
-    }
-
-    defer {
-        for (files_to_add.items) |file| {
-            allocator.free(file);
+        for (current_status.untracked) |file| {
+            try files_to_add.append(allocator, file);
         }
-        files_to_add.deinit(allocator);
+        for (current_status.modified) |file| {
+            try files_to_add.append(allocator, file);
+        }
+
+        defer {
+            for (files_to_add.items) |file| {
+                allocator.free(file);
+            }
+            files_to_add.deinit(allocator);
+        }
+
+        try add(io, allocator, path, files_to_add.items);
     }
 
-    allocator.free(current_status.branch);
-    allocator.free(current_status.up_to_date);
-    for (current_status.staged) |item| allocator.free(item);
-    allocator.free(current_status.staged);
-    allocator.free(current_status.modified);
-    allocator.free(current_status.untracked);
+    if (current_status.deleted.len > 0) {
+        const git_index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
+        defer allocator.free(git_index_path);
 
-    try add(io, allocator, path, files_to_add.items);
+        var index = try utils.getIndex(io, allocator, git_index_path);
+        defer {
+            var iter = index.iterator();
+            while (iter.next()) |entry| {
+                const value = entry.value_ptr.*;
+                allocator.free(value.path);
+                allocator.free(value.sha);
+                allocator.free(value.mode);
+            }
+            index.deinit();
+        }
+
+        for (current_status.deleted) |file| {
+            const old_entry = index.fetchRemove(file);
+            if (old_entry) |entry| {
+                allocator.free(entry.value.path);
+                allocator.free(entry.value.sha);
+                allocator.free(entry.value.mode);
+            }
+        }
+
+        try utils.writeIndex(io, allocator, git_index_path, index);
+    }
+
+    // Don't free untracked and modified items - they're moved to files_to_add and freed there
+    // Only free the slices themselves, not the items they contain
+    allocator.free(current_status.untracked);
+    allocator.free(current_status.modified);
 }

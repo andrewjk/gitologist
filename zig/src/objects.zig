@@ -20,24 +20,26 @@ pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
 
     try visited.put(sha, {});
 
-    const object_data = try utils.readObject(io, allocator, git_dir_path, sha);
+    const object_data = try utils.readObjectData(io, allocator, git_dir_path, sha);
     defer allocator.free(object_data);
 
-    const header_end = std.mem.indexOfScalar(u8, object_data, '\n') orelse return objects;
-    const header = object_data[0..header_end];
+    const null_idx = std.mem.indexOfScalar(u8, object_data, 0) orelse return objects;
 
+    const header_data = object_data[0..null_idx];
+    const content_data = object_data[null_idx + 1 ..];
+
+    const header = header_data;
     const space_idx = std.mem.indexOfScalar(u8, header, ' ') orelse return objects;
     const obj_type = header[0..space_idx];
-
-    const content = object_data[header_end + 1 ..];
 
     try objects.append(allocator, .{
         .obj_type = try allocator.dupe(u8, obj_type),
         .sha = try allocator.dupe(u8, sha),
-        .content = try allocator.dupe(u8, content),
+        .content = try allocator.dupe(u8, content_data),
     });
 
     if (std.mem.eql(u8, obj_type, "commit")) {
+        const content = content_data;
         var lines = std.mem.splitScalar(u8, content, '\n');
 
         while (lines.next()) |line| {
@@ -64,7 +66,7 @@ pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
             }
         }
     } else if (std.mem.eql(u8, obj_type, "tree")) {
-        var entries = try utils.parseTreeEntries(allocator, object_data);
+        var entries = try utils.parseTreeEntriesFromData(allocator, content_data);
         defer {
             for (entries.items) |entry| {
                 allocator.free(entry.path);

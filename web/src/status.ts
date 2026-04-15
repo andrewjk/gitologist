@@ -68,10 +68,10 @@ export async function status(path: string): Promise<StatusInfo> {
 	return {
 		branch,
 		upToDate: `Your branch is up to date with 'origin/${branch}'.`,
-		staged,
-		modified,
-		untracked,
-		deleted,
+		staged: staged.sort(),
+		modified: modified.sort(),
+		untracked: untracked.sort(),
+		deleted: deleted.sort(),
 	};
 }
 

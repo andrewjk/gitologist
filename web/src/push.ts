@@ -24,7 +24,11 @@ export async function push(path: string, remote?: string, branch?: string): Prom
 
 	const currentStatus = await status(path);
 
-	if (currentStatus.modified.length > 0 || currentStatus.untracked.length > 0) {
+	if (
+		currentStatus.modified.length > 0 ||
+		currentStatus.untracked.length > 0 ||
+		currentStatus.deleted.length > 0
+	) {
 		throw new Error("You have uncommitted changes. Commit or stash them before pushing.");
 	}
 
@@ -46,10 +50,17 @@ async function pushToRemote(
 	branchName: string,
 	gitDir: string,
 ): Promise<void> {
-	// Get remote refs to determine what they have
-	const remoteRefs = await discoverRefsForPush(remoteUrl);
-	const remoteRef = remoteRefs.find((r) => r.ref === `refs/heads/${branchName}`);
-	const oldSha = remoteRef?.sha || "0".repeat(40);
+	let oldSha = "0".repeat(40);
+
+	try {
+		const remoteRefs = await discoverRefsForPush(remoteUrl);
+		const remoteRef = remoteRefs.find((r) => r.ref === `refs/heads/${branchName}`);
+		if (remoteRef) {
+			oldSha = remoteRef.sha;
+		}
+	} catch {
+		// If we can't discover refs, assume it's a new branch
+	}
 
 	// Enumerate all objects we need to send
 	const objects = await enumerateObjects(gitDir, commitSha);
@@ -58,7 +69,7 @@ async function pushToRemote(
 	const packfile = createPackfile(objects);
 
 	// Build and send push request
-	await uploadPackfile(remoteUrl, oldSha, commitSha, branchName, packfile);
+	await sendPush(remoteUrl, oldSha, commitSha, branchName, packfile);
 }
 
 async function discoverRefsForPush(
@@ -75,8 +86,8 @@ async function discoverRefsForPush(
 		},
 	});
 
-	if (!response.ok) {
-		throw new Error(`Failed to discover refs: ${response.status} ${response.statusText}`);
+	if (response.status !== 200) {
+		return [];
 	}
 
 	const buffer = Buffer.from(await response.arrayBuffer());
@@ -106,7 +117,7 @@ async function discoverRefsForPush(
 	return refs;
 }
 
-async function uploadPackfile(
+async function sendPush(
 	remoteUrl: string,
 	oldSha: string,
 	newSha: string,
@@ -122,12 +133,14 @@ async function uploadPackfile(
 		headers: {
 			"Content-Type": "application/x-git-receive-pack-request",
 			Accept: "application/x-git-receive-pack-result",
+			"Git-Protocol": "version=2",
 		},
 		body: requestBody,
 	});
 
 	if (!response.ok) {
-		throw new Error(`Push failed: ${response.status} ${response.statusText}`);
+		const errorText = await response.text();
+		throw new Error(`Push failed: ${response.status} ${errorText || response.statusText}`);
 	}
 
 	// Parse response for errors
@@ -149,8 +162,12 @@ function buildPushRequest(
 ): Buffer {
 	const lines: Buffer[] = [];
 
-	// Update command
-	lines.push(encodePktLine(`${oldSha} ${newSha} refs/heads/${branchName}`));
+	// Update command with capabilities
+	lines.push(
+		encodePktLine(
+			`${oldSha} ${newSha} refs/heads/${branchName}\0report-status agent=gitologist/1.0`,
+		),
+	);
 
 	// Flush packet to end commands
 	lines.push(encodePktLine(null));

@@ -10,8 +10,9 @@ func hashFile(at path: String) async throws -> String {
 
 func hashFileAsBlob(at path: String) async throws -> String {
 	let content = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
-	let header = "blob \(content.count)\0\(content)"
-	let data = header.data(using: .utf8)!
+	let contentData = content.data(using: .utf8)!
+	let header = "blob \(contentData.count)\0"
+	let data = header.data(using: .utf8)! + contentData
 	let sha1 = Insecure.SHA1.hash(data: data)
 	return sha1.compactMap { String(format: "%02x", $0) }.joined()
 }
@@ -307,14 +308,18 @@ func updateBranch(at gitDir: String, branchName: String, commitSha: String) asyn
 	try "\(commitSha)\n".write(to: branchPath, atomically: true, encoding: .utf8)
 }
 
-func readObject(at gitDir: String, sha: String) async throws -> String {
+func readObjectData(at gitDir: String, sha: String) async throws -> Data {
 	let objectPath = URL(fileURLWithPath: gitDir)
 		.appendingPathComponent("objects")
 		.appendingPathComponent(String(sha.prefix(2)))
 		.appendingPathComponent(String(sha.dropFirst(2)))
 
 	let compressedData = try Data(contentsOf: objectPath)
-	let data = try decompressData(compressedData)
+	return try decompressData(compressedData)
+}
+
+func readObject(at gitDir: String, sha: String) async throws -> String {
+	let data = try await readObjectData(at: gitDir, sha: sha)
 
 	// Find the null byte separating header from content
 	guard let nullIndex = data.firstIndex(of: 0) else {
@@ -432,8 +437,6 @@ func parseTreeEntries(_ treeData: String) throws -> [TreeEntry] {
 		return []
 	}
 
-	var entries: [TreeEntry] = []
-
 	// Skip header by starting after first newline
 	let lines = treeData.split(separator: "\n", maxSplits: 1)
 	guard lines.count >= 2, let header = lines.first, header.hasPrefix("tree ") else {
@@ -457,7 +460,13 @@ func parseTreeEntries(_ treeData: String) throws -> [TreeEntry] {
 		i = nextIndex
 	}
 
+	return try parseTreeEntriesFromData(content)
+}
+
+func parseTreeEntriesFromData(_ content: Data) throws -> [TreeEntry] {
+	var entries: [TreeEntry] = []
 	var offset = 0
+
 	while offset < content.count {
 		let startIndex = content.startIndex.advanced(by: offset)
 

@@ -25,7 +25,8 @@ export async function commit(path: string, message: string): Promise<string> {
 	if (
 		currentStatus.staged.length === 0 &&
 		currentStatus.modified.length === 0 &&
-		currentStatus.untracked.length === 0
+		currentStatus.untracked.length === 0 &&
+		currentStatus.deleted.length === 0
 	) {
 		throw new Error("Nothing to commit");
 	}

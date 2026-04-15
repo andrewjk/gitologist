@@ -65,9 +65,16 @@ export async function addAll(path: string): Promise<void> {
 	const currentStatus = await status(path);
 	const filesToAdd = [...currentStatus.untracked, ...currentStatus.modified];
 
-	if (filesToAdd.length === 0) {
-		return;
+	if (filesToAdd.length > 0) {
+		await add(path, filesToAdd);
 	}
 
-	await add(path, filesToAdd);
+	if (currentStatus.deleted.length > 0) {
+		const indexPath = join(gitDir, "index");
+		const index = await getIndex(indexPath);
+		for (const file of currentStatus.deleted) {
+			index.delete(file);
+		}
+		await writeIndex(indexPath, index);
+	}
 }

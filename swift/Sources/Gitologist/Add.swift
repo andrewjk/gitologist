@@ -86,9 +86,16 @@ func addAll(at path: String) async throws {
 	let currentStatus = try await status(at: path)
 	let filesToAdd = currentStatus.untracked + currentStatus.modified
 
-	guard !filesToAdd.isEmpty else {
-		return
+	if !filesToAdd.isEmpty {
+		try await add(at: path, files: filesToAdd)
 	}
 
-	try await add(at: path, files: filesToAdd)
+	if !currentStatus.deleted.isEmpty {
+		let indexPath = gitDir.appendingPathComponent("index")
+		var index = try await getIndex(at: indexPath.path)
+		for file in currentStatus.deleted {
+			index.removeValue(forKey: file)
+		}
+		try await writeIndex(at: indexPath.path, index: index)
+	}
 }

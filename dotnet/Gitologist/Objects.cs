@@ -14,22 +14,25 @@ public static class Objects
         }
         newVisited.Add(sha);
 
-        var objectData = await Utils.ReadObject(gitDir, sha);
-        var headerEnd = objectData.IndexOf('\n');
-        if (headerEnd == -1)
+        var objectData = await Utils.ReadObjectData(gitDir, sha);
+        var nullIndex = Array.IndexOf(objectData, (byte)0);
+        if (nullIndex == -1)
         {
             return new List<PackObject>();
         }
 
-        var header = objectData.Substring(0, headerEnd);
+        var headerData = objectData[..nullIndex];
+        var contentData = objectData[(nullIndex + 1)..];
+
+        var header = Encoding.UTF8.GetString(headerData);
         var spaceIndex = header.IndexOf(' ');
         if (spaceIndex == -1)
         {
             return new List<PackObject>();
         }
 
-        var type = header.Substring(0, spaceIndex);
-        var content = objectData.Substring(headerEnd + 1);
+        var typeString = header.Substring(0, spaceIndex);
+        var type = typeString;
 
         var objects = new List<PackObject>
         {
@@ -37,12 +40,13 @@ public static class Objects
             {
                 Type = type,
                 Sha = sha,
-                Content = Encoding.UTF8.GetBytes(content)
+                Content = contentData
             }
         };
 
         if (type == "commit")
         {
+            var content = Encoding.UTF8.GetString(contentData);
             var lines = content.Split('\n');
             foreach (var line in lines)
             {
@@ -62,7 +66,7 @@ public static class Objects
         }
         else if (type == "tree")
         {
-            var entries = Utils.ParseTreeEntries(objectData);
+            var entries = Utils.ParseTreeEntriesFromData(contentData);
             foreach (var entry in entries)
             {
                 var entryObjects = await EnumerateObjects(gitDir, entry.Sha, newVisited);

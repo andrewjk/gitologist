@@ -46,12 +46,13 @@ pub fn hashFileAsBlob(io: std.Io, allocator: std.mem.Allocator, file_path: []con
         offset += bytes_read;
     }
 
-    // Git blob hash format: "blob <size>\0<content>"
-    const blob_header = try std.fmt.allocPrint(allocator, "blob {d}\x00{s}", .{ content.items.len, content.items });
+    // Git blob hash format: "blob <size>\0" + content
+    const blob_header = try std.fmt.allocPrint(allocator, "blob {d}\x00", .{content.items.len});
     defer allocator.free(blob_header);
 
     var hasher = std.crypto.hash.Sha1.init(.{});
     hasher.update(blob_header);
+    hasher.update(content.items);
 
     var hash: [20]u8 = undefined;
     hasher.final(&hash);
@@ -487,6 +488,40 @@ pub const TreeEntry = struct {
 };
 
 pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) ![]const u8 {
+    const data = try readObjectData(io, allocator, git_dir_path, sha);
+
+    // Find the null byte separating header from content
+    const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse {
+        allocator.free(data);
+        return error.InvalidObjectFormat;
+    };
+
+    const header = data[0..null_idx];
+
+    // For tree objects, return hex-encoded binary content
+    if (std.mem.startsWith(u8, header, "tree ")) {
+        const content_data = data[null_idx + 1 ..];
+
+        // Convert to hex
+        var hex_content = std.ArrayList(u8).initCapacity(allocator, content_data.len * 2) catch unreachable;
+        defer hex_content.deinit(allocator);
+
+        const hex_digits = "0123456789abcdef";
+        for (content_data) |byte| {
+            try hex_content.append(allocator, hex_digits[byte >> 4]);
+            try hex_content.append(allocator, hex_digits[byte & 0x0f]);
+        }
+
+        const result = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ header, hex_content.items });
+        allocator.free(data);
+        return result;
+    }
+
+    // For blobs, preserve the null byte and return as is
+    return data;
+}
+
+pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) ![]const u8 {
     const obj_dir = sha[0..2];
     const obj_name = sha[2..];
 
@@ -507,39 +542,7 @@ pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
     defer writer.deinit();
     _ = try decompress.reader.streamRemaining(&writer.writer);
 
-    const decompressed = try writer.toOwnedSlice();
-
-    // Find the null byte separating header from content
-    const null_idx = std.mem.indexOfScalar(u8, decompressed, 0) orelse {
-        allocator.free(decompressed);
-        return error.InvalidObjectFormat;
-    };
-
-    const header = decompressed[0..null_idx];
-
-    // For tree objects, return hex-encoded binary content
-    if (std.mem.startsWith(u8, header, "tree ")) {
-        const content_data = decompressed[null_idx + 1 ..];
-
-        // Convert to hex
-        var hex_content = std.ArrayList(u8).initCapacity(allocator, content_data.len * 2) catch unreachable;
-        defer hex_content.deinit(allocator);
-
-        //try hex_content.ensureTotalCapacityPrecise(content_data.len * 2);
-
-        const hex_digits = "0123456789abcdef";
-        for (content_data) |byte| {
-            try hex_content.append(allocator, hex_digits[byte >> 4]);
-            try hex_content.append(allocator, hex_digits[byte & 0x0f]);
-        }
-
-        const result = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ header, hex_content.items });
-        allocator.free(decompressed);
-        return result;
-    }
-
-    // For blobs, preserve the null byte and return as is
-    return decompressed;
+    return writer.toOwnedSlice();
 }
 
 pub fn extractContentFromBlob(blob_data: []const u8) []const u8 {
@@ -624,6 +627,63 @@ pub fn parseTreeEntries(allocator: std.mem.Allocator, tree_data: []const u8) !st
         const sha_start = after_space_idx + null_idx + 1;
         if (sha_start + 20 > content.items.len) break;
         const sha_bytes = content.items[sha_start .. sha_start + 20];
+
+        // Convert SHA bytes to hex
+        var sha: [40]u8 = undefined;
+        for (0..20) |byte_idx| {
+            sha[2 * byte_idx] = "0123456789abcdef"[sha_bytes[byte_idx] >> 4];
+            sha[2 * byte_idx + 1] = "0123456789abcdef"[sha_bytes[byte_idx] & 0x0f];
+        }
+
+        // Determine type from mode
+        const entry_type = if (std.mem.eql(u8, mode, "040000")) "tree" else "blob";
+
+        try entries.append(allocator, .{
+            .path = try allocator.dupe(u8, name_data),
+            .sha = try allocator.dupe(u8, &sha),
+            .mode = try allocator.dupe(u8, mode),
+            .entry_type = try allocator.dupe(u8, entry_type),
+        });
+
+        offset = sha_start + 20;
+    }
+
+    return entries;
+}
+
+pub fn parseTreeEntriesFromData(allocator: std.mem.Allocator, content: []const u8) !std.ArrayList(TreeEntry) {
+    var entries = std.ArrayList(TreeEntry).initCapacity(allocator, 0) catch unreachable;
+    errdefer {
+        for (entries.items) |entry| {
+            allocator.free(entry.path);
+            allocator.free(entry.sha);
+            allocator.free(entry.mode);
+            allocator.free(entry.entry_type);
+        }
+        entries.deinit(allocator);
+    }
+
+    var offset: usize = 0;
+    while (offset < content.len) {
+        // Find space after mode
+        const space_idx = std.mem.indexOfScalar(u8, content[offset..], ' ') orelse break;
+        if (space_idx == 0) break;
+
+        // Find null after filename
+        const after_space_idx = offset + space_idx + 1;
+        const null_idx = std.mem.indexOfScalar(u8, content[after_space_idx..], 0) orelse break;
+        if (null_idx == 0) break;
+
+        // Extract mode
+        const mode = content[offset .. offset + space_idx];
+
+        // Extract filename
+        const name_data = content[after_space_idx .. after_space_idx + null_idx];
+
+        // Extract 20-byte SHA
+        const sha_start = after_space_idx + null_idx + 1;
+        if (sha_start + 20 > content.len) break;
+        const sha_bytes = content[sha_start .. sha_start + 20];
 
         // Convert SHA bytes to hex
         var sha: [40]u8 = undefined;

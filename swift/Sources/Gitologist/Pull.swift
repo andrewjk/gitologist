@@ -274,7 +274,7 @@ private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: 
 	}
 }
 
-private func updateIndex(gitDir: String, workingPath _: String, treeSha: String) async throws {
+func updateIndex(gitDir: String, workingPath _: String, treeSha: String) async throws {
 	let indexPath = URL(fileURLWithPath: gitDir).appendingPathComponent("index")
 	var index = try await getIndex(at: indexPath.path)
 
@@ -302,7 +302,7 @@ private func updateIndexRecursive(
 			let blobData = try await readObject(at: gitDir, sha: entry.sha)
 			let fileContent = try extractContentFromBlob(blobData)
 			// Use git blob hash format (with "blob <size>\0" header)
-			let blobHeader = "blob \(fileContent.count)\0\(fileContent)"
+			let blobHeader = "blob \(fileContent.utf8.count)\0\(fileContent)"
 			let sha = Insecure.SHA1.hash(data: Data(blobHeader.utf8))
 				.compactMap { String(format: "%02x", $0) }
 				.joined()

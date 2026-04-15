@@ -1,53 +1,63 @@
 import Foundation
 
-func enumerateObjects(at gitDir: String, sha: String, visited: Set<String> = Set()) async throws -> [PackObject] {
-	var newVisited = visited
-	if newVisited.contains(sha) {
-		return []
-	}
-	newVisited.insert(sha)
+private class ObjectEnumerator {
+	var visited = Set<String>()
+	var objects: [PackObject] = []
 
-	let objectData = try await readObject(at: gitDir, sha: sha)
-	guard let headerEnd = objectData.firstIndex(of: "\n") else {
-		return []
-	}
-	let header = String(objectData[..<headerEnd])
-	guard let spaceIndex = header.firstIndex(of: " ") else {
-		return []
-	}
-	let typeString = String(header[..<spaceIndex])
-	guard let type = ObjectType(rawValue: typeString) else {
-		return []
-	}
+	func enumerate(at gitDir: String, sha: String) async throws {
+		if visited.contains(sha) {
+			return
+		}
+		visited.insert(sha)
 
-	let content = String(objectData[objectData.index(after: headerEnd)...])
+		let objectData = try await readObjectData(at: gitDir, sha: sha)
+		guard let nullIndex = objectData.firstIndex(of: 0) else {
+			return
+		}
 
-	var objects: [PackObject] = [
-		PackObject(type: type, sha: sha, content: content.data(using: .utf8)!),
-	]
+		let headerData = objectData.prefix(upTo: nullIndex)
+		let contentData = objectData.suffix(from: objectData.index(after: nullIndex))
 
-	if type == .commit {
-		let lines = content.split(separator: "\n")
-		for line in lines {
-			if line.hasPrefix("parent ") {
-				let parentSha = String(line.dropFirst(7))
-				let parentObjects = try await enumerateObjects(at: gitDir, sha: parentSha, visited: newVisited)
-				objects.append(contentsOf: parentObjects)
-			} else if line.hasPrefix("tree ") {
-				let treeSha = String(line.dropFirst(5))
-				let treeObjects = try await enumerateObjects(at: gitDir, sha: treeSha, visited: newVisited)
-				objects.append(contentsOf: treeObjects)
+		guard let header = String(data: headerData, encoding: .utf8) else {
+			return
+		}
+		guard let spaceIndex = header.firstIndex(of: " ") else {
+			return
+		}
+		let typeString = String(header[..<spaceIndex])
+		guard let type = ObjectType(rawValue: typeString) else {
+			return
+		}
+
+		objects.append(PackObject(type: type, sha: sha, content: contentData))
+
+		if type == .commit {
+			guard let content = String(data: contentData, encoding: .utf8) else {
+				return
+			}
+			let lines = content.split(separator: "\n")
+			for line in lines {
+				if line.hasPrefix("parent ") {
+					let parentSha = String(line.dropFirst(7))
+					try await enumerate(at: gitDir, sha: parentSha)
+				} else if line.hasPrefix("tree ") {
+					let treeSha = String(line.dropFirst(5))
+					try await enumerate(at: gitDir, sha: treeSha)
+				}
+			}
+		} else if type == .tree {
+			let entries = try parseTreeEntriesFromData(contentData)
+			for entry in entries {
+				try await enumerate(at: gitDir, sha: entry.sha)
 			}
 		}
-	} else if type == .tree {
-		let entries = try parseTreeEntries(objectData)
-		for entry in entries {
-			let entryObjects = try await enumerateObjects(at: gitDir, sha: entry.sha, visited: newVisited)
-			objects.append(contentsOf: entryObjects)
-		}
 	}
+}
 
-	return objects
+func enumerateObjects(at gitDir: String, sha: String) async throws -> [PackObject] {
+	let enumerator = ObjectEnumerator()
+	try await enumerator.enumerate(at: gitDir, sha: sha)
+	return enumerator.objects
 }
 
 func getAllObjects(at gitDir: String) async throws -> [PackObject] {

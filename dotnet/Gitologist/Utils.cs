@@ -19,8 +19,9 @@ public static class Utils
     {
         var content = await File.ReadAllTextAsync(filePath);
         var contentBytes = Encoding.UTF8.GetBytes(content);
-        var blobContent = $"blob {contentBytes.Length}\0{content}";
-        return HashString(blobContent);
+        var headerBytes = Encoding.UTF8.GetBytes($"blob {contentBytes.Length}\0");
+        var data = headerBytes.Concat(contentBytes).ToArray();
+        return HashBytes(data);
     }
 
     public static string HashString(string content)
@@ -340,29 +341,34 @@ public static class Utils
 
     public static async Task<string> ReadObject(string gitDir, string sha)
     {
-        var objectPath = Path.Combine(gitDir, "objects", sha.Substring(0, 2), sha.Substring(2));
-        var compressed = await File.ReadAllBytesAsync(objectPath);
-        var decompressed = Decompress(compressed);
+        var data = await ReadObjectData(gitDir, sha);
 
         // Find the null byte separating header from content
-        var nullIndex = Array.IndexOf(decompressed, (byte)0);
+        var nullIndex = Array.IndexOf(data, (byte)0);
         if (nullIndex == -1)
         {
             throw new InvalidOperationException("Invalid object format: no null byte");
         }
 
-        var header = Encoding.UTF8.GetString(decompressed, 0, nullIndex);
+        var header = Encoding.UTF8.GetString(data, 0, nullIndex);
 
         // For tree objects, return hex-encoded binary content
         if (header.StartsWith("tree "))
         {
-            var contentData = decompressed[(nullIndex + 1)..];
+            var contentData = data[(nullIndex + 1)..];
             var hexContent = Convert.ToHexString(contentData).ToLowerInvariant();
             return $"{header}\n{hexContent}";
         }
 
         // For blobs, preserve the null byte
-        return Encoding.UTF8.GetString(decompressed);
+        return Encoding.UTF8.GetString(data);
+    }
+
+    public static async Task<byte[]> ReadObjectData(string gitDir, string sha)
+    {
+        var objectPath = Path.Combine(gitDir, "objects", sha.Substring(0, 2), sha.Substring(2));
+        var compressed = await File.ReadAllBytesAsync(objectPath);
+        return Decompress(compressed);
     }
 
     public static byte[] Decompress(byte[] compressed)
@@ -428,6 +434,65 @@ public static class Utils
         var content = Convert.FromHexString(hexContent);
 
         var offset = 0;
+        while (offset < content.Length)
+        {
+            // Find space after mode
+            var spaceIndex = Array.IndexOf(content, (byte)' ', offset);
+            if (spaceIndex == -1 || spaceIndex < offset)
+            {
+                break;
+            }
+
+            // Find null after filename
+            var afterSpaceIndex = spaceIndex + 1;
+            var nullIndex = Array.IndexOf(content, (byte)0, afterSpaceIndex);
+            if (nullIndex == -1 || nullIndex < afterSpaceIndex)
+            {
+                break;
+            }
+
+            // Extract mode
+            var mode = Encoding.UTF8.GetString(content, offset, spaceIndex - offset);
+
+            // Extract filename
+            var nameLength = nullIndex - afterSpaceIndex;
+            var name = Encoding.UTF8.GetString(content, afterSpaceIndex, nameLength);
+
+            // Extract 20-byte SHA
+            var shaStart = nullIndex + 1;
+            var shaEnd = shaStart + 20;
+            if (shaEnd > content.Length)
+            {
+                break;
+            }
+            var shaBytes = new byte[20];
+            Array.Copy(content, shaStart, shaBytes, 0, 20);
+            var sha = Convert.ToHexString(shaBytes).ToLowerInvariant();
+
+            // Determine type from mode
+            var type = mode == "040000" ? "tree" : "blob";
+
+            entries.Add(
+                new TreeEntry
+                {
+                    Path = name,
+                    Sha = sha,
+                    Mode = mode,
+                    Type = type,
+                }
+            );
+
+            offset = shaEnd;
+        }
+
+        return entries;
+    }
+
+    public static List<TreeEntry> ParseTreeEntriesFromData(byte[] content)
+    {
+        var entries = new List<TreeEntry>();
+        var offset = 0;
+
         while (offset < content.Length)
         {
             // Find space after mode

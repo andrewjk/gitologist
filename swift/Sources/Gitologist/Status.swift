@@ -87,10 +87,10 @@ func status(at path: String) async throws -> StatusInfo {
 	return StatusInfo(
 		branch: branch,
 		upToDate: "Your branch is up to date with 'origin/\(branch)'.",
-		staged: staged,
-		modified: modified,
-		untracked: untracked,
-		deleted: deleted
+		staged: staged.sorted(),
+		modified: modified.sorted(),
+		untracked: untracked.sorted(),
+		deleted: deleted.sorted()
 	)
 }
 

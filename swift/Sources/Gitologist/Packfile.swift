@@ -34,10 +34,13 @@ enum ObjectType: String {
 
 func encodePktLine(_ line: String?) -> Data {
 	guard let line = line else {
-		return Data([0x00, 0x00, 0x00, 0x00])
+		return Data("0000".utf8)
 	}
 	let length = line.utf8.count + 4
 	let hexLength = String(format: "%04x", length)
+	if length == 4 {
+		return Data(hexLength.utf8)
+	}
 	return (hexLength + line).data(using: .utf8)!
 }
 

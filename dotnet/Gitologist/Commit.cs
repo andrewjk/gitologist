@@ -19,7 +19,8 @@ public static class Commit
         if (
             currentStatus.Staged.Length == 0 &&
             currentStatus.Modified.Length == 0 &&
-            currentStatus.Untracked.Length == 0
+            currentStatus.Untracked.Length == 0 &&
+            currentStatus.Deleted.Length == 0
         )
         {
             throw new InvalidOperationException("Nothing to commit");

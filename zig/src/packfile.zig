@@ -8,14 +8,16 @@ pub const PackObject = struct {
 
 pub fn encodePktLine(allocator: std.mem.Allocator, line: ?[]const u8) ![]const u8 {
     if (line == null) {
-        const result = try allocator.alloc(u8, 4);
-        @memset(result, 0);
-        return result;
+        return try allocator.dupe(u8, "0000");
     }
 
     const length = line.?.len + 4;
     const hex_length = try std.fmt.allocPrint(allocator, "{x:0>4}", .{length});
     defer allocator.free(hex_length);
+
+    if (length == 4) {
+        return try allocator.dupe(u8, hex_length);
+    }
 
     const result = try allocator.alloc(u8, hex_length.len + line.?.len);
     @memcpy(result[0..hex_length.len], hex_length);

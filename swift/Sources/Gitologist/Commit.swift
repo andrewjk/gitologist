@@ -26,7 +26,7 @@ func commit(at path: String, message: String) async throws -> String {
 
 	let currentStatus = try await status(at: path)
 
-	if currentStatus.staged.isEmpty && currentStatus.modified.isEmpty && currentStatus.untracked.isEmpty {
+	if currentStatus.staged.isEmpty && currentStatus.modified.isEmpty && currentStatus.untracked.isEmpty && currentStatus.deleted.isEmpty {
 		throw CommitError.nothingToCommit
 	}
 

@@ -78,11 +78,20 @@ public static class Add
         filesToAdd.AddRange(currentStatus.Untracked);
         filesToAdd.AddRange(currentStatus.Modified);
 
-        if (filesToAdd.Count == 0)
+        if (filesToAdd.Count > 0)
         {
-            return;
+            await AddFiles(path, filesToAdd.ToArray());
         }
 
-        await AddFiles(path, filesToAdd.ToArray());
+        if (currentStatus.Deleted.Length > 0)
+        {
+            var indexPath = Path.Combine(gitDir, "index");
+            var index = await Utils.GetIndex(indexPath);
+            foreach (var file in currentStatus.Deleted)
+            {
+                index.Remove(file);
+            }
+            await Utils.WriteIndex(indexPath, index);
+        }
     }
 }

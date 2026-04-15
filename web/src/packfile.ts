@@ -9,10 +9,13 @@ export interface PackObject {
 
 export function encodePktLine(line: string | null): Buffer {
 	if (line === null) {
-		return Buffer.from("0000", "hex");
+		return Buffer.from("0000", "utf-8");
 	}
-	const length = line.length + 4;
+	const length = Buffer.byteLength(line, "utf-8") + 4;
 	const hexLength = length.toString(16).padStart(4, "0");
+	if (length === 4) {
+		return Buffer.from(hexLength, "utf-8");
+	}
 	return Buffer.from(hexLength + line, "utf-8");
 }
 

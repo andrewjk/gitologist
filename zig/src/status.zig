@@ -92,6 +92,30 @@ pub fn status(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Statu
 
     const up_to_date = try std.fmt.allocPrint(allocator, "Your branch is up to date with 'origin/{s}'.", .{branch});
 
+    std.sort.insertion([]const u8, staged.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+
+    std.sort.insertion([]const u8, modified.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+
+    std.sort.insertion([]const u8, untracked.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+
+    std.sort.insertion([]const u8, deleted.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+
     return .{
         .branch = branch,
         .up_to_date = up_to_date,

@@ -46,12 +46,14 @@ pub fn push(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_n
         for (current_status.staged) |file| allocator.free(file);
         for (current_status.modified) |file| allocator.free(file);
         for (current_status.untracked) |file| allocator.free(file);
+        for (current_status.deleted) |file| allocator.free(file);
         allocator.free(current_status.staged);
         allocator.free(current_status.modified);
         allocator.free(current_status.untracked);
+        allocator.free(current_status.deleted);
     }
 
-    if (current_status.modified.len > 0 or current_status.untracked.len > 0) {
+    if (current_status.modified.len > 0 or current_status.untracked.len > 0 or current_status.deleted.len > 0) {
         return error.UncommittedChanges;
     }
 
@@ -91,7 +93,28 @@ fn pushToRemote(
     branch_name: []const u8,
     git_dir_path: []const u8,
 ) !void {
-    var refs = try discoverRefsForPush(io, allocator, remote_url);
+    var old_sha: []const u8 = undefined;
+    var free_old_sha = false;
+
+    var refs = discoverRefsForPush(io, allocator, remote_url) catch {
+        // If we can't discover refs, assume it's a new branch
+        const zeros = try allocator.alloc(u8, 40);
+        @memset(zeros, '0');
+        var visited = std.StringHashMap(void).init(allocator);
+        defer visited.deinit();
+        var pack_objects = try objects.enumerateObjects(io, allocator, git_dir_path, commit_sha, &visited);
+        defer {
+            for (pack_objects.items) |obj| {
+                allocator.free(obj.obj_type);
+                allocator.free(obj.sha);
+                allocator.free(obj.content);
+            }
+            pack_objects.deinit(allocator);
+        }
+        const pack_data = try packfile.createPackfile(allocator, pack_objects);
+        defer allocator.free(pack_data);
+        return try sendPush(io, allocator, remote_url, zeros, commit_sha, branch_name, pack_data);
+    };
     defer {
         for (refs.items) |ref| {
             allocator.free(ref.sha);
@@ -112,11 +135,15 @@ fn pushToRemote(
         break :blk null;
     };
 
-    const old_sha = if (remote_ref) |r| r.sha else blk: {
+    if (remote_ref) |r| {
+        old_sha = r.sha;
+    } else {
         const zeros = try allocator.alloc(u8, 40);
         @memset(zeros, '0');
-        break :blk zeros;
-    };
+        old_sha = zeros;
+        free_old_sha = true;
+    }
+    defer if (free_old_sha) allocator.free(old_sha);
 
     var visited = std.StringHashMap(void).init(allocator);
     defer visited.deinit();
@@ -134,7 +161,109 @@ fn pushToRemote(
     const pack_data = try packfile.createPackfile(allocator, pack_objects);
     defer allocator.free(pack_data);
 
-    try uploadPackfile(io, allocator, remote_url, old_sha, commit_sha, branch_name, pack_data);
+    try sendPush(io, allocator, remote_url, old_sha, commit_sha, branch_name, pack_data);
+}
+
+fn buildPushRequest(allocator: std.mem.Allocator, old_sha: []const u8, new_sha: []const u8, branch_name: []const u8, pack_data: []const u8) ![]const u8 {
+    var lines = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable;
+    errdefer {
+        for (lines.items) |line| allocator.free(line);
+        lines.deinit(allocator);
+    }
+
+    const update_cmd = try std.fmt.allocPrint(allocator, "{s} {s} refs/heads/{s}\x00report-status agent=gitologist/1.0", .{ old_sha, new_sha, branch_name });
+    defer allocator.free(update_cmd);
+
+    const update_pkt = try packfile.encodePktLine(allocator, update_cmd);
+    try lines.append(allocator, update_pkt);
+
+    const flush_pkt = try packfile.encodePktLine(allocator, null);
+    try lines.append(allocator, flush_pkt);
+
+    try lines.append(allocator, try allocator.dupe(u8, pack_data));
+
+    var result = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    for (lines.items) |line| {
+        try result.appendSlice(allocator, line);
+    }
+
+    return result.toOwnedSlice(allocator);
+}
+
+fn sendPush(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    remote_url: []const u8,
+    old_sha: []const u8,
+    new_sha: []const u8,
+    branch_name: []const u8,
+    pack_data: []const u8,
+) !void {
+    var url_parts = std.mem.splitScalar(u8, remote_url, '/');
+    var host: []const u8 = undefined;
+
+    var i: usize = 0;
+    while (url_parts.next()) |part| {
+        if (i == 0) {
+            if (std.mem.startsWith(u8, part, "http://")) {
+                host = part["http://".len..];
+            } else if (std.mem.startsWith(u8, part, "https://")) {
+                host = part["https://".len..];
+            } else {
+                host = part;
+            }
+        }
+        i += 1;
+    }
+
+    const full_url = try std.fmt.allocPrint(allocator, "http://{s}/git-receive-pack", .{host});
+    defer allocator.free(full_url);
+
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse(full_url);
+    var request = try client.request(.POST, uri, .{});
+    defer request.deinit();
+
+    const request_body = try buildPushRequest(allocator, old_sha, new_sha, branch_name, pack_data);
+    defer allocator.free(request_body);
+
+    try request.sendBodyComplete(@constCast(request_body));
+
+    var redirect_buffer: [4096]u8 = undefined;
+    var response = try request.receiveHead(&redirect_buffer);
+
+    if (response.head.status != .ok) {
+        var body = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+        defer body.deinit(allocator);
+        var transfer_buffer: [8192]u8 = undefined;
+        const reader = response.reader(&transfer_buffer);
+        try reader.appendRemainingUnlimited(allocator, &body);
+        return error.PushFailed;
+    }
+
+    var body = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer body.deinit(allocator);
+
+    var transfer_buffer: [8192]u8 = undefined;
+    const reader = response.reader(&transfer_buffer);
+
+    try reader.appendRemainingUnlimited(allocator, &body);
+
+    var lines = try packfile.decodePktLines(allocator, body.items);
+    defer {
+        for (lines.items) |line| allocator.free(line);
+        lines.deinit(allocator);
+    }
+
+    for (lines.items) |line| {
+        if (std.mem.startsWith(u8, line, "ng ")) {
+            const reason = line["ng ".len..];
+            _ = reason;
+            return error.PushRejected;
+        }
+    }
 }
 
 const DiscoveredRef = struct {
@@ -238,103 +367,6 @@ fn discoverRefsForPush(io: std.Io, allocator: std.mem.Allocator, remote_url: []c
     }
 
     return refs;
-}
-
-fn uploadPackfile(
-    io: std.Io,
-    allocator: std.mem.Allocator,
-    remote_url: []const u8,
-    old_sha: []const u8,
-    new_sha: []const u8,
-    branch_name: []const u8,
-    pack_data: []const u8,
-) !void {
-    var url_parts = std.mem.splitScalar(u8, remote_url, '/');
-    var host: []const u8 = undefined;
-
-    var i: usize = 0;
-    while (url_parts.next()) |part| {
-        if (i == 0) {
-            if (std.mem.startsWith(u8, part, "http://")) {
-                host = part["http://".len..];
-            } else if (std.mem.startsWith(u8, part, "https://")) {
-                host = part["https://".len..];
-            } else {
-                host = part;
-            }
-        }
-        i += 1;
-    }
-
-    const full_url = try std.fmt.allocPrint(allocator, "http://{s}/git-receive-pack", .{host});
-    defer allocator.free(full_url);
-
-    var client: std.http.Client = .{ .allocator = allocator, .io = io };
-    defer client.deinit();
-
-    const uri = try std.Uri.parse(full_url);
-    var request = try client.request(.POST, uri, .{});
-    defer request.deinit();
-
-    const request_body = try buildPushRequest(allocator, old_sha, new_sha, branch_name, pack_data);
-    defer allocator.free(request_body);
-
-    try request.sendBodyComplete(@constCast(request_body));
-
-    var redirect_buffer: [4096]u8 = undefined;
-    var response = try request.receiveHead(&redirect_buffer);
-
-    if (response.head.status != .ok) {
-        return error.PushFailed;
-    }
-
-    var body = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
-    defer body.deinit(allocator);
-
-    var transfer_buffer: [8192]u8 = undefined;
-    const reader = response.reader(&transfer_buffer);
-
-    try reader.appendRemainingUnlimited(allocator, &body);
-
-    var lines = try packfile.decodePktLines(allocator, body.items);
-    defer {
-        for (lines.items) |line| allocator.free(line);
-        lines.deinit(allocator);
-    }
-
-    for (lines.items) |line| {
-        if (std.mem.startsWith(u8, line, "ng ")) {
-            const reason = line["ng ".len..];
-            _ = reason;
-            return error.PushRejected;
-        }
-    }
-}
-
-fn buildPushRequest(allocator: std.mem.Allocator, old_sha: []const u8, new_sha: []const u8, branch_name: []const u8, pack_data: []const u8) ![]const u8 {
-    var lines = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable;
-    errdefer {
-        for (lines.items) |line| allocator.free(line);
-        lines.deinit(allocator);
-    }
-
-    const update_cmd = try std.fmt.allocPrint(allocator, "{s} {s} refs/heads/{s}", .{ old_sha, new_sha, branch_name });
-    defer allocator.free(update_cmd);
-
-    const update_pkt = try packfile.encodePktLine(allocator, update_cmd);
-    try lines.append(allocator, update_pkt);
-
-    const flush_pkt = try packfile.encodePktLine(allocator, null);
-    try lines.append(allocator, flush_pkt);
-
-    try lines.append(allocator, try allocator.dupe(u8, pack_data));
-
-    var result = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
-    for (lines.items) |line| {
-        try result.appendSlice(allocator, line);
-    }
-
-    return result.toOwnedSlice(allocator);
 }
 
 pub fn setUpstreamBranch(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name: []const u8, branch_name: []const u8) !void {
