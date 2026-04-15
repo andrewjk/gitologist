@@ -154,7 +154,61 @@ async function discoverRefs(remoteUrl: string): Promise<DiscoveredRef[]> {
 		}
 	}
 
+	if (refs.length > 0) {
+		return refs;
+	}
+
+	return await discoverRefsV2(remoteUrl);
+}
+
+async function discoverRefsV2(remoteUrl: string): Promise<DiscoveredRef[]> {
+	const uploadUrl = new URL("git-upload-pack", remoteUrl);
+
+	const requestBody = buildLsRefsRequest();
+
+	const response = await fetch(uploadUrl.toString(), {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/x-git-upload-pack-request",
+			Accept: "application/x-git-upload-pack-result",
+			"Git-Protocol": "version=2",
+		},
+		body: requestBody,
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to discover refs v2: ${response.status} ${response.statusText}`);
+	}
+
+	const buffer = Buffer.from(await response.arrayBuffer());
+	const lines = decodePktLines(buffer);
+
+	const refs: DiscoveredRef[] = [];
+
+	for (const line of lines) {
+		if (line === "") continue;
+
+		const parts = line.split(" ");
+		if (parts.length >= 2 && parts[0].match(/^[0-9a-f]{40}$/)) {
+			refs.push({
+				sha: parts[0],
+				ref: parts[1].split("\0")[0],
+			});
+		}
+	}
+
 	return refs;
+}
+
+function buildLsRefsRequest(): Buffer {
+	const lines: Buffer[] = [];
+
+	lines.push(encodePktLine("command=ls-refs\0peel\0symrefs"));
+	lines.push(encodePktLine("0001"));
+	lines.push(encodePktLine("refs/heads/*"));
+	lines.push(encodePktLine(null));
+
+	return Buffer.concat(lines);
 }
 
 async function fetchPackfile(
@@ -164,13 +218,14 @@ async function fetchPackfile(
 ): Promise<PackObject[]> {
 	const url = new URL("git-upload-pack", remoteUrl);
 
-	const requestBody = buildFetchRequest(wants, haves);
+	const requestBody = buildFetchRequestV2(wants, haves);
 
 	const response = await fetch(url.toString(), {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/x-git-upload-pack-request",
 			Accept: "application/x-git-upload-pack-result",
+			"Git-Protocol": "version=2",
 		},
 		body: requestBody,
 	});
@@ -190,18 +245,23 @@ async function fetchPackfile(
 	return parsePackfile(packfileData);
 }
 
-function buildFetchRequest(wants: string[], haves: string[]): Buffer {
+function buildFetchRequestV2(wants: string[], haves: string[]): Buffer {
 	const lines: Buffer[] = [];
+
+	lines.push(encodePktLine("command=fetch"));
 
 	for (const want of wants) {
 		lines.push(encodePktLine(`want ${want}`));
 	}
 
-	for (const have of haves) {
-		lines.push(encodePktLine(`have ${have}`));
+	if (haves.length > 0) {
+		for (const have of haves) {
+			lines.push(encodePktLine(`have ${have}`));
+		}
 	}
 
 	lines.push(encodePktLine("done"));
+	lines.push(encodePktLine("0001"));
 	lines.push(encodePktLine(null));
 
 	return Buffer.concat(lines);

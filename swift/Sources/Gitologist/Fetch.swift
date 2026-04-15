@@ -42,7 +42,10 @@ func fetchFromRemote(at path: String, remote: String? = nil) async throws -> Fet
 		return FetchResult(remote: remoteName, refs: [])
 	}
 
-	let refs = try await discoverRefs(remoteUrl: remoteUrl)
+	var refs = try await discoverRefs(remoteUrl: remoteUrl)
+	if refs.isEmpty {
+		refs = try await discoverRefsV2(remoteUrl: remoteUrl)
+	}
 	var result = FetchResult(remote: remoteName, refs: [])
 
 	var wants: [String] = []
@@ -154,6 +157,69 @@ func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
 	return refs
 }
 
+func discoverRefsV2(remoteUrl: String) async throws -> [DiscoveredRef] {
+	guard let url = URL(string: remoteUrl) else {
+		throw FetchError.invalidURL
+	}
+	let fetchUrl = url.appendingPathComponent("git-upload-pack")
+
+	let requestBody = buildLsRefsRequest()
+
+	var request = URLRequest(url: fetchUrl)
+	request.httpMethod = "POST"
+	request.setValue("application/x-git-upload-pack-request", forHTTPHeaderField: "Content-Type")
+	request.setValue("application/x-git-upload-pack-result", forHTTPHeaderField: "Accept")
+	request.setValue("version=2", forHTTPHeaderField: "Git-Protocol")
+	request.httpBody = requestBody
+
+	let (data, response) = try await URLSession.shared.data(for: request)
+
+	guard let httpResponse = response as? HTTPURLResponse else {
+		throw FetchError.failedToDiscoverRefs(0, "Invalid response")
+	}
+
+	guard httpResponse.statusCode == 200 else {
+		throw FetchError.failedToDiscoverRefs(httpResponse.statusCode, HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode))
+	}
+
+	let lines = decodePktLines(data)
+
+	var refs: [DiscoveredRef] = []
+
+	for line in lines {
+		if line.isEmpty {
+			continue
+		}
+
+		let parts = line.split(separator: " ", maxSplits: 1)
+		if parts.count >= 2 {
+			let sha = String(parts[0])
+			guard sha.count == 40, sha.allSatisfy({ $0.isNumber || ($0.isLetter && $0.isASCII) }) else {
+				continue
+			}
+			let refParts = String(parts[1]).split(separator: "\0")
+			guard !refParts.isEmpty else {
+				continue
+			}
+			let ref = String(refParts[0])
+			refs.append(DiscoveredRef(sha: sha, ref: ref))
+		}
+	}
+
+	return refs
+}
+
+func buildLsRefsRequest() -> Data {
+	var lines: [Data] = []
+
+	lines.append(encodePktLine("command=ls-refs\u{00}peel\u{00}symrefs"))
+	lines.append(encodePktLine("0001"))
+	lines.append(encodePktLine("refs/heads/*"))
+	lines.append(encodePktLine(nil))
+
+	return lines.reduce(Data(), +)
+}
+
 func fetchPackfile(remoteUrl: String, wants: [String], haves: [String]) async throws -> [PackObject] {
 	guard let url = URL(string: remoteUrl) else {
 		throw FetchError.invalidURL
@@ -166,6 +232,7 @@ func fetchPackfile(remoteUrl: String, wants: [String], haves: [String]) async th
 	request.httpMethod = "POST"
 	request.setValue("application/x-git-upload-pack-request", forHTTPHeaderField: "Content-Type")
 	request.setValue("application/x-git-upload-pack-result", forHTTPHeaderField: "Accept")
+	request.setValue("version=2", forHTTPHeaderField: "Git-Protocol")
 	request.httpBody = requestBody
 
 	let (data, response) = try await URLSession.shared.data(for: request)
@@ -189,6 +256,8 @@ func fetchPackfile(remoteUrl: String, wants: [String], haves: [String]) async th
 func buildFetchRequest(wants: [String], haves: [String]) -> Data {
 	var lines: [Data] = []
 
+	lines.append(encodePktLine("command=fetch"))
+
 	for want in wants {
 		lines.append(encodePktLine("want \(want)"))
 	}
@@ -198,6 +267,7 @@ func buildFetchRequest(wants: [String], haves: [String]) -> Data {
 	}
 
 	lines.append(encodePktLine("done"))
+	lines.append(encodePktLine("0001"))
 	lines.append(encodePktLine(nil))
 
 	return lines.reduce(Data(), +)

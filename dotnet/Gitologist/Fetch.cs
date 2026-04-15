@@ -41,6 +41,10 @@ public static class Fetch
         }
 
         var refs = await DiscoverRefs(remoteUrl);
+        if (refs.Count == 0)
+        {
+            refs = await DiscoverRefsV2(remoteUrl);
+        }
         var result = new FetchResult { Remote = remoteName, Refs = new List<RefInfo>() };
 
         var wants = new List<string>();
@@ -134,6 +138,60 @@ public static class Fetch
         return refs;
     }
 
+    private static async Task<List<DiscoveredRef>> DiscoverRefsV2(string remoteUrl)
+    {
+        var url = new Uri(new Uri(remoteUrl), "git-upload-pack");
+
+        var requestBody = BuildLsRefsRequest();
+
+        using var client = new HttpClient();
+        using var content = new ByteArrayContent(requestBody);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-git-upload-pack-request");
+        client.DefaultRequestHeaders.Add("Accept", "application/x-git-upload-pack-result");
+        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
+
+        var response = await client.PostAsync(url, content);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Failed to discover refs v2: {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+
+        var data = await response.Content.ReadAsByteArrayAsync();
+        var lines = Packfile.DecodePktLines(data);
+
+        var refs = new List<DiscoveredRef>();
+
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrEmpty(line)) continue;
+
+            var parts = line.Split(new[] { ' ' }, 2);
+            if (parts.Length >= 2)
+            {
+                var sha = parts[0];
+                if (sha.Length == 40 && sha.All(c => char.IsLetterOrDigit(c)))
+                {
+                    var refName = parts[1].Split('\0')[0];
+                    refs.Add(new DiscoveredRef { Sha = sha, Ref = refName });
+                }
+            }
+        }
+
+        return refs;
+    }
+
+    private static byte[] BuildLsRefsRequest()
+    {
+        var lines = new List<byte[]>();
+
+        lines.Add(Packfile.EncodePktLine("command=ls-refs\0peel\0symrefs"));
+        lines.Add(Packfile.EncodePktLine("0001"));
+        lines.Add(Packfile.EncodePktLine("refs/heads/*"));
+        lines.Add(Packfile.EncodePktLine(null));
+
+        return lines.SelectMany(x => x).ToArray();
+    }
+
     private static async Task<List<PackObject>> FetchPackfile(string remoteUrl, List<string> wants, List<string> haves)
     {
         var url = new Uri(new Uri(remoteUrl), "git-upload-pack");
@@ -144,6 +202,7 @@ public static class Fetch
         using var content = new ByteArrayContent(requestBody);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-git-upload-pack-request");
         client.DefaultRequestHeaders.Add("Accept", "application/x-git-upload-pack-result");
+        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         var response = await client.PostAsync(url, content);
         if (!response.IsSuccessStatusCode)
@@ -167,6 +226,8 @@ public static class Fetch
     {
         var lines = new List<byte[]>();
 
+        lines.Add(Packfile.EncodePktLine("command=fetch"));
+
         foreach (var want in wants)
         {
             lines.Add(Packfile.EncodePktLine($"want {want}"));
@@ -178,6 +239,7 @@ public static class Fetch
         }
 
         lines.Add(Packfile.EncodePktLine("done"));
+        lines.Add(Packfile.EncodePktLine("0001"));
         lines.Add(Packfile.EncodePktLine(null));
 
         return lines.SelectMany(x => x).ToArray();
