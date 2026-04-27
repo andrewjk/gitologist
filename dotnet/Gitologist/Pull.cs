@@ -46,7 +46,7 @@ public static async Task PullFromRemote(
             var commitData = await Utils.ReadObject(gitDir, remoteCommitSha);
             var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
-            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha);
+            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha, new Dictionary<string, string>());
             await UpdateIndex(gitDir, path, treeSha);
             return;
         }
@@ -58,13 +58,19 @@ public static async Task PullFromRemote(
 
         var isAncestor = await IsAncestorOf(gitDir, currentCommitSha, remoteCommitSha);
 
+        var currentTreeSha = await GetTree(gitDir, currentCommitSha);
+        var currentBlobs = currentTreeSha != null
+            ? await GetTreeBlobs(gitDir, currentTreeSha)
+            : new Dictionary<string, string>();
+
         if (isAncestor)
         {
             await Utils.UpdateBranch(gitDir, branchName, remoteCommitSha);
             var commitData = await Utils.ReadObject(gitDir, remoteCommitSha);
             var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
-            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha);
+            await CheckForLocalChanges(gitDir, path, currentBlobs, treeSha);
+            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs);
             await UpdateIndex(gitDir, path, treeSha);
             return;
         }
@@ -87,24 +93,95 @@ public static async Task PullFromRemote(
         var mergeCommitData = await Utils.ReadObject(gitDir, mergeCommitSha);
         var mergeTreeSha = Utils.ExtractTreeFromCommit(mergeCommitData);
 
-        await ExtractTreeToWorkingDirectory(gitDir, path, mergeTreeSha);
+        await CheckForLocalChanges(gitDir, path, currentBlobs, mergeTreeSha);
+        await ExtractTreeToWorkingDirectory(gitDir, path, mergeTreeSha, currentBlobs);
         await UpdateIndex(gitDir, path, mergeTreeSha);
+    }
+
+    private static async Task<Dictionary<string, string>> GetTreeBlobs(
+        string gitDir,
+        string treeSha,
+        string prefix = ""
+    )
+    {
+        var blobs = new Dictionary<string, string>();
+        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var entries = Utils.ParseTreeEntries(treeData);
+
+        foreach (var entry in entries)
+        {
+            var path = string.IsNullOrEmpty(prefix) ? entry.Path : $"{prefix}/{entry.Path}";
+            if (entry.Type == "blob")
+            {
+                blobs[path] = entry.Sha;
+            }
+            else if (entry.Type == "tree")
+            {
+                var childBlobs = await GetTreeBlobs(gitDir, entry.Sha, path);
+                foreach (var childBlob in childBlobs)
+                {
+                    blobs[childBlob.Key] = childBlob.Value;
+                }
+            }
+        }
+
+        return blobs;
+    }
+
+    private static async Task CheckForLocalChanges(
+        string gitDir,
+        string workingPath,
+        Dictionary<string, string> currentBlobs,
+        string newTreeSha
+    )
+    {
+        var indexPath = Path.Combine(gitDir, "index");
+        var index = await Utils.GetIndex(indexPath);
+        var newBlobs = await GetTreeBlobs(gitDir, newTreeSha);
+
+        foreach (var (path, newSha) in newBlobs)
+        {
+            currentBlobs.TryGetValue(path, out var currentSha);
+            
+            // Only check files that will be updated (currentSha != newSha)
+            if (currentSha == newSha)
+            {
+                continue;
+            }
+            
+            var fullPath = Path.Combine(workingPath, path);
+            if (!File.Exists(fullPath) || !index.ContainsKey(path))
+            {
+                continue;
+            }
+
+            var currentHash = await Utils.HashFileAsBlob(fullPath);
+            var indexEntry = index[path];
+            if (currentHash != indexEntry.Sha)
+            {
+                throw new InvalidOperationException(
+                    $"Your local changes to '{path}' would be overwritten by merge. Please commit or stash them."
+                );
+            }
+        }
     }
 
     private static async Task ExtractTreeToWorkingDirectory(
         string gitDir,
         string workingPath,
-        string treeSha
+        string treeSha,
+        Dictionary<string, string> currentBlobs
     )
     {
-        await ExtractTreeRecursive(gitDir, workingPath, treeSha, "");
+        await ExtractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs);
     }
 
     private static async Task ExtractTreeRecursive(
         string gitDir,
         string workingPath,
         string treeSha,
-        string prefix
+        string prefix,
+        Dictionary<string, string> currentBlobs
     )
     {
         var treeData = await Utils.ReadObject(gitDir, treeSha);
@@ -116,8 +193,16 @@ public static async Task PullFromRemote(
                 ? Path.Combine(workingPath, entry.Path)
                 : Path.Combine(workingPath, prefix, entry.Path);
 
+            var path = string.IsNullOrEmpty(prefix) ? entry.Path : $"{prefix}/{entry.Path}";
+
             if (entry.Type == "blob")
             {
+                currentBlobs.TryGetValue(path, out var currentSha);
+                if (currentSha == entry.Sha)
+                {
+                    continue;
+                }
+
                 var blobData = await Utils.ReadObject(gitDir, entry.Sha);
                 var content = Utils.ExtractContentFromBlob(blobData);
                 await File.WriteAllTextAsync(entryPath, content);
@@ -137,7 +222,8 @@ public static async Task PullFromRemote(
                     gitDir,
                     workingPath,
                     entry.Sha,
-                    newPrefix
+                    newPrefix,
+                    currentBlobs
                 );
             }
         }

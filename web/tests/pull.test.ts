@@ -174,4 +174,92 @@ describe("pull", () => {
 		expect(content2).toBe("modified2");
 		expect(content3).toBe("modified3");
 	});
+
+	it("should fast-forward when remote is ahead", async () => {
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+		const firstSha = await commit(testDir, "Initial commit");
+
+		await push(testDir);
+
+		await writeFile(join(testDir, "test.txt"), "modified");
+		await add(testDir, ["test.txt"]);
+		const secondSha = await commit(testDir, "Second commit");
+		await push(testDir);
+
+		// Reset local branch back to first commit to simulate another clone
+		await writeFile(join(testDir, ".git", "refs", "heads", "main"), firstSha + "\n");
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+
+		await pull(testDir);
+
+		const content = await readFile(join(testDir, "test.txt"), "utf-8");
+		expect(content).toBe("modified");
+
+		const localBranchPath = join(testDir, ".git", "refs", "heads", "main");
+		const localBranchContent = await readFile(localBranchPath, "utf-8");
+		expect(localBranchContent.trim()).toBe(secondSha);
+	});
+
+	it("should throw error when local changes would be overwritten", async () => {
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+		const firstSha = await commit(testDir, "Initial commit");
+
+		await push(testDir);
+
+		await writeFile(join(testDir, "test.txt"), "modified");
+		await add(testDir, ["test.txt"]);
+		/*const secondSha =*/ await commit(testDir, "Second commit");
+		await push(testDir);
+
+		// Reset local branch back to first commit
+		await writeFile(join(testDir, ".git", "refs", "heads", "main"), firstSha + "\n");
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+
+		// Make uncommitted local change
+		await writeFile(join(testDir, "test.txt"), "local changes");
+
+		await expect(pull(testDir)).rejects.toThrow("would be overwritten by merge");
+
+		// Verify local changes are preserved
+		const content = await readFile(join(testDir, "test.txt"), "utf-8");
+		expect(content).toBe("local changes");
+	});
+
+	it("should not overwrite unchanged files with local modifications", async () => {
+		await writeFile(join(testDir, "file1.txt"), "content1");
+		await writeFile(join(testDir, "file2.txt"), "content2");
+		await add(testDir, ["file1.txt", "file2.txt"]);
+		const firstSha = await commit(testDir, "Initial commit");
+
+		await push(testDir);
+
+		// Commit a change only to file1
+		await writeFile(join(testDir, "file1.txt"), "modified1");
+		await add(testDir, ["file1.txt"]);
+		/*const secondSha =*/ await commit(testDir, "Second commit");
+		await push(testDir);
+
+		// Reset local branch back to first commit
+		await writeFile(join(testDir, ".git", "refs", "heads", "main"), firstSha + "\n");
+		await writeFile(join(testDir, "file1.txt"), "content1");
+		await writeFile(join(testDir, "file2.txt"), "content2");
+		await add(testDir, ["file1.txt", "file2.txt"]);
+
+		// Make uncommitted change to file2 (which did not change in the pull)
+		await writeFile(join(testDir, "file2.txt"), "local changes to file2");
+
+		await pull(testDir);
+
+		// file1 should be updated
+		const content1 = await readFile(join(testDir, "file1.txt"), "utf-8");
+		expect(content1).toBe("modified1");
+
+		// file2 local changes should be preserved since it wasn't changed in the pull
+		const content2 = await readFile(join(testDir, "file2.txt"), "utf-8");
+		expect(content2).toBe("local changes to file2");
+	});
 });

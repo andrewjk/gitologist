@@ -9,6 +9,8 @@ import {
 	extractTreeFromCommit,
 	getCurrentBranch,
 	getCurrentCommit,
+	getIndex,
+	hashFileAsBlob,
 	hashObject,
 	parseTreeEntries,
 	readObject,
@@ -45,7 +47,7 @@ export async function pull(
 		const commitData = await readObject(gitDir, remoteCommitSha);
 		const treeSha = extractTreeFromCommit(commitData);
 
-		await extractTreeToWorkingDirectory(gitDir, path, treeSha);
+		await extractTreeToWorkingDirectory(gitDir, path, treeSha, new Map());
 		await updateIndex(gitDir, path, treeSha);
 		return;
 	}
@@ -56,12 +58,16 @@ export async function pull(
 
 	const isAncestor = await isAncestorOf(gitDir, currentCommitSha, remoteCommitSha);
 
+	const currentTreeSha = await getTree(gitDir, currentCommitSha);
+	const currentBlobs = currentTreeSha ? await getTreeBlobs(gitDir, currentTreeSha) : new Map();
+
 	if (isAncestor) {
 		await updateBranch(gitDir, branchName, remoteCommitSha);
 		const commitData = await readObject(gitDir, remoteCommitSha);
 		const treeSha = extractTreeFromCommit(commitData);
 
-		await extractTreeToWorkingDirectory(gitDir, path, treeSha);
+		await checkForLocalChanges(gitDir, path, currentBlobs, treeSha);
+		await extractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs);
 		await updateIndex(gitDir, path, treeSha);
 		return;
 	}
@@ -83,16 +89,79 @@ export async function pull(
 	const commitData = await readObject(gitDir, mergeCommitSha);
 	const treeSha = extractTreeFromCommit(commitData);
 
-	await extractTreeToWorkingDirectory(gitDir, path, treeSha);
+	await checkForLocalChanges(gitDir, path, currentBlobs, treeSha);
+	await extractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs);
 	await updateIndex(gitDir, path, treeSha);
+}
+
+async function getTreeBlobs(
+	gitDir: string,
+	treeSha: string,
+	prefix: string = "",
+): Promise<Map<string, string>> {
+	const blobs = new Map<string, string>();
+	const treeData = await readObject(gitDir, treeSha);
+	const entries = parseTreeEntries(treeData);
+
+	for (const entry of entries) {
+		const path = prefix ? `${prefix}/${entry.path}` : entry.path;
+		if (entry.type === "blob") {
+			blobs.set(path, entry.sha);
+		} else if (entry.type === "tree") {
+			const childBlobs = await getTreeBlobs(gitDir, entry.sha, path);
+			for (const [childPath, childSha] of childBlobs) {
+				blobs.set(childPath, childSha);
+			}
+		}
+	}
+
+	return blobs;
+}
+
+async function checkForLocalChanges(
+	gitDir: string,
+	workingPath: string,
+	currentBlobs: Map<string, string>,
+	newTreeSha: string,
+): Promise<void> {
+	const indexPath = join(gitDir, "index");
+	const index = await getIndex(indexPath);
+	const newBlobs = await getTreeBlobs(gitDir, newTreeSha);
+
+	// Check if any files that will be changed have uncommitted modifications
+	for (const [path, newSha] of newBlobs) {
+		const currentSha = currentBlobs.get(path);
+
+		// Only check files that will be updated (currentSha != newSha)
+		if (currentSha === newSha) {
+			continue;
+		}
+
+		const fullPath = join(workingPath, path);
+		if (!existsSync(fullPath)) {
+			continue;
+		}
+
+		const indexEntry = index.get(path);
+		if (indexEntry) {
+			const currentHash = await hashFileAsBlob(fullPath);
+			// If the file has uncommitted changes (different from index) and will be updated, throw error
+			if (currentHash !== indexEntry.sha) {
+				throw new Error(
+					`Your local changes to '${path}' would be overwritten by merge. Please commit or stash them.`,
+				);
+			}
+		}
+	}
 }
 
 async function extractTreeToWorkingDirectory(
 	gitDir: string,
 	workingPath: string,
 	treeSha: string,
+	currentBlobs: Map<string, string>,
 ): Promise<void> {
-	await extractTreeRecursive(gitDir, workingPath, treeSha, "");
+	await extractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs);
 }
 
 async function extractTreeRecursive(
@@ -100,14 +169,20 @@ async function extractTreeRecursive(
 	workingPath: string,
 	treeSha: string,
 	prefix: string,
+	currentBlobs: Map<string, string>,
 ): Promise<void> {
 	const treeData = await readObject(gitDir, treeSha);
 	const entries = parseTreeEntries(treeData);
 
 	for (const entry of entries) {
 		const entryPath = join(workingPath, prefix, entry.path);
+		const path = prefix ? `${prefix}/${entry.path}` : entry.path;
 
 		if (entry.type === "blob") {
+			const currentSha = currentBlobs.get(path);
+			if (currentSha === entry.sha) {
+				continue;
+			}
 			const blobData = await readObject(gitDir, entry.sha);
 			const content = extractContentFromBlob(blobData);
 			await writeFile(entryPath, content, "utf-8");
@@ -120,6 +195,7 @@ async function extractTreeRecursive(
 				workingPath,
 				entry.sha,
 				prefix ? `${prefix}/${entry.path}` : entry.path,
+				currentBlobs,
 			);
 		}
 	}

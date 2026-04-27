@@ -303,4 +303,174 @@ public class PullTests
         Assert.AreEqual("modified2", content2);
         Assert.AreEqual("modified3", content3);
     }
+
+    [TestMethod]
+    public async Task ShouldFastForwardWhenRemoteIsAhead()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "test.txt"),
+            "content"
+        );
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "test.txt"),
+            "modified"
+        );
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        var secondSha = await Commit.CreateCommit(_testDir, "Second commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Reset local branch back to first commit to simulate another clone
+        var localBranchPath = Path.Combine(
+            _testDir,
+            ".git",
+            "refs",
+            "heads",
+            "main"
+        );
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "test.txt"),
+            "content"
+        );
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+
+        await Pull.PullFromRemote(_testDir);
+
+        var content = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "test.txt")
+        );
+        Assert.AreEqual("modified", content);
+
+        var localBranchContent = await File.ReadAllTextAsync(localBranchPath);
+        Assert.AreEqual(secondSha, localBranchContent.Trim());
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowErrorWhenLocalChangesWouldBeOverwritten()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "test.txt"),
+            "content"
+        );
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "test.txt"),
+            "modified"
+        );
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Second commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Reset local branch back to first commit
+        var localBranchPath = Path.Combine(
+            _testDir,
+            ".git",
+            "refs",
+            "heads",
+            "main"
+        );
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "test.txt"),
+            "content"
+        );
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+
+        // Make uncommitted local change
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "test.txt"),
+            "local changes"
+        );
+
+        var exception = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => Pull.PullFromRemote(_testDir)
+        );
+        Assert.IsTrue(exception.Message.Contains("would be overwritten by merge"));
+
+        // Verify local changes are preserved
+        var content = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "test.txt")
+        );
+        Assert.AreEqual("local changes", content);
+    }
+
+    [TestMethod]
+    public async Task ShouldNotOverwriteUnchangedFilesWithLocalModifications()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file1.txt"),
+            "content1"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "content2"
+        );
+        await Add.AddFiles(_testDir, new[] { "file1.txt", "file2.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Commit a change only to file1
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file1.txt"),
+            "modified1"
+        );
+        await Add.AddFiles(_testDir, new[] { "file1.txt" });
+        var secondSha = await Commit.CreateCommit(_testDir, "Second commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Reset local branch back to first commit
+        var localBranchPath = Path.Combine(
+            _testDir,
+            ".git",
+            "refs",
+            "heads",
+            "main"
+        );
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file1.txt"),
+            "content1"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "content2"
+        );
+        await Add.AddFiles(_testDir, new[] { "file1.txt", "file2.txt" });
+
+        // Make uncommitted change to file2 (which did not change in the pull)
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "local changes to file2"
+        );
+
+        await Pull.PullFromRemote(_testDir);
+
+        // file1 should be updated
+        var content1 = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "file1.txt")
+        );
+        Assert.AreEqual("modified1", content1);
+
+        // file2 local changes should be preserved since it wasn't changed in the pull
+        var content2 = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "file2.txt")
+        );
+        Assert.AreEqual("local changes to file2", content2);
+    }
 }

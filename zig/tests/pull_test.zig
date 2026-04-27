@@ -258,7 +258,6 @@ test "should update local branch reference" {
 
     try add(io, allocator, tmp_path, paths2);
     const second_sha = try commit(io, allocator, tmp_path, "Second commit");
-
     try push(io, allocator, tmp_path, null, null, null);
 
     try pull(io, allocator, tmp_path, null, null, null);
@@ -401,4 +400,216 @@ test "should handle multiple files" {
     try std.testing.expectEqualStrings("modified1", content1);
     try std.testing.expectEqualStrings("modified2", content2);
     try std.testing.expectEqualStrings("modified3", content3);
+}
+
+test "should fast-forward when remote is ahead" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-10" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
+    defer allocator.free(test_file_path);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
+
+    const paths = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths);
+    paths[0] = try allocator.dupe(u8, "test.txt");
+    defer allocator.free(paths[0]);
+
+    try add(io, allocator, tmp_path, paths);
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
+
+    const paths2 = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths2);
+    paths2[0] = try allocator.dupe(u8, "test.txt");
+    defer allocator.free(paths2[0]);
+
+    try add(io, allocator, tmp_path, paths2);
+    const second_sha = try commit(io, allocator, tmp_path, "Second commit");
+    try push(io, allocator, tmp_path, null, null, null);
+
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
+
+    const paths3 = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths3);
+    paths3[0] = try allocator.dupe(u8, "test.txt");
+    defer allocator.free(paths3[0]);
+    try add(io, allocator, tmp_path, paths3);
+
+    try pull(io, allocator, tmp_path, null, null, null);
+
+    const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
+    defer allocator.free(content);
+
+    try std.testing.expectEqualStrings("modified", content);
+
+    const local_branch_content = try cwd.readFileAlloc(io, local_branch_path, allocator, .unlimited);
+    defer allocator.free(local_branch_content);
+
+    const trimmed = std.mem.trim(u8, local_branch_content, &std.ascii.whitespace);
+    try std.testing.expectEqualStrings(second_sha, trimmed);
+
+    allocator.free(first_sha);
+    allocator.free(second_sha);
+}
+
+test "should throw error when local changes would be overwritten" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-11" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
+    defer allocator.free(test_file_path);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
+
+    const paths = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths);
+    paths[0] = try allocator.dupe(u8, "test.txt");
+    defer allocator.free(paths[0]);
+
+    try add(io, allocator, tmp_path, paths);
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
+
+    const paths2 = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths2);
+    paths2[0] = try allocator.dupe(u8, "test.txt");
+    defer allocator.free(paths2[0]);
+
+    try add(io, allocator, tmp_path, paths2);
+    const second_sha = try commit(io, allocator, tmp_path, "Second commit");
+    defer allocator.free(second_sha);
+    try push(io, allocator, tmp_path, null, null, null);
+
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
+
+    const paths3 = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths3);
+    paths3[0] = try allocator.dupe(u8, "test.txt");
+    defer allocator.free(paths3[0]);
+    try add(io, allocator, tmp_path, paths3);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "local changes" });
+
+    const result = pull(io, allocator, tmp_path, null, null, null);
+    try std.testing.expectError(error.LocalChangesWouldBeOverwritten, result);
+
+    const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
+    defer allocator.free(content);
+
+    try std.testing.expectEqualStrings("local changes", content);
+
+    allocator.free(first_sha);
+}
+
+test "should not overwrite unchanged files with local modifications" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-12" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const file1_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file1.txt" });
+    const file2_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file2.txt" });
+    defer allocator.free(file1_path);
+    defer allocator.free(file2_path);
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "content1" });
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "content2" });
+
+    const paths = try allocator.alloc([]const u8, 2);
+    defer allocator.free(paths);
+    paths[0] = try allocator.dupe(u8, "file1.txt");
+    paths[1] = try allocator.dupe(u8, "file2.txt");
+    defer allocator.free(paths[0]);
+    defer allocator.free(paths[1]);
+
+    try add(io, allocator, tmp_path, paths);
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "modified1" });
+
+    const paths2 = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths2);
+    paths2[0] = try allocator.dupe(u8, "file1.txt");
+    defer allocator.free(paths2[0]);
+    try add(io, allocator, tmp_path, paths2);
+    const second_sha = try commit(io, allocator, tmp_path, "Second commit");
+    defer allocator.free(second_sha);
+    try push(io, allocator, tmp_path, null, null, null);
+
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "content1" });
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "content2" });
+
+    const paths3 = try allocator.alloc([]const u8, 2);
+    defer allocator.free(paths3);
+    paths3[0] = try allocator.dupe(u8, "file1.txt");
+    paths3[1] = try allocator.dupe(u8, "file2.txt");
+    defer allocator.free(paths3[0]);
+    defer allocator.free(paths3[1]);
+    try add(io, allocator, tmp_path, paths3);
+
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "local changes to file2" });
+
+    try pull(io, allocator, tmp_path, null, null, null);
+
+    const content1 = try cwd.readFileAlloc(io, file1_path, allocator, .unlimited);
+    defer allocator.free(content1);
+
+    try std.testing.expectEqualStrings("modified1", content1);
+
+    const content2 = try cwd.readFileAlloc(io, file2_path, allocator, .unlimited);
+    defer allocator.free(content2);
+
+    try std.testing.expectEqualStrings("local changes to file2", content2);
+
+    allocator.free(first_sha);
 }
