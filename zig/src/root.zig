@@ -29,6 +29,9 @@ pub const types = struct {
     pub const StatusInfo = @import("types/StatusInfo.zig").StatusInfo;
 };
 
+pub const RemoteOptions = @import("types/RemoteOptions.zig").RemoteOptions;
+pub const Credentials = @import("types/RemoteOptions.zig").Credentials;
+
 pub const packfile = @import("packfile.zig");
 
 // Placeholder function for main.zig

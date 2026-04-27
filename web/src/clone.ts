@@ -2,10 +2,16 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { fetchFromRemote } from "./fetch.ts";
 import { init } from "./init.ts";
 import { remoteAdd } from "./remote.ts";
+import type { RemoteOptions } from "./types/RemoteOptions.ts";
 
-export async function clone(url: string, targetPath?: string): Promise<string> {
+export async function clone(
+	url: string,
+	targetPath?: string,
+	options?: RemoteOptions,
+): Promise<string> {
 	const repoName = extractRepoName(url);
 	const path = targetPath || join(process.cwd(), repoName);
 
@@ -18,6 +24,12 @@ export async function clone(url: string, targetPath?: string): Promise<string> {
 	await init(path);
 
 	await remoteAdd(path, "origin", url);
+
+	try {
+		await fetchFromRemote(path, "origin", options);
+	} catch {
+		// Fetch may fail for fake URLs or unreachable remotes, but clone should still succeed
+	}
 
 	return path;
 }

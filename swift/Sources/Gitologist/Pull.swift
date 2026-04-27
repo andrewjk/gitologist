@@ -21,7 +21,7 @@ enum PullError: Error, LocalizedError {
 	}
 }
 
-func pull(at path: String, remote: String? = nil, branch: String? = nil) async throws {
+func pull(at path: String, remote: String? = nil, branch: String? = nil, options: RemoteOptions? = nil) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -37,7 +37,7 @@ func pull(at path: String, remote: String? = nil, branch: String? = nil) async t
 		branchName = try await getCurrentBranch(at: gitDir.path)
 	}
 
-	_ = try await fetchFromRemote(at: path, remote: remoteName)
+	_ = try await fetchFromRemote(at: path, remote: remoteName, options: options)
 
 	let remoteBranchPath = gitDir
 		.appendingPathComponent("refs")

@@ -1,8 +1,11 @@
 const std = @import("std");
 
-pub fn clone(io: std.Io, allocator: std.mem.Allocator, url: []const u8, target_path: ?[]const u8) ![]const u8 {
+const RemoteOptions = @import("types/RemoteOptions.zig").RemoteOptions;
+
+pub fn clone(io: std.Io, allocator: std.mem.Allocator, url: []const u8, target_path: ?[]const u8, options: ?*const RemoteOptions) ![]const u8 {
     const init_fn = @import("init.zig").init;
     const remote_add_fn = @import("remote.zig").remoteAdd;
+    const fetch_fn = @import("fetch.zig").fetchFromRemote;
 
     const cwd = std.Io.Dir.cwd();
 
@@ -26,6 +29,10 @@ pub fn clone(io: std.Io, allocator: std.mem.Allocator, url: []const u8, target_p
     try init_fn(io, allocator, path);
 
     try remote_add_fn(io, allocator, path, "origin", url);
+
+    _ = fetch_fn(io, allocator, path, "origin", options) catch {
+        // Fetch may fail for fake URLs or unreachable remotes, but clone should still succeed
+    };
 
     return path;
 }

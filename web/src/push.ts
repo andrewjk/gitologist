@@ -5,9 +5,17 @@ import { join, dirname } from "node:path";
 import { enumerateObjects } from "./objects.ts";
 import { encodePktLine, decodePktLines, createPackfile } from "./packfile.ts";
 import { status } from "./status.ts";
+import type { RemoteOptions } from "./types/RemoteOptions.ts";
 import { getCurrentBranch } from "./utils.ts";
 
-export async function push(path: string, remote?: string, branch?: string): Promise<void> {
+type FetchHeaders = Record<string, string>;
+
+export async function push(
+	path: string,
+	remote?: string,
+	branch?: string,
+	options?: RemoteOptions,
+): Promise<void> {
 	const gitDir = join(path, ".git");
 
 	if (!existsSync(gitDir)) {
@@ -36,7 +44,7 @@ export async function push(path: string, remote?: string, branch?: string): Prom
 	const remoteUrl = await getRemoteUrl(gitDir, remoteName);
 
 	if (remoteUrl && (remoteUrl.startsWith("http://") || remoteUrl.startsWith("https://"))) {
-		await pushToRemote(remoteUrl, commitSha, branchName, gitDir);
+		await pushToRemote(remoteUrl, commitSha, branchName, gitDir, options);
 	}
 
 	const remoteBranchPath = join(gitDir, "refs", "remotes", remoteName, branchName);
@@ -49,11 +57,12 @@ async function pushToRemote(
 	commitSha: string,
 	branchName: string,
 	gitDir: string,
+	options?: RemoteOptions,
 ): Promise<void> {
 	let oldSha = "0".repeat(40);
 
 	try {
-		const remoteRefs = await discoverRefsForPush(remoteUrl);
+		const remoteRefs = await discoverRefsForPush(remoteUrl, options);
 		const remoteRef = remoteRefs.find((r) => r.ref === `refs/heads/${branchName}`);
 		if (remoteRef) {
 			oldSha = remoteRef.sha;
@@ -69,21 +78,31 @@ async function pushToRemote(
 	const packfile = createPackfile(objects);
 
 	// Build and send push request
-	await sendPush(remoteUrl, oldSha, commitSha, branchName, packfile);
+	await sendPush(remoteUrl, oldSha, commitSha, branchName, packfile, options);
 }
 
 async function discoverRefsForPush(
 	remoteUrl: string,
+	options?: RemoteOptions,
 ): Promise<Array<{ sha: string; ref: string }>> {
 	const url = new URL("info/refs", remoteUrl);
 	url.searchParams.set("service", "git-receive-pack");
 
+	const headers: FetchHeaders = {
+		Accept: "application/x-git-receive-pack-advertisement",
+		"Git-Protocol": "version=2",
+	};
+
+	if (options?.credentials) {
+		const auth = Buffer.from(
+			`${options.credentials.username}:${options.credentials.token}`,
+		).toString("base64");
+		headers["Authorization"] = `Basic ${auth}`;
+	}
+
 	const response = await fetch(url.toString(), {
 		method: "GET",
-		headers: {
-			Accept: "application/x-git-receive-pack-advertisement",
-			"Git-Protocol": "version=2",
-		},
+		headers,
 	});
 
 	if (response.status !== 200) {
@@ -123,18 +142,28 @@ async function sendPush(
 	newSha: string,
 	branchName: string,
 	packfile: Buffer,
+	options?: RemoteOptions,
 ): Promise<void> {
 	const url = new URL("git-receive-pack", remoteUrl);
 
 	const requestBody = buildPushRequest(oldSha, newSha, branchName, packfile);
 
+	const headers: FetchHeaders = {
+		"Content-Type": "application/x-git-receive-pack-request",
+		Accept: "application/x-git-receive-pack-result",
+		"Git-Protocol": "version=2",
+	};
+
+	if (options?.credentials) {
+		const auth = Buffer.from(
+			`${options.credentials.username}:${options.credentials.token}`,
+		).toString("base64");
+		headers["Authorization"] = `Basic ${auth}`;
+	}
+
 	const response = await fetch(url.toString(), {
 		method: "POST",
-		headers: {
-			"Content-Type": "application/x-git-receive-pack-request",
-			Accept: "application/x-git-receive-pack-result",
-			"Git-Protocol": "version=2",
-		},
+		headers,
 		body: requestBody,
 	});
 

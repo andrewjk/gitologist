@@ -30,7 +30,7 @@ enum FetchError: Error, LocalizedError {
 	}
 }
 
-func fetchFromRemote(at path: String, remote: String? = nil) async throws -> FetchResult {
+func fetchFromRemote(at path: String, remote: String? = nil, options: RemoteOptions? = nil) async throws -> FetchResult {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -42,7 +42,7 @@ func fetchFromRemote(at path: String, remote: String? = nil) async throws -> Fet
 		return FetchResult(remote: remoteName, refs: [])
 	}
 
-	let refs = try await discoverRefs(remoteUrl: remoteUrl)
+	let refs = try await discoverRefs(remoteUrl: remoteUrl, options: options)
 	var result = FetchResult(remote: remoteName, refs: [])
 
 	var wants: [String] = []
@@ -64,7 +64,7 @@ func fetchFromRemote(at path: String, remote: String? = nil) async throws -> Fet
 	}
 
 	if !wants.isEmpty {
-		let objects = try await fetchPackfile(remoteUrl: remoteUrl, wants: wants, haves: haves)
+		let objects = try await fetchPackfile(remoteUrl: remoteUrl, wants: wants, haves: haves, options: options)
 		try await storeObjects(at: gitDir.path, objects: objects)
 	}
 
@@ -92,7 +92,7 @@ struct DiscoveredRef {
 	let ref: String
 }
 
-func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
+func discoverRefs(remoteUrl: String, options: RemoteOptions? = nil) async throws -> [DiscoveredRef] {
 	guard let url = URL(string: remoteUrl) else {
 		throw FetchError.invalidURL
 	}
@@ -106,6 +106,15 @@ func discoverRefs(remoteUrl: String) async throws -> [DiscoveredRef] {
 	request.setValue("application/x-git-upload-pack-request", forHTTPHeaderField: "Content-Type")
 	request.setValue("application/x-git-upload-pack-result", forHTTPHeaderField: "Accept")
 	request.setValue("version=2", forHTTPHeaderField: "Git-Protocol")
+
+	if let credentials = options?.credentials {
+		let authString = "\(credentials.username):\(credentials.token)"
+		if let authData = authString.data(using: .utf8) {
+			let base64Auth = authData.base64EncodedString()
+			request.setValue("Basic \(base64Auth)", forHTTPHeaderField: "Authorization")
+		}
+	}
+
 	request.httpBody = requestBody
 
 	let (data, response) = try await URLSession.shared.data(for: request)
@@ -159,7 +168,7 @@ func buildLsRefsRequest() -> Data {
 	return lines.reduce(Data(), +)
 }
 
-func fetchPackfile(remoteUrl: String, wants: [String], haves: [String]) async throws -> [PackObject] {
+func fetchPackfile(remoteUrl: String, wants: [String], haves: [String], options: RemoteOptions? = nil) async throws -> [PackObject] {
 	guard let url = URL(string: remoteUrl) else {
 		throw FetchError.invalidURL
 	}
@@ -173,6 +182,15 @@ func fetchPackfile(remoteUrl: String, wants: [String], haves: [String]) async th
 	request.setValue("application/x-git-upload-pack-request", forHTTPHeaderField: "Content-Type")
 	request.setValue("application/x-git-upload-pack-result", forHTTPHeaderField: "Accept")
 	request.setValue("version=2", forHTTPHeaderField: "Git-Protocol")
+
+	if let credentials = options?.credentials {
+		let authString = "\(credentials.username):\(credentials.token)"
+		if let authData = authString.data(using: .utf8) {
+			let base64Auth = authData.base64EncodedString()
+			request.setValue("Basic \(base64Auth)", forHTTPHeaderField: "Authorization")
+		}
+	}
+
 	request.httpBody = requestBody
 
 	let (data, response) = try await URLSession.shared.data(for: request)

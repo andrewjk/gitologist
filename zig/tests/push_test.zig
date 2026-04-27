@@ -34,7 +34,7 @@ test "should push to default remote and branch" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "main" });
     defer allocator.free(remote_branch_path);
@@ -80,7 +80,7 @@ test "should push to specified remote" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, "upstream", null);
+    try push(io, allocator, tmp_path, "upstream", null, null);
 
     const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "upstream", "main" });
     defer allocator.free(remote_branch_path);
@@ -132,7 +132,7 @@ test "should push to specified branch" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, "origin", "main");
+    try push(io, allocator, tmp_path, "origin", "main", null);
 
     const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "main" });
     defer allocator.free(remote_branch_path);
@@ -156,7 +156,7 @@ test "should throw error if not a git repository" {
     try cwd.createDirPath(io, non_git_dir);
     defer cwd.deleteTree(io, non_git_dir) catch {};
 
-    const result = push(io, allocator, non_git_dir, null, null);
+    const result = push(io, allocator, non_git_dir, null, null, null);
     try std.testing.expectError(error.NotAGitRepository, result);
 }
 
@@ -190,7 +190,7 @@ test "should throw error if there are uncommitted changes" {
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
-    const result = push(io, allocator, tmp_path, null, null);
+    const result = push(io, allocator, tmp_path, null, null, null);
     try std.testing.expectError(error.UncommittedChanges, result);
 }
 
@@ -226,7 +226,7 @@ test "should throw error if there are untracked files" {
     defer allocator.free(test2_file_path);
     try cwd.writeFile(io, .{ .sub_path = test2_file_path, .data = "untracked" });
 
-    const result = push(io, allocator, tmp_path, null, null);
+    const result = push(io, allocator, tmp_path, null, null, null);
     try std.testing.expectError(error.UncommittedChanges, result);
 }
 
@@ -248,7 +248,7 @@ test "should throw error if local branch does not exist" {
     defer allocator.free(head_path);
     try cwd.writeFile(io, .{ .sub_path = head_path, .data = "ref: refs/heads/nonexistent\n" });
 
-    const result = push(io, allocator, tmp_path, null, null);
+    const result = push(io, allocator, tmp_path, null, null, null);
     try std.testing.expectError(error.LocalBranchDoesNotExist, result);
 }
 
@@ -280,7 +280,7 @@ test "should update existing remote branch" {
     const sha = try commit(io, allocator, tmp_path, "First commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
@@ -292,7 +292,7 @@ test "should update existing remote branch" {
     try add(io, allocator, tmp_path, paths2);
     const second_sha = try commit(io, allocator, tmp_path, "Second commit");
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "main" });
     defer allocator.free(remote_branch_path);
@@ -338,7 +338,7 @@ test "should create remote directory if it does not exist" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, "myremote", null);
+    try push(io, allocator, tmp_path, "myremote", null, null);
 
     const remote_dir = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "myremote" });
     defer allocator.free(remote_dir);
@@ -383,7 +383,7 @@ test "should handle multiple pushes to same branch" {
     const sha = try commit(io, allocator, tmp_path, "First commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
@@ -396,7 +396,7 @@ test "should handle multiple pushes to same branch" {
     const sha2 = try commit(io, allocator, tmp_path, "Second commit");
     allocator.free(sha2);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     const remote_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "remotes", "origin", "main" });
     defer allocator.free(remote_branch_path);

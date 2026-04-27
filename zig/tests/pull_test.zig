@@ -34,7 +34,7 @@ test "should pull from default remote and branch" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
@@ -47,9 +47,9 @@ test "should pull from default remote and branch" {
     const sha2 = try commit(io, allocator, tmp_path, "Second commit");
     allocator.free(sha2);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
-    try pull(io, allocator, tmp_path, null, null);
+    try pull(io, allocator, tmp_path, null, null, null);
 
     const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
     defer allocator.free(content);
@@ -85,7 +85,7 @@ test "should pull from specified remote" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, "upstream", null);
+    try push(io, allocator, tmp_path, "upstream", null, null);
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
@@ -98,9 +98,9 @@ test "should pull from specified remote" {
     const sha2 = try commit(io, allocator, tmp_path, "Second commit");
     allocator.free(sha2);
 
-    try push(io, allocator, tmp_path, "upstream", null);
+    try push(io, allocator, tmp_path, "upstream", null, null);
 
-    try pull(io, allocator, tmp_path, "upstream", null);
+    try pull(io, allocator, tmp_path, "upstream", null, null);
 
     const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
     defer allocator.free(content);
@@ -148,7 +148,7 @@ test "should pull from specified branch" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, "origin", "main");
+    try push(io, allocator, tmp_path, "origin", "main", null);
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
@@ -161,9 +161,9 @@ test "should pull from specified branch" {
     const sha2 = try commit(io, allocator, tmp_path, "Second commit");
     allocator.free(sha2);
 
-    try push(io, allocator, tmp_path, "origin", "main");
+    try push(io, allocator, tmp_path, "origin", "main", null);
 
-    try pull(io, allocator, tmp_path, "origin", "main");
+    try pull(io, allocator, tmp_path, "origin", "main", null);
 
     const content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
     defer allocator.free(content);
@@ -183,7 +183,7 @@ test "should throw error if not a git repository" {
     try cwd.createDirPath(io, non_git_dir);
     defer cwd.deleteTree(io, non_git_dir) catch {};
 
-    const result = pull(io, allocator, non_git_dir, null, null);
+    const result = pull(io, allocator, non_git_dir, null, null, null);
     try std.testing.expectError(error.NotAGitRepository, result);
 }
 
@@ -215,7 +215,7 @@ test "should throw error if remote branch does not exist" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    const result = pull(io, allocator, tmp_path, null, null);
+    const result = pull(io, allocator, tmp_path, null, null, null);
     try std.testing.expectError(error.RemoteBranchDoesNotExist, result);
 }
 
@@ -247,7 +247,7 @@ test "should update local branch reference" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
@@ -259,9 +259,9 @@ test "should update local branch reference" {
     try add(io, allocator, tmp_path, paths2);
     const second_sha = try commit(io, allocator, tmp_path, "Second commit");
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
-    try pull(io, allocator, tmp_path, null, null);
+    try pull(io, allocator, tmp_path, null, null, null);
 
     const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
     defer allocator.free(local_branch_path);
@@ -307,7 +307,7 @@ test "should handle directories" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     try cwd.writeFile(io, .{ .sub_path = index_file_path, .data = "console.log('world')" });
 
@@ -320,9 +320,9 @@ test "should handle directories" {
     const sha2 = try commit(io, allocator, tmp_path, "Second commit");
     allocator.free(sha2);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
-    try pull(io, allocator, tmp_path, null, null);
+    try pull(io, allocator, tmp_path, null, null, null);
 
     const content = try cwd.readFileAlloc(io, index_file_path, allocator, .unlimited);
     defer allocator.free(content);
@@ -368,7 +368,7 @@ test "should handle multiple files" {
     const sha = try commit(io, allocator, tmp_path, "Initial commit");
     allocator.free(sha);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
     try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "modified1" });
     try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "modified2" });
@@ -387,9 +387,9 @@ test "should handle multiple files" {
     const sha2 = try commit(io, allocator, tmp_path, "Second commit");
     allocator.free(sha2);
 
-    try push(io, allocator, tmp_path, null, null);
+    try push(io, allocator, tmp_path, null, null, null);
 
-    try pull(io, allocator, tmp_path, null, null);
+    try pull(io, allocator, tmp_path, null, null, null);
 
     const content1 = try cwd.readFileAlloc(io, file1_path, allocator, .unlimited);
     const content2 = try cwd.readFileAlloc(io, file2_path, allocator, .unlimited);

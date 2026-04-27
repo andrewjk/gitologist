@@ -2,10 +2,12 @@ const std = @import("std");
 
 const utils = @import("utils.zig");
 const packfile = @import("packfile.zig");
-const objects = @import("objects.zig");
 const remote = @import("remote.zig");
+const objects = @import("objects.zig");
+const gitologist = @import("root.zig");
+const RemoteOptions = gitologist.RemoteOptions;
 
-pub fn push(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name_param: ?[]const u8, branch: ?[]const u8) !void {
+pub fn push(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name_param: ?[]const u8, branch: ?[]const u8, options: ?*const RemoteOptions) !void {
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 
@@ -67,7 +69,7 @@ pub fn push(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_n
     if (remote_url_opt) |remote_url| {
         defer allocator.free(remote_url);
         if (std.mem.startsWith(u8, remote_url, "http://") or std.mem.startsWith(u8, remote_url, "https://")) {
-            try pushToRemote(io, allocator, remote_url, commit_sha, branch_name, git_dir_path);
+            try pushToRemote(io, allocator, remote_url, commit_sha, branch_name, git_dir_path, options);
         }
     }
 
@@ -92,11 +94,12 @@ fn pushToRemote(
     commit_sha: []const u8,
     branch_name: []const u8,
     git_dir_path: []const u8,
+    options: ?*const RemoteOptions,
 ) !void {
     var old_sha: []const u8 = undefined;
     var free_old_sha = false;
 
-    var refs = discoverRefsForPush(io, allocator, remote_url) catch {
+    var refs = discoverRefsForPush(io, allocator, remote_url, options) catch {
         // If we can't discover refs, assume it's a new branch
         const zeros = try allocator.alloc(u8, 40);
         @memset(zeros, '0');
@@ -113,7 +116,7 @@ fn pushToRemote(
         }
         const pack_data = try packfile.createPackfile(allocator, pack_objects);
         defer allocator.free(pack_data);
-        return try sendPush(io, allocator, remote_url, zeros, commit_sha, branch_name, pack_data);
+        return try sendPush(io, allocator, remote_url, zeros, commit_sha, branch_name, pack_data, options);
     };
     defer {
         for (refs.items) |ref| {
@@ -161,7 +164,7 @@ fn pushToRemote(
     const pack_data = try packfile.createPackfile(allocator, pack_objects);
     defer allocator.free(pack_data);
 
-    try sendPush(io, allocator, remote_url, old_sha, commit_sha, branch_name, pack_data);
+    try sendPush(io, allocator, remote_url, old_sha, commit_sha, branch_name, pack_data, options);
 }
 
 fn buildPushRequest(allocator: std.mem.Allocator, old_sha: []const u8, new_sha: []const u8, branch_name: []const u8, pack_data: []const u8) ![]const u8 {
@@ -198,6 +201,7 @@ fn sendPush(
     new_sha: []const u8,
     branch_name: []const u8,
     pack_data: []const u8,
+    options: ?*const RemoteOptions,
 ) !void {
     var url_parts = std.mem.splitScalar(u8, remote_url, '/');
     var host: []const u8 = undefined;
@@ -223,7 +227,41 @@ fn sendPush(
     defer client.deinit();
 
     const uri = try std.Uri.parse(full_url);
-    var request = try client.request(.POST, uri, .{});
+
+    var headers_buf: [4]std.http.Header = undefined;
+    var headers_len: usize = 0;
+    headers_buf[headers_len] = .{ .name = "Content-Type", .value = "application/x-git-receive-pack-request" };
+    headers_len += 1;
+    headers_buf[headers_len] = .{ .name = "Accept", .value = "application/x-git-receive-pack-result" };
+    headers_len += 1;
+    headers_buf[headers_len] = .{ .name = "Git-Protocol", .value = "version=2" };
+    headers_len += 1;
+
+    var req_options: std.http.Client.RequestOptions = .{
+        .extra_headers = headers_buf[0..headers_len],
+    };
+
+    if (options) |opts| {
+        if (opts.credentials) |creds| {
+            const auth_string = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ creds.username, creds.token });
+            defer allocator.free(auth_string);
+
+            const encoder = std.base64.standard.Encoder;
+            const auth_bytes_len = encoder.calcSize(auth_string.len);
+            const auth_bytes = try allocator.alloc(u8, auth_bytes_len);
+            defer allocator.free(auth_bytes);
+            _ = encoder.encode(auth_bytes, auth_string);
+
+            const auth_header = try std.fmt.allocPrint(allocator, "Basic {s}", .{auth_bytes});
+            defer allocator.free(auth_header);
+
+            headers_buf[headers_len] = .{ .name = "Authorization", .value = auth_header };
+            headers_len += 1;
+            req_options.extra_headers = headers_buf[0..headers_len];
+        }
+    }
+
+    var request = try client.request(.POST, uri, req_options);
     defer request.deinit();
 
     const request_body = try buildPushRequest(allocator, old_sha, new_sha, branch_name, pack_data);
@@ -271,7 +309,7 @@ const DiscoveredRef = struct {
     ref: []const u8,
 };
 
-fn discoverRefsForPush(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8) !std.ArrayList(DiscoveredRef) {
+fn discoverRefsForPush(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8, options: ?*const RemoteOptions) !std.ArrayList(DiscoveredRef) {
     var url_parts = std.mem.splitScalar(u8, remote_url, '/');
     var host: []const u8 = undefined;
 
@@ -296,7 +334,39 @@ fn discoverRefsForPush(io: std.Io, allocator: std.mem.Allocator, remote_url: []c
     defer client.deinit();
 
     const uri = try std.Uri.parse(full_url);
-    var request = try client.request(.GET, uri, .{});
+
+    var headers_buf: [4]std.http.Header = undefined;
+    var headers_len: usize = 0;
+    headers_buf[headers_len] = .{ .name = "Accept", .value = "application/x-git-receive-pack-advertisement" };
+    headers_len += 1;
+    headers_buf[headers_len] = .{ .name = "Git-Protocol", .value = "version=2" };
+    headers_len += 1;
+
+    var req_options: std.http.Client.RequestOptions = .{
+        .extra_headers = headers_buf[0..headers_len],
+    };
+
+    if (options) |opts| {
+        if (opts.credentials) |creds| {
+            const auth_string = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ creds.username, creds.token });
+            defer allocator.free(auth_string);
+
+            const encoder = std.base64.standard.Encoder;
+            const auth_bytes_len = encoder.calcSize(auth_string.len);
+            const auth_bytes = try allocator.alloc(u8, auth_bytes_len);
+            defer allocator.free(auth_bytes);
+            _ = encoder.encode(auth_bytes, auth_string);
+
+            const auth_header = try std.fmt.allocPrint(allocator, "Basic {s}", .{auth_bytes});
+            defer allocator.free(auth_header);
+
+            headers_buf[headers_len] = .{ .name = "Authorization", .value = auth_header };
+            headers_len += 1;
+            req_options.extra_headers = headers_buf[0..headers_len];
+        }
+    }
+
+    var request = try client.request(.GET, uri, req_options);
     defer request.deinit();
 
     try request.sendBodiless();

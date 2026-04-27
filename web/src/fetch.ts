@@ -4,9 +4,16 @@ import { join, dirname } from "node:path";
 
 import { encodePktLine, decodePktLines, parsePackfile, type PackObject } from "./packfile.ts";
 import type { FetchResult } from "./types/FetchResult.ts";
+import type { RemoteOptions } from "./types/RemoteOptions.ts";
 import { hashObjectBuffer } from "./utils.ts";
 
-export async function fetchFromRemote(path: string, remote?: string): Promise<FetchResult> {
+type FetchHeaders = Record<string, string>;
+
+export async function fetchFromRemote(
+	path: string,
+	remote?: string,
+	options?: RemoteOptions,
+): Promise<FetchResult> {
 	const gitDir = join(path, ".git");
 
 	if (!existsSync(gitDir)) {
@@ -23,7 +30,7 @@ export async function fetchFromRemote(path: string, remote?: string): Promise<Fe
 		};
 	}
 
-	const refs = await discoverRefs(remoteUrl);
+	const refs = await discoverRefs(remoteUrl, options);
 	const result: FetchResult = {
 		remote: remoteName,
 		refs: [],
@@ -51,7 +58,7 @@ export async function fetchFromRemote(path: string, remote?: string): Promise<Fe
 	}
 
 	if (wants.length > 0) {
-		const objects = await fetchPackfile(remoteUrl, wants, haves);
+		const objects = await fetchPackfile(remoteUrl, wants, haves, options);
 		await storeObjects(gitDir, objects);
 	}
 
@@ -114,16 +121,25 @@ interface DiscoveredRef {
 	ref: string;
 }
 
-async function discoverRefs(remoteUrl: string): Promise<DiscoveredRef[]> {
+async function discoverRefs(remoteUrl: string, options?: RemoteOptions): Promise<DiscoveredRef[]> {
 	const url = new URL("info/refs", remoteUrl);
 	url.searchParams.set("service", "git-upload-pack");
 
+	const headers: FetchHeaders = {
+		Accept: "application/x-git-upload-pack-advertisement",
+		"Git-Protocol": "version=2",
+	};
+
+	if (options?.credentials) {
+		const auth = Buffer.from(
+			`${options.credentials.username}:${options.credentials.token}`,
+		).toString("base64");
+		headers["Authorization"] = `Basic ${auth}`;
+	}
+
 	const response = await fetch(url.toString(), {
 		method: "GET",
-		headers: {
-			Accept: "application/x-git-upload-pack-advertisement",
-			"Git-Protocol": "version=2",
-		},
+		headers,
 	});
 
 	if (!response.ok) {
@@ -158,21 +174,33 @@ async function discoverRefs(remoteUrl: string): Promise<DiscoveredRef[]> {
 		return refs;
 	}
 
-	return await discoverRefsV2(remoteUrl);
+	return await discoverRefsV2(remoteUrl, options);
 }
 
-async function discoverRefsV2(remoteUrl: string): Promise<DiscoveredRef[]> {
+async function discoverRefsV2(
+	remoteUrl: string,
+	options?: RemoteOptions,
+): Promise<DiscoveredRef[]> {
 	const uploadUrl = new URL("git-upload-pack", remoteUrl);
 
 	const requestBody = buildLsRefsRequest();
 
+	const headers: FetchHeaders = {
+		"Content-Type": "application/x-git-upload-pack-request",
+		Accept: "application/x-git-upload-pack-result",
+		"Git-Protocol": "version=2",
+	};
+
+	if (options?.credentials) {
+		const auth = Buffer.from(
+			`${options.credentials.username}:${options.credentials.token}`,
+		).toString("base64");
+		headers["Authorization"] = `Basic ${auth}`;
+	}
+
 	const response = await fetch(uploadUrl.toString(), {
 		method: "POST",
-		headers: {
-			"Content-Type": "application/x-git-upload-pack-request",
-			Accept: "application/x-git-upload-pack-result",
-			"Git-Protocol": "version=2",
-		},
+		headers,
 		body: requestBody,
 	});
 
@@ -262,18 +290,28 @@ async function fetchPackfile(
 	remoteUrl: string,
 	wants: string[],
 	haves: string[],
+	options?: RemoteOptions,
 ): Promise<PackObject[]> {
 	const url = new URL("git-upload-pack", remoteUrl);
 
 	const requestBody = buildFetchRequestV2(wants, haves);
 
+	const headers: FetchHeaders = {
+		"Content-Type": "application/x-git-upload-pack-request",
+		Accept: "application/x-git-upload-pack-result",
+		"Git-Protocol": "version=2",
+	};
+
+	if (options?.credentials) {
+		const auth = Buffer.from(
+			`${options.credentials.username}:${options.credentials.token}`,
+		).toString("base64");
+		headers["Authorization"] = `Basic ${auth}`;
+	}
+
 	const response = await fetch(url.toString(), {
 		method: "POST",
-		headers: {
-			"Content-Type": "application/x-git-upload-pack-request",
-			Accept: "application/x-git-upload-pack-result",
-			"Git-Protocol": "version=2",
-		},
+		headers,
 		body: requestBody,
 	});
 

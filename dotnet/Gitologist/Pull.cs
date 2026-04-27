@@ -4,23 +4,24 @@ namespace Gitologist;
 
 public static class Pull
 {
-    public static async Task PullFromRemote(
-        string path,
-        string? remote = null,
-        string? branch = null
-    )
+public static async Task PullFromRemote(
+    string path,
+    string? remote = null,
+    string? branch = null,
+    RemoteOptions? options = null
+)
+{
+    var gitDir = Path.Combine(path, ".git");
+
+    if (!Directory.Exists(gitDir))
     {
-        var gitDir = Path.Combine(path, ".git");
+        throw new InvalidOperationException("Not a git repository");
+    }
 
-        if (!Directory.Exists(gitDir))
-        {
-            throw new InvalidOperationException("Not a git repository");
-        }
+    var remoteName = remote ?? "origin";
+    var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
 
-        var remoteName = remote ?? "origin";
-        var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
-
-        await Fetch.FetchFromRemote(path, remoteName);
+    await Fetch.FetchFromRemote(path, remoteName, options);
 
         var remoteBranchPath = Path.Combine(
             gitDir,

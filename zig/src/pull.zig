@@ -2,8 +2,9 @@ const std = @import("std");
 
 const utils = @import("utils.zig");
 const fetch = @import("fetch.zig");
+const RemoteOptions = @import("types/RemoteOptions.zig").RemoteOptions;
 
-pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: ?[]const u8, branch: ?[]const u8) !void {
+pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: ?[]const u8, branch: ?[]const u8, options: ?*const RemoteOptions) !void {
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 
@@ -15,7 +16,7 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
 
     const remote_name = if (remote) |r| r else "origin";
 
-    var fetch_result = try fetch.fetchFromRemote(io, allocator, path, remote_name);
+    var fetch_result = try fetch.fetchFromRemote(io, allocator, path, remote_name, options);
     defer {
         allocator.free(fetch_result.remote);
         for (fetch_result.refs.items) |ref| {

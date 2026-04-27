@@ -3,6 +3,8 @@ const std = @import("std");
 const packfile = @import("packfile.zig");
 const utils = @import("utils.zig");
 const remote = @import("remote.zig");
+const gitologist = @import("root.zig");
+const RemoteOptions = gitologist.RemoteOptions;
 
 pub const FetchResult = struct {
     remote: []const u8,
@@ -19,7 +21,7 @@ const DiscoveredRef = struct {
     ref: []const u8,
 };
 
-pub fn fetchFromRemote(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name_param: ?[]const u8) !FetchResult {
+pub fn fetchFromRemote(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name_param: ?[]const u8, options: ?*const RemoteOptions) !FetchResult {
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 
@@ -42,7 +44,7 @@ pub fn fetchFromRemote(io: std.Io, allocator: std.mem.Allocator, path: []const u
     const remote_url = remote_url_opt.?;
     defer allocator.free(remote_url);
 
-    var refs = try discoverRefs(io, allocator, remote_url);
+    var refs = try discoverRefs(io, allocator, remote_url, options);
     defer {
         for (refs.items) |ref| {
             allocator.free(ref.sha);
@@ -103,7 +105,7 @@ pub fn fetchFromRemote(io: std.Io, allocator: std.mem.Allocator, path: []const u
     }
 
     if (wants.items.len > 0) {
-        var objects = try fetchPackfile(io, allocator, remote_url, wants, haves);
+        var objects = try fetchPackfile(io, allocator, remote_url, wants, haves, options);
         defer {
             for (objects.items) |obj| {
                 allocator.free(obj.obj_type);
@@ -140,7 +142,7 @@ fn storeObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const 
     }
 }
 
-fn discoverRefs(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8) !std.ArrayList(DiscoveredRef) {
+fn discoverRefs(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8, options: ?*const RemoteOptions) !std.ArrayList(DiscoveredRef) {
     var url_parts = std.mem.splitScalar(u8, remote_url, '/');
     var host: []const u8 = undefined;
     var path: []const u8 = undefined;
@@ -168,7 +170,39 @@ fn discoverRefs(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8
     defer client.deinit();
 
     const uri = try std.Uri.parse(full_url);
-    var request = try client.request(.GET, uri, .{});
+
+    var headers_buf: [4]std.http.Header = undefined;
+    var headers_len: usize = 0;
+    headers_buf[headers_len] = .{ .name = "Accept", .value = "application/x-git-upload-pack-advertisement" };
+    headers_len += 1;
+    headers_buf[headers_len] = .{ .name = "Git-Protocol", .value = "version=2" };
+    headers_len += 1;
+
+    var req_options: std.http.Client.RequestOptions = .{
+        .extra_headers = headers_buf[0..headers_len],
+    };
+
+    if (options) |opts| {
+        if (opts.credentials) |creds| {
+            const auth_string = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ creds.username, creds.token });
+            defer allocator.free(auth_string);
+
+            const encoder = std.base64.standard.Encoder;
+            const auth_bytes_len = encoder.calcSize(auth_string.len);
+            const auth_bytes = try allocator.alloc(u8, auth_bytes_len);
+            defer allocator.free(auth_bytes);
+            _ = encoder.encode(auth_bytes, auth_string);
+
+            const auth_header = try std.fmt.allocPrint(allocator, "Basic {s}", .{auth_bytes});
+            defer allocator.free(auth_header);
+
+            headers_buf[headers_len] = .{ .name = "Authorization", .value = auth_header };
+            headers_len += 1;
+            req_options.extra_headers = headers_buf[0..headers_len];
+        }
+    }
+
+    var request = try client.request(.GET, uri, req_options);
     defer request.deinit();
 
     try request.sendBodiless();
@@ -322,7 +356,7 @@ fn extractPackfileFromSideband(allocator: std.mem.Allocator, data: []const u8) !
     return packfile_data.toOwnedSlice(allocator);
 }
 
-fn fetchPackfile(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8, wants: std.ArrayList([]const u8), haves: std.ArrayList([]const u8)) !std.ArrayList(packfile.PackObject) {
+fn fetchPackfile(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u8, wants: std.ArrayList([]const u8), haves: std.ArrayList([]const u8), options: ?*const RemoteOptions) !std.ArrayList(packfile.PackObject) {
     var url_parts = std.mem.splitScalar(u8, remote_url, '/');
     var host: []const u8 = undefined;
 
@@ -347,7 +381,41 @@ fn fetchPackfile(io: std.Io, allocator: std.mem.Allocator, remote_url: []const u
     defer client.deinit();
 
     const uri = try std.Uri.parse(full_url);
-    var request = try client.request(.POST, uri, .{});
+
+    var headers_buf: [4]std.http.Header = undefined;
+    var headers_len: usize = 0;
+    headers_buf[headers_len] = .{ .name = "Content-Type", .value = "application/x-git-upload-pack-request" };
+    headers_len += 1;
+    headers_buf[headers_len] = .{ .name = "Accept", .value = "application/x-git-upload-pack-result" };
+    headers_len += 1;
+    headers_buf[headers_len] = .{ .name = "Git-Protocol", .value = "version=2" };
+    headers_len += 1;
+
+    var req_options: std.http.Client.RequestOptions = .{
+        .extra_headers = headers_buf[0..headers_len],
+    };
+
+    if (options) |opts| {
+        if (opts.credentials) |creds| {
+            const auth_string = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ creds.username, creds.token });
+            defer allocator.free(auth_string);
+
+            const encoder = std.base64.standard.Encoder;
+            const auth_bytes_len = encoder.calcSize(auth_string.len);
+            const auth_bytes = try allocator.alloc(u8, auth_bytes_len);
+            defer allocator.free(auth_bytes);
+            _ = encoder.encode(auth_bytes, auth_string);
+
+            const auth_header = try std.fmt.allocPrint(allocator, "Basic {s}", .{auth_bytes});
+            defer allocator.free(auth_header);
+
+            headers_buf[headers_len] = .{ .name = "Authorization", .value = auth_header };
+            headers_len += 1;
+            req_options.extra_headers = headers_buf[0..headers_len];
+        }
+    }
+
+    var request = try client.request(.POST, uri, req_options);
     defer request.deinit();
 
     const request_body = try buildFetchRequest(allocator, wants, haves);

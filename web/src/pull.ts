@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { fetchFromRemote } from "./fetch.ts";
+import type { RemoteOptions } from "./types/RemoteOptions.ts";
 import {
 	extractContentFromBlob,
 	extractTreeFromCommit,
@@ -14,14 +15,19 @@ import {
 	updateBranch,
 } from "./utils.ts";
 
-export async function pull(path: string, remote?: string, branch?: string): Promise<void> {
+export async function pull(
+	path: string,
+	remote?: string,
+	branch?: string,
+	options?: RemoteOptions,
+): Promise<void> {
 	const gitDir = join(path, ".git");
 
 	if (!existsSync(gitDir)) {
 		throw new Error("Not a git repository");
 	}
 
-	await fetchFromRemote(path, remote);
+	await fetchFromRemote(path, remote, options);
 
 	const remoteName = remote || "origin";
 	const branchName = branch || (await getCurrentBranch(gitDir));

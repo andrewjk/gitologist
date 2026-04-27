@@ -17,7 +17,7 @@ test "should clone a repository to default directory" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path, null);
     defer allocator.free(result_path);
 
     try std.testing.expectEqualStrings(target_path, result_path);
@@ -47,7 +47,7 @@ test "should clone to specified directory" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "my-custom-dir" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path, null);
     defer allocator.free(result_path);
 
     try std.testing.expectEqualStrings(target_path, result_path);
@@ -73,7 +73,7 @@ test "should extract repo name from URL" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test-repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/my-repo.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/my-repo.git", target_path, null);
     defer allocator.free(result_path);
 
     try std.testing.expectEqualStrings(target_path, result_path);
@@ -94,7 +94,7 @@ test "should initialize git repository" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test-repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path, null);
     defer allocator.free(result_path);
 
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ result_path, ".git" });
@@ -124,7 +124,7 @@ test "should add remote" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test-repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path, null);
     defer allocator.free(result_path);
 
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ result_path, ".git" });
@@ -155,7 +155,7 @@ test "should handle URLs with .git extension" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test-repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/repo.git", target_path, null);
     defer allocator.free(result_path);
 
     try std.testing.expectEqualStrings(target_path, result_path);
@@ -187,7 +187,7 @@ test "should handle URLs without .git extension" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test-repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/repo", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/repo", target_path, null);
     defer allocator.free(result_path);
 
     try std.testing.expectEqualStrings(target_path, result_path);
@@ -219,7 +219,7 @@ test "should extract repo name from complex URL" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test-repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/org/team/project.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/org/team/project.git", target_path, null);
     defer allocator.free(result_path);
 
     try std.testing.expectEqualStrings(target_path, result_path);
@@ -240,7 +240,7 @@ test "should handle subdirectory in URL" {
     const target_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test-repo" });
     defer allocator.free(target_path);
 
-    const result_path = try clone(io, allocator, "https://github.com/user/nested/project.git", target_path);
+    const result_path = try clone(io, allocator, "https://github.com/user/nested/project.git", target_path, null);
     defer allocator.free(result_path);
 
     try std.testing.expectEqualStrings(target_path, result_path);
@@ -263,6 +263,6 @@ test "should throw error if directory already exists" {
 
     try cwd.createDirPath(io, existing_path);
 
-    const result = clone(io, allocator, "https://github.com/user/repo.git", existing_path);
+    const result = clone(io, allocator, "https://github.com/user/repo.git", existing_path, null);
     try std.testing.expectError(error.DestinationPathAlreadyExists, result);
 }

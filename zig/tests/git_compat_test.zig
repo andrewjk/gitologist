@@ -516,7 +516,7 @@ test "should create repo structure like git clone" {
     const our_clone = try std.fs.path.join(allocator, &[_][]const u8{ base_dir, "our-clone" });
     defer allocator.free(our_clone);
 
-    const result_path = try clone(io, allocator, remote_dir, our_clone);
+    const result_path = try clone(io, allocator, remote_dir, our_clone, null);
     defer allocator.free(result_path);
 
     // Verify our clone exists with proper structure
@@ -702,4 +702,3 @@ test "should create HEAD pointing to same ref format as git init" {
     try std.testing.expect(std.mem.startsWith(u8, our_head, "ref: refs/heads/"));
     try std.testing.expect(std.mem.startsWith(u8, their_head, "ref: refs/heads/"));
 }
-

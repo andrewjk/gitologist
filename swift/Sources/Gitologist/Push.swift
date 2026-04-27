@@ -23,7 +23,7 @@ enum PushError: Error, LocalizedError {
 	}
 }
 
-func push(at path: String, remote: String? = nil, branch: String? = nil) async throws {
+func push(at path: String, remote: String? = nil, branch: String? = nil, options: RemoteOptions? = nil) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -56,7 +56,7 @@ func push(at path: String, remote: String? = nil, branch: String? = nil) async t
 	let remoteUrl = await getRemoteUrl(at: gitDir.path, remoteName: remoteName)
 
 	if let remoteUrl = remoteUrl, remoteUrl.hasPrefix("http://") || remoteUrl.hasPrefix("https://") {
-		try await pushToRemote(remoteUrl: remoteUrl, commitSha: commitSha, branchName: branchName, gitDir: gitDir.path)
+		try await pushToRemote(remoteUrl: remoteUrl, commitSha: commitSha, branchName: branchName, gitDir: gitDir.path, options: options)
 	}
 
 	let remoteBranchPath = gitDir.appendingPathComponent("refs").appendingPathComponent("remotes").appendingPathComponent(remoteName).appendingPathComponent(branchName)
@@ -65,11 +65,11 @@ func push(at path: String, remote: String? = nil, branch: String? = nil) async t
 	try "\(commitSha)\n".write(to: remoteBranchPath, atomically: true, encoding: .utf8)
 }
 
-private func pushToRemote(remoteUrl: String, commitSha: String, branchName: String, gitDir: String) async throws {
+private func pushToRemote(remoteUrl: String, commitSha: String, branchName: String, gitDir: String, options: RemoteOptions? = nil) async throws {
 	var oldSha = String(repeating: "0", count: 40)
 
 	do {
-		let remoteRefs = try await discoverRefsForPush(remoteUrl: remoteUrl)
+		let remoteRefs = try await discoverRefsForPush(remoteUrl: remoteUrl, options: options)
 		if let remoteRef = remoteRefs.first(where: { $0.ref == "refs/heads/\(branchName)" }) {
 			oldSha = remoteRef.sha
 		}
@@ -79,10 +79,10 @@ private func pushToRemote(remoteUrl: String, commitSha: String, branchName: Stri
 
 	let packfile = createPackfile(objects)
 
-	try await sendPush(remoteUrl: remoteUrl, oldSha: oldSha, newSha: commitSha, branchName: branchName, packfile: packfile)
+	try await sendPush(remoteUrl: remoteUrl, oldSha: oldSha, newSha: commitSha, branchName: branchName, packfile: packfile, options: options)
 }
 
-private func discoverRefsForPush(remoteUrl: String) async throws -> [DiscoveredRef] {
+private func discoverRefsForPush(remoteUrl: String, options: RemoteOptions? = nil) async throws -> [DiscoveredRef] {
 	guard let url = URL(string: remoteUrl) else {
 		throw PushError.pushFailed(0, "Invalid URL")
 	}
@@ -97,6 +97,14 @@ private func discoverRefsForPush(remoteUrl: String) async throws -> [DiscoveredR
 	request.httpMethod = "GET"
 	request.setValue("application/x-git-receive-pack-advertisement", forHTTPHeaderField: "Accept")
 	request.setValue("version=2", forHTTPHeaderField: "Git-Protocol")
+
+	if let credentials = options?.credentials {
+		let authString = "\(credentials.username):\(credentials.token)"
+		if let authData = authString.data(using: .utf8) {
+			let base64Auth = authData.base64EncodedString()
+			request.setValue("Basic \(base64Auth)", forHTTPHeaderField: "Authorization")
+		}
+	}
 
 	let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -135,7 +143,7 @@ private func discoverRefsForPush(remoteUrl: String) async throws -> [DiscoveredR
 	return refs
 }
 
-private func sendPush(remoteUrl: String, oldSha: String, newSha: String, branchName: String, packfile: Data) async throws {
+private func sendPush(remoteUrl: String, oldSha: String, newSha: String, branchName: String, packfile: Data, options: RemoteOptions? = nil) async throws {
 	guard let url = URL(string: remoteUrl) else {
 		throw PushError.pushFailed(0, "Invalid URL")
 	}
@@ -153,6 +161,15 @@ private func sendPush(remoteUrl: String, oldSha: String, newSha: String, branchN
 	request.setValue("application/x-git-receive-pack-request", forHTTPHeaderField: "Content-Type")
 	request.setValue("application/x-git-receive-pack-result", forHTTPHeaderField: "Accept")
 	request.setValue("version=2", forHTTPHeaderField: "Git-Protocol")
+
+	if let credentials = options?.credentials {
+		let authString = "\(credentials.username):\(credentials.token)"
+		if let authData = authString.data(using: .utf8) {
+			let base64Auth = authData.base64EncodedString()
+			request.setValue("Basic \(base64Auth)", forHTTPHeaderField: "Authorization")
+		}
+	}
+
 	request.httpBody = requestBody
 
 	let (data, response) = try await URLSession.shared.data(for: request)
