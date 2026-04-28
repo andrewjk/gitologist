@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 
+import { IgnoreParser } from "./IgnoreParser.ts";
 import { status } from "./status.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
@@ -237,23 +238,40 @@ async function resetHard(path: string, gitDir: string, commitSha: string): Promi
 	const commitData = await readObject(gitDir, commitSha);
 	const treeSha = extractTreeFromCommit(commitData);
 
+	const gitignore = new IgnoreParser();
+	await gitignore.loadGitignore(path);
+
+	await removeNonIgnored(path, path, gitignore);
+
+	await restoreTree(path, gitDir, treeSha, "");
+
+	await updateIndex(gitDir, path, treeSha);
+}
+
+async function removeNonIgnored(
+	repoPath: string,
+	currentDir: string,
+	gitignore: IgnoreParser,
+): Promise<void> {
 	const { readdir } = await import("node:fs/promises");
-	const entries = await readdir(path, { withFileTypes: true });
+	const entries = await readdir(currentDir, { withFileTypes: true });
 
 	for (const entry of entries) {
 		if (entry.name === ".git") continue;
 
-		const fullPath = join(path, entry.name);
+		const fullPath = join(currentDir, entry.name);
+		const relPath = relative(repoPath, fullPath);
+
+		if (gitignore.isIgnored(relPath, entry.isDirectory())) {
+			continue;
+		}
+
 		try {
 			await rm(fullPath, { recursive: true, force: true });
 		} catch {
 			// Ignore errors
 		}
 	}
-
-	await restoreTree(path, gitDir, treeSha, "");
-
-	await updateIndex(gitDir, path, treeSha);
 }
 
 async function restoreTree(

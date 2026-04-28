@@ -117,7 +117,19 @@ public static class Stash
         var commitData = await Utils.ReadObject(gitDir, commitSha);
         var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
-        var entries = Directory.GetFileSystemEntries(path);
+        var gitignore = new IgnoreParser();
+        await gitignore.LoadGitignore(path);
+
+        RemoveNonIgnored(path, path, gitignore);
+
+        await RestoreTree(path, gitDir, treeSha, "");
+
+        await UpdateIndexFromTree(gitDir, path, treeSha);
+    }
+
+    private static void RemoveNonIgnored(string currentDir, string repoPath, IgnoreParser gitignore)
+    {
+        var entries = Directory.GetFileSystemEntries(currentDir);
 
         foreach (var entry in entries)
         {
@@ -126,9 +138,17 @@ public static class Stash
                 continue;
             }
 
+            var relPath = Path.GetRelativePath(repoPath, entry).Replace("\\", "/");
+            var isDir = Directory.Exists(entry);
+
+            if (gitignore.IsIgnored(relPath, isDir))
+            {
+                continue;
+            }
+
             try
             {
-                if (Directory.Exists(entry))
+                if (isDir)
                 {
                     Directory.Delete(entry, true);
                 }
@@ -142,10 +162,6 @@ public static class Stash
                 // Ignore errors
             }
         }
-
-        await RestoreTree(path, gitDir, treeSha, "");
-
-        await UpdateIndexFromTree(gitDir, path, treeSha);
     }
 
     private static async Task RestoreTree(string path, string gitDir, string treeSha, string prefix)

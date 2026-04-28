@@ -4,6 +4,7 @@ const utils = @import("utils.zig");
 const status_module = @import("status.zig");
 const commit_module = @import("commit.zig");
 const add_module = @import("add.zig");
+const ignore_parser = @import("ignore_parser.zig");
 
 pub fn stash(io: std.Io, allocator: std.mem.Allocator, path: []const u8, message: []const u8) ![]const u8 {
     const default_message = "WIP";
@@ -236,6 +237,10 @@ fn resetHard(
     git_dir_path: []const u8,
     commit_sha: []const u8,
 ) !void {
+    var gitignore = ignore_parser.IgnoreParser.init(allocator);
+    defer gitignore.deinit();
+    gitignore.loadGitignore(io, path) catch {};
+
     const cwd = std.Io.Dir.cwd();
     const repo_dir = cwd.openDir(io, path, .{}) catch return error.NotADirectory;
     defer repo_dir.close(io);
@@ -252,6 +257,10 @@ fn resetHard(
         var iter = repo_dir.iterate();
         while (try iter.next(io)) |entry| {
             if (std.mem.eql(u8, entry.name, ".git")) continue;
+
+            const is_dir = entry.kind == .directory;
+            if (gitignore.isIgnored(entry.name, is_dir)) continue;
+
             const name_copy = try allocator.dupe(u8, entry.name);
             const entry_copy = std.Io.Dir.Entry{
                 .name = name_copy,

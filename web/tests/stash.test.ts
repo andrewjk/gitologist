@@ -202,6 +202,50 @@ describe("stash", () => {
 		await rm(nonGitDir, { recursive: true, force: true });
 	});
 
+	it("should preserve ignored files when stashing", async () => {
+		await writeFile(join(testDir, "test.txt"), "initial content");
+		await writeFile(join(testDir, ".gitignore"), "*.log\nnode_modules/\n");
+		await add(testDir, [".gitignore", "test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "test.txt"), "modified content");
+		await writeFile(join(testDir, "debug.log"), "log data");
+		await mkdir(join(testDir, "node_modules", "pkg"), { recursive: true });
+		await writeFile(join(testDir, "node_modules", "pkg", "index.js"), "module");
+
+		await stash(testDir, "WIP");
+
+		const afterStashContent = await readFile(join(testDir, "test.txt"), "utf-8");
+		expect(afterStashContent).toBe("initial content");
+
+		expect(existsSync(join(testDir, "debug.log"))).toBe(true);
+		expect(existsSync(join(testDir, "node_modules", "pkg", "index.js"))).toBe(true);
+
+		const logContent = await readFile(join(testDir, "debug.log"), "utf-8");
+		expect(logContent).toBe("log data");
+	});
+
+	it("should stash multiple files and preserve ignored files", async () => {
+		await writeFile(join(testDir, "tracked.txt"), "tracked content");
+		await writeFile(join(testDir, ".gitignore"), "*.log\nbuild/\n");
+		await add(testDir, [".gitignore", "tracked.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "tracked.txt"), "modified");
+		await writeFile(join(testDir, "new.txt"), "new file");
+		await mkdir(join(testDir, "build"), { recursive: true });
+		await writeFile(join(testDir, "build", "output.js"), "compiled");
+		await writeFile(join(testDir, "error.log"), "errors");
+
+		await stash(testDir, "WIP");
+
+		expect(existsSync(join(testDir, "build", "output.js"))).toBe(true);
+		expect(existsSync(join(testDir, "error.log"))).toBe(true);
+
+		const buildContent = await readFile(join(testDir, "build", "output.js"), "utf-8");
+		expect(buildContent).toBe("compiled");
+	});
+
 	it("should restore multiple stashed files", async () => {
 		await writeFile(join(testDir, "file1.txt"), "content1");
 		await add(testDir, ["file1.txt"]);

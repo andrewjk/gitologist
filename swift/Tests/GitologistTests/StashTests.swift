@@ -250,6 +250,62 @@ struct StashTests {
 		try? fileManager.removeItem(at: nonGitDir)
 	}
 
+	@Test func shouldPreserveIgnoredFilesWhenStashing() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "initial content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try "*.log\nnode_modules/\n".write(to: testDirPath.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: [".gitignore", "test.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "modified content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try "log data".write(to: testDirPath.appendingPathComponent("debug.log"), atomically: true, encoding: .utf8)
+		try fileManager.createDirectory(at: testDirPath.appendingPathComponent("node_modules").appendingPathComponent("pkg"), withIntermediateDirectories: true)
+		try "module".write(to: testDirPath.appendingPathComponent("node_modules").appendingPathComponent("pkg").appendingPathComponent("index.js"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		let afterStashContent = try String(contentsOf: testDirPath.appendingPathComponent("test.txt"), encoding: .utf8)
+		#expect(afterStashContent == "initial content")
+
+		#expect(fileManager.fileExists(atPath: testDirPath.appendingPathComponent("debug.log").path))
+		#expect(fileManager.fileExists(atPath: testDirPath.appendingPathComponent("node_modules").appendingPathComponent("pkg").appendingPathComponent("index.js").path))
+
+		let logContent = try String(contentsOf: testDirPath.appendingPathComponent("debug.log"), encoding: .utf8)
+		#expect(logContent == "log data")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldStashMultipleFilesAndPreserveIgnored() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "tracked content".write(to: testDirPath.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+		try "*.log\nbuild/\n".write(to: testDirPath.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: [".gitignore", "tracked.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "modified".write(to: testDirPath.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+		try "new file".write(to: testDirPath.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+		try fileManager.createDirectory(at: testDirPath.appendingPathComponent("build"), withIntermediateDirectories: true)
+		try "compiled".write(to: testDirPath.appendingPathComponent("build").appendingPathComponent("output.js"), atomically: true, encoding: .utf8)
+		try "errors".write(to: testDirPath.appendingPathComponent("error.log"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		#expect(fileManager.fileExists(atPath: testDirPath.appendingPathComponent("build").appendingPathComponent("output.js").path))
+		#expect(fileManager.fileExists(atPath: testDirPath.appendingPathComponent("error.log").path))
+
+		let buildContent = try String(contentsOf: testDirPath.appendingPathComponent("build").appendingPathComponent("output.js"), encoding: .utf8)
+		#expect(buildContent == "compiled")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
 	@Test func shouldRestoreMultipleStashedFiles() async throws {
 		let testDirPath = testDir
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)

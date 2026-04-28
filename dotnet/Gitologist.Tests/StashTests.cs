@@ -274,6 +274,59 @@ public class StashTests
     }
 
     [TestMethod]
+    public async Task ShouldPreserveIgnoredFilesWhenStashing()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "initial content");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, ".gitignore"), "*.log\nnode_modules/\n");
+        await Add.AddFiles(_testDir, new[] { ".gitignore", "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified content");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "debug.log"), "log data");
+        Directory.CreateDirectory(Path.Combine(_testDir, "node_modules", "pkg"));
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "node_modules", "pkg", "index.js"),
+            "module"
+        );
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        var afterStashContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "test.txt"));
+        Assert.AreEqual("initial content", afterStashContent);
+
+        Assert.IsTrue(File.Exists(Path.Combine(_testDir, "debug.log")));
+        Assert.IsTrue(File.Exists(Path.Combine(_testDir, "node_modules", "pkg", "index.js")));
+
+        var logContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "debug.log"));
+        Assert.AreEqual("log data", logContent);
+    }
+
+    [TestMethod]
+    public async Task ShouldStashMultipleFilesAndPreserveIgnored()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "tracked.txt"), "tracked content");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, ".gitignore"), "*.log\nbuild/\n");
+        await Add.AddFiles(_testDir, new[] { ".gitignore", "tracked.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "tracked.txt"), "modified");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "new.txt"), "new file");
+        Directory.CreateDirectory(Path.Combine(_testDir, "build"));
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "build", "output.js"), "compiled");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "error.log"), "errors");
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        Assert.IsTrue(File.Exists(Path.Combine(_testDir, "build", "output.js")));
+        Assert.IsTrue(File.Exists(Path.Combine(_testDir, "error.log")));
+
+        var buildContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "build", "output.js"));
+        Assert.AreEqual("compiled", buildContent);
+    }
+
+    [TestMethod]
     public async Task ShouldRestoreMultipleStashedFiles()
     {
         await Init.InitRepo(_testDir);

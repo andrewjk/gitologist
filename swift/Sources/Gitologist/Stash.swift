@@ -114,17 +114,37 @@ private func resetHard(at path: String, gitDir: String, commitSha: String) async
 	let commitData = try await readObject(at: gitDir, sha: commitSha)
 	let treeSha = try extractTreeFromCommit(commitData)
 
-	let entries = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: nil)
+	let gitignore = IgnoreParser()
+	await gitignore.loadGitignore(repoPath: path)
 
-	for entry in entries {
-		if entry.lastPathComponent == ".git" { continue }
-
-		try? FileManager.default.removeItem(at: entry)
-	}
+	try await removeNonIgnored(at: path, repoPath: path, gitignore: gitignore)
 
 	try await restoreTree(at: path, gitDir: gitDir, treeSha: treeSha, prefix: "")
 
 	try await updateIndex(gitDir: gitDir, workingPath: path, treeSha: treeSha)
+}
+
+private func removeNonIgnored(at currentDir: String, repoPath: String, gitignore: IgnoreParser) async throws {
+	let entries = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: currentDir), includingPropertiesForKeys: [.isDirectoryKey])
+
+	for entry in entries {
+		if entry.lastPathComponent == ".git" { continue }
+
+		let relPath = relativePath(from: repoPath, to: entry.path)
+		let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+
+		if await gitignore.isIgnored(filePath: relPath, isDirectory: isDir) {
+			continue
+		}
+
+		try? FileManager.default.removeItem(at: entry)
+	}
+}
+
+private func relativePath(from base: String, to fullPath: String) -> String {
+	let baseComponents = URL(fileURLWithPath: base).standardized.pathComponents
+	let fullComponents = URL(fileURLWithPath: fullPath).standardized.pathComponents
+	return fullComponents.dropFirst(baseComponents.count).joined(separator: "/")
 }
 
 private func restoreTree(at path: String, gitDir: String, treeSha: String, prefix: String) async throws {

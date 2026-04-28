@@ -464,6 +464,128 @@ test "should throw error if not a git repository for unstash" {
     try std.testing.expectError(error.NotAGitRepository, result);
 }
 
+test "should preserve ignored files when stashing" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-preserve-ignored");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
+    defer allocator.free(test_file_path);
+
+    const gitignore_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".gitignore" });
+    defer allocator.free(gitignore_path);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "initial content" });
+    try cwd.writeFile(io, .{ .sub_path = gitignore_path, .data = "*.log\nnode_modules/\n" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ ".gitignore", "test.txt" });
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified content" });
+
+    const debug_log_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "debug.log" });
+    defer allocator.free(debug_log_path);
+
+    try cwd.writeFile(io, .{ .sub_path = debug_log_path, .data = "log data" });
+
+    const nm_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "node_modules" });
+    defer allocator.free(nm_path);
+
+    const nm_pkg_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "node_modules", "pkg" });
+    defer allocator.free(nm_pkg_path);
+
+    const nm_index_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "node_modules", "pkg", "index.js" });
+    defer allocator.free(nm_index_path);
+
+    cwd.createDirPath(io, nm_pkg_path) catch |err| {
+        if (err != error.PathAlreadyExists) return err;
+    };
+    try cwd.writeFile(io, .{ .sub_path = nm_index_path, .data = "module" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    const after_stash_content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
+    defer allocator.free(after_stash_content);
+    try std.testing.expectEqualSlices(u8, "initial content", after_stash_content);
+
+    const log_content = try cwd.readFileAlloc(io, debug_log_path, allocator, .unlimited);
+    defer allocator.free(log_content);
+    try std.testing.expectEqualSlices(u8, "log data", log_content);
+
+    const nm_content = try cwd.readFileAlloc(io, nm_index_path, allocator, .unlimited);
+    defer allocator.free(nm_content);
+    try std.testing.expectEqualSlices(u8, "module", nm_content);
+}
+
+test "should stash multiple files and preserve ignored" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-multi-preserve");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    const tracked_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "tracked.txt" });
+    defer allocator.free(tracked_path);
+
+    const gitignore_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".gitignore" });
+    defer allocator.free(gitignore_path);
+
+    try cwd.writeFile(io, .{ .sub_path = tracked_path, .data = "tracked content" });
+    try cwd.writeFile(io, .{ .sub_path = gitignore_path, .data = "*.log\nbuild/\n" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ ".gitignore", "tracked.txt" });
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = tracked_path, .data = "modified" });
+
+    const new_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "new.txt" });
+    defer allocator.free(new_path);
+
+    try cwd.writeFile(io, .{ .sub_path = new_path, .data = "new file" });
+
+    const build_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "build" });
+    defer allocator.free(build_path);
+
+    const build_output_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "build", "output.js" });
+    defer allocator.free(build_output_path);
+
+    cwd.createDirPath(io, build_path) catch |err| {
+        if (err != error.PathAlreadyExists) return err;
+    };
+    try cwd.writeFile(io, .{ .sub_path = build_output_path, .data = "compiled" });
+
+    const error_log_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "error.log" });
+    defer allocator.free(error_log_path);
+
+    try cwd.writeFile(io, .{ .sub_path = error_log_path, .data = "errors" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    const build_content = try cwd.readFileAlloc(io, build_output_path, allocator, .unlimited);
+    defer allocator.free(build_content);
+    try std.testing.expectEqualSlices(u8, "compiled", build_content);
+
+    const log_content = try cwd.readFileAlloc(io, error_log_path, allocator, .unlimited);
+    defer allocator.free(log_content);
+    try std.testing.expectEqualSlices(u8, "errors", log_content);
+}
+
 test "should restore multiple stashed files" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
