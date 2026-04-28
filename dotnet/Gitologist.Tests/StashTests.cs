@@ -181,4 +181,127 @@ public class StashTests
 
         Assert.IsTrue(File.Exists(commitPath));
     }
+
+    [TestMethod]
+    public async Task ShouldRestoreStashedModifiedFile()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "initial content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified content");
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        var afterStashContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "test.txt"));
+        Assert.AreEqual("initial content", afterStashContent);
+
+        await Stash.Unstash(_testDir);
+
+        var afterUnstashContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "test.txt"));
+        Assert.AreEqual("modified content", afterUnstashContent);
+
+        var statusResult = await Status.GetStatus(_testDir);
+        Assert.IsTrue(statusResult.Modified.Contains("test.txt"));
+    }
+
+    [TestMethod]
+    public async Task ShouldRestoreStashedUntrackedFile()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "initial content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "newfile.txt"), "untracked content");
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        var existsAfterStash = File.Exists(Path.Combine(_testDir, "newfile.txt"));
+        Assert.IsFalse(existsAfterStash);
+
+        await Stash.Unstash(_testDir);
+
+        var existsAfterUnstash = File.Exists(Path.Combine(_testDir, "newfile.txt"));
+        Assert.IsTrue(existsAfterUnstash);
+
+        var content = await File.ReadAllTextAsync(Path.Combine(_testDir, "newfile.txt"));
+        Assert.AreEqual("untracked content", content);
+
+        var statusResult = await Status.GetStatus(_testDir);
+        Assert.IsTrue(statusResult.Untracked.Contains("newfile.txt"));
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowErrorIfNoStashExists()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => Stash.Unstash(_testDir)
+        );
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowErrorIfNotAGitRepositoryForUnstash()
+    {
+        var nonGitDir = Path.Combine(
+            Path.GetTempPath(),
+            $"not-a-repo-{DateTime.UtcNow.Ticks}-{Guid.NewGuid():N}"
+        );
+        Directory.CreateDirectory(nonGitDir);
+
+        try
+        {
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+                () => Stash.Unstash(nonGitDir)
+            );
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(nonGitDir, true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ShouldRestoreMultipleStashedFiles()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file1.txt"), "content1");
+        await Add.AddFiles(_testDir, new[] { "file1.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file1.txt"), "modified1");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file2.txt"), "content2");
+
+        await Stash.CreateStash(_testDir, "Multiple files");
+
+        var afterStashContent1 = await File.ReadAllTextAsync(Path.Combine(_testDir, "file1.txt"));
+        Assert.AreEqual("content1", afterStashContent1);
+        var existsAfterStash = File.Exists(Path.Combine(_testDir, "file2.txt"));
+        Assert.IsFalse(existsAfterStash);
+
+        await Stash.Unstash(_testDir);
+
+        var afterUnstashContent1 = await File.ReadAllTextAsync(Path.Combine(_testDir, "file1.txt"));
+        Assert.AreEqual("modified1", afterUnstashContent1);
+        var existsAfterUnstash = File.Exists(Path.Combine(_testDir, "file2.txt"));
+        Assert.IsTrue(existsAfterUnstash);
+        var afterUnstashContent2 = await File.ReadAllTextAsync(Path.Combine(_testDir, "file2.txt"));
+        Assert.AreEqual("content2", afterUnstashContent2);
+
+        var statusResult = await Status.GetStatus(_testDir);
+        Assert.IsTrue(statusResult.Modified.Contains("file1.txt"));
+        Assert.IsTrue(statusResult.Untracked.Contains("file2.txt"));
+    }
 }

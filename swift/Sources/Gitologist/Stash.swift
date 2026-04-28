@@ -4,6 +4,7 @@ enum StashError: Error, LocalizedError {
 	case nothingToStash
 	case headNotFound
 	case notAGitRepository
+	case noStashFound
 
 	var errorDescription: String? {
 		switch self {
@@ -13,6 +14,8 @@ enum StashError: Error, LocalizedError {
 			return "HEAD not found"
 		case .notAGitRepository:
 			return "Not a git repository"
+		case .noStashFound:
+			return "No stash found"
 		}
 	}
 }
@@ -141,4 +144,25 @@ private func restoreTree(at path: String, gitDir: String, treeSha: String, prefi
 			try await restoreTree(at: path, gitDir: gitDir, treeSha: entry.sha, prefix: entryPath)
 		}
 	}
+}
+
+func unstash(at path: String) async throws {
+	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+
+	guard FileManager.default.fileExists(atPath: gitDir.path) else {
+		throw StashError.notAGitRepository
+	}
+
+	let stashRefPath = gitDir.appendingPathComponent("refs").appendingPathComponent("stash")
+
+	guard FileManager.default.fileExists(atPath: stashRefPath.path) else {
+		throw StashError.noStashFound
+	}
+
+	let stashCommitSha = try String(contentsOf: stashRefPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+
+	let stashCommitData = try await readObject(at: gitDir.path, sha: stashCommitSha)
+	let stashTreeSha = try extractTreeFromCommit(stashCommitData)
+
+	try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "")
 }

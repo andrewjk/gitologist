@@ -248,4 +248,28 @@ public static class Stash
 
         return newIndex;
     }
+
+    public static async Task Unstash(string path)
+    {
+        var gitDir = Path.Combine(path, ".git");
+
+        if (!Directory.Exists(gitDir))
+        {
+            throw new InvalidOperationException("Not a git repository");
+        }
+
+        var stashRefPath = Path.Combine(gitDir, "refs", "stash");
+
+        if (!File.Exists(stashRefPath))
+        {
+            throw new InvalidOperationException("No stash found");
+        }
+
+        var stashCommitSha = (await File.ReadAllTextAsync(stashRefPath)).Trim();
+
+        var stashCommitData = await Utils.ReadObject(gitDir, stashCommitSha);
+        var stashTreeSha = Utils.ExtractTreeFromCommit(stashCommitData);
+
+        await RestoreTree(path, gitDir, stashTreeSha, "");
+    }
 }

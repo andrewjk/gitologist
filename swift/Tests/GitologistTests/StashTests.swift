@@ -164,4 +164,124 @@ struct StashTests {
 
 		try? fileManager.removeItem(at: testDirPath)
 	}
+
+	@Test func shouldRestoreStashedModifiedFile() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "initial content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "modified content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		let afterStashContent = try String(contentsOf: testDirPath.appendingPathComponent("test.txt"), encoding: .utf8)
+		#expect(afterStashContent == "initial content")
+
+		try await unstash(at: testDirPath.path)
+
+		let afterUnstashContent = try String(contentsOf: testDirPath.appendingPathComponent("test.txt"), encoding: .utf8)
+		#expect(afterUnstashContent == "modified content")
+
+		let statusResult = try await status(at: testDirPath.path)
+		#expect(statusResult.modified.contains("test.txt"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldRestoreStashedUntrackedFile() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "initial content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "untracked content".write(to: testDirPath.appendingPathComponent("newfile.txt"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		let existsAfterStash = fileManager.fileExists(atPath: testDirPath.appendingPathComponent("newfile.txt").path)
+		#expect(existsAfterStash == false)
+
+		try await unstash(at: testDirPath.path)
+
+		let existsAfterUnstash = fileManager.fileExists(atPath: testDirPath.appendingPathComponent("newfile.txt").path)
+		#expect(existsAfterUnstash)
+
+		let content = try String(contentsOf: testDirPath.appendingPathComponent("newfile.txt"), encoding: .utf8)
+		#expect(content == "untracked content")
+
+		let statusResult = try await status(at: testDirPath.path)
+		#expect(statusResult.untracked.contains("newfile.txt"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldThrowErrorIfNoStashExists() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		await #expect(throws: StashError.self) {
+			try await unstash(at: testDirPath.path)
+		}
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldThrowErrorIfNotAGitRepositoryWhenUnstashing() async throws {
+		let tempDir = FileManager.default.temporaryDirectory
+		let nonGitDir = tempDir.appendingPathComponent("not-a-repo-\(Date().timeIntervalSince1970)-\(UUID().uuidString.prefix(8))")
+		try fileManager.createDirectory(at: nonGitDir, withIntermediateDirectories: true)
+
+		await #expect(throws: StashError.self) {
+			try await unstash(at: nonGitDir.path)
+		}
+
+		try? fileManager.removeItem(at: nonGitDir)
+	}
+
+	@Test func shouldRestoreMultipleStashedFiles() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "content1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file1.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "modified1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
+		try "content2".write(to: testDirPath.appendingPathComponent("file2.txt"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "Multiple files")
+
+		let afterStashContent1 = try String(contentsOf: testDirPath.appendingPathComponent("file1.txt"), encoding: .utf8)
+		#expect(afterStashContent1 == "content1")
+		let existsAfterStash = fileManager.fileExists(atPath: testDirPath.appendingPathComponent("file2.txt").path)
+		#expect(existsAfterStash == false)
+
+		try await unstash(at: testDirPath.path)
+
+		let afterUnstashContent1 = try String(contentsOf: testDirPath.appendingPathComponent("file1.txt"), encoding: .utf8)
+		#expect(afterUnstashContent1 == "modified1")
+		let existsAfterUnstash = fileManager.fileExists(atPath: testDirPath.appendingPathComponent("file2.txt").path)
+		#expect(existsAfterUnstash)
+		let afterUnstashContent2 = try String(contentsOf: testDirPath.appendingPathComponent("file2.txt"), encoding: .utf8)
+		#expect(afterUnstashContent2 == "content2")
+
+		let statusResult = try await status(at: testDirPath.path)
+		#expect(statusResult.modified.contains("file1.txt"))
+		#expect(statusResult.untracked.contains("file2.txt"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
 }

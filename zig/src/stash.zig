@@ -451,3 +451,31 @@ fn updateIndexRecursive(
         }
     }
 }
+
+pub fn unstash(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void {
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
+    defer allocator.free(git_dir_path);
+
+    const cwd = std.Io.Dir.cwd();
+    const git_dir = cwd.openDir(io, git_dir_path, .{}) catch {
+        return error.NotAGitRepository;
+    };
+    defer git_dir.close(io);
+
+    const stash_ref_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "refs", "stash" });
+    defer allocator.free(stash_ref_path);
+
+    const stash_commit_sha = cwd.readFileAlloc(io, stash_ref_path, allocator, .unlimited) catch {
+        return error.NoStashFound;
+    };
+    defer allocator.free(stash_commit_sha);
+
+    const trimmed_sha = std.mem.trim(u8, stash_commit_sha, &std.ascii.whitespace);
+
+    const stash_commit_data = try utils.readObject(io, allocator, git_dir_path, trimmed_sha);
+    defer allocator.free(stash_commit_data);
+
+    const tree_sha = try utils.extractTreeFromCommit(stash_commit_data);
+
+    try restoreTree(io, allocator, path, git_dir_path, tree_sha, "");
+}

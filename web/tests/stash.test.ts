@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import { add } from "../src/add";
 import { commit } from "../src/commit";
 import { init } from "../src/init";
-import { stash } from "../src/stash";
+import { stash, unstash } from "../src/stash";
 import { status } from "../src/status";
 
 describe("stash", () => {
@@ -135,5 +135,99 @@ describe("stash", () => {
 
 		const exists = existsSync(commitPath);
 		expect(exists).toBe(true);
+	});
+
+	it("should restore stashed modified file", async () => {
+		await writeFile(join(testDir, "test.txt"), "initial content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "test.txt"), "modified content");
+
+		await stash(testDir, "WIP");
+
+		const afterStashContent = await readFile(join(testDir, "test.txt"), "utf-8");
+		expect(afterStashContent).toBe("initial content");
+
+		await unstash(testDir);
+
+		const afterUnstashContent = await readFile(join(testDir, "test.txt"), "utf-8");
+		expect(afterUnstashContent).toBe("modified content");
+
+		const statusResult = await status(testDir);
+		expect(statusResult.modified).toContain("test.txt");
+	});
+
+	it("should restore stashed untracked file", async () => {
+		await writeFile(join(testDir, "test.txt"), "initial content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "newfile.txt"), "untracked content");
+
+		await stash(testDir, "WIP");
+
+		const existsAfterStash = existsSync(join(testDir, "newfile.txt"));
+		expect(existsAfterStash).toBe(false);
+
+		await unstash(testDir);
+
+		const existsAfterUnstash = existsSync(join(testDir, "newfile.txt"));
+		expect(existsAfterUnstash).toBe(true);
+
+		const content = await readFile(join(testDir, "newfile.txt"), "utf-8");
+		expect(content).toBe("untracked content");
+
+		const statusResult = await status(testDir);
+		expect(statusResult.untracked).toContain("newfile.txt");
+	});
+
+	it("should throw error if no stash exists", async () => {
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await expect(unstash(testDir)).rejects.toThrow("No stash found");
+	});
+
+	it("should throw error if not a git repository", async () => {
+		const nonGitDir = join(
+			tmpdir(),
+			`not-a-repo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		await mkdir(nonGitDir, { recursive: true });
+
+		await expect(unstash(nonGitDir)).rejects.toThrow("Not a git repository");
+
+		await rm(nonGitDir, { recursive: true, force: true });
+	});
+
+	it("should restore multiple stashed files", async () => {
+		await writeFile(join(testDir, "file1.txt"), "content1");
+		await add(testDir, ["file1.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "file1.txt"), "modified1");
+		await writeFile(join(testDir, "file2.txt"), "content2");
+
+		await stash(testDir, "Multiple files");
+
+		const afterStashContent1 = await readFile(join(testDir, "file1.txt"), "utf-8");
+		expect(afterStashContent1).toBe("content1");
+		const existsAfterStash = existsSync(join(testDir, "file2.txt"));
+		expect(existsAfterStash).toBe(false);
+
+		await unstash(testDir);
+
+		const afterUnstashContent1 = await readFile(join(testDir, "file1.txt"), "utf-8");
+		expect(afterUnstashContent1).toBe("modified1");
+		const existsAfterUnstash = existsSync(join(testDir, "file2.txt"));
+		expect(existsAfterUnstash).toBe(true);
+		const afterUnstashContent2 = await readFile(join(testDir, "file2.txt"), "utf-8");
+		expect(afterUnstashContent2).toBe("content2");
+
+		const statusResult = await status(testDir);
+		expect(statusResult.modified).toContain("file1.txt");
+		expect(statusResult.untracked).toContain("file2.txt");
 	});
 });

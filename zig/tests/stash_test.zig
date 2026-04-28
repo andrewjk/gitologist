@@ -5,6 +5,7 @@ const add = @import("gitologist").add;
 const commit = @import("gitologist").commit;
 const status = @import("gitologist").status;
 const stash = @import("gitologist").stash;
+const unstash = @import("gitologist").unstash;
 
 fn createTempDir(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", name });
@@ -301,4 +302,248 @@ test "should handle custom stash message" {
     };
     file.close(io);
     try std.testing.expect(true); // File exists
+}
+
+test "should restore stashed modified file" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-restore-modified");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
+    defer allocator.free(test_file_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "initial content" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified content" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    const after_stash_content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
+    defer allocator.free(after_stash_content);
+
+    try std.testing.expectEqualSlices(u8, "initial content", after_stash_content);
+
+    try unstash(io, allocator, tmp_path);
+
+    const after_unstash_content = try cwd.readFileAlloc(io, test_file_path, allocator, .unlimited);
+    defer allocator.free(after_unstash_content);
+
+    try std.testing.expectEqualSlices(u8, "modified content", after_unstash_content);
+
+    const result = try status(io, allocator, tmp_path);
+
+    const has_modified = blk: {
+        for (result.modified) |file| {
+            if (std.mem.eql(u8, file, "test.txt")) {
+                break :blk true;
+            }
+        }
+        break :blk false;
+    };
+    try std.testing.expect(has_modified);
+
+    allocator.free(result.branch);
+    allocator.free(result.up_to_date);
+    for (result.staged) |item| allocator.free(item);
+    allocator.free(result.staged);
+    for (result.modified) |item| allocator.free(item);
+    allocator.free(result.modified);
+    for (result.untracked) |item| allocator.free(item);
+    allocator.free(result.untracked);
+    for (result.deleted) |item| allocator.free(item);
+    allocator.free(result.deleted);
+}
+
+test "should restore stashed untracked file" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-restore-untracked");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
+    defer allocator.free(test_file_path);
+
+    const newfile_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "newfile.txt" });
+    defer allocator.free(newfile_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "initial content" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = newfile_path, .data = "untracked content" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    _ = cwd.openFile(io, newfile_path, .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+    };
+
+    try unstash(io, allocator, tmp_path);
+
+    const content = try cwd.readFileAlloc(io, newfile_path, allocator, .unlimited);
+    defer allocator.free(content);
+
+    try std.testing.expectEqualSlices(u8, "untracked content", content);
+
+    const result = try status(io, allocator, tmp_path);
+
+    const has_untracked = blk: {
+        for (result.untracked) |file| {
+            if (std.mem.eql(u8, file, "newfile.txt")) {
+                break :blk true;
+            }
+        }
+        break :blk false;
+    };
+    try std.testing.expect(has_untracked);
+
+    allocator.free(result.branch);
+    allocator.free(result.up_to_date);
+    for (result.staged) |item| allocator.free(item);
+    allocator.free(result.staged);
+    for (result.modified) |item| allocator.free(item);
+    allocator.free(result.modified);
+    for (result.untracked) |item| allocator.free(item);
+    allocator.free(result.untracked);
+    for (result.deleted) |item| allocator.free(item);
+    allocator.free(result.deleted);
+}
+
+test "should throw error if no stash exists" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-no-stash");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const test_file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
+    defer allocator.free(test_file_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    const result = unstash(io, allocator, tmp_path);
+    try std.testing.expectError(error.NoStashFound, result);
+}
+
+test "should throw error if not a git repository for unstash" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const non_git_dir = try createTempDir(allocator, "gitologist-stash-not-repo-unstash");
+    defer allocator.free(non_git_dir);
+    defer cleanupTempDir(io, non_git_dir);
+
+    const result = unstash(io, allocator, non_git_dir);
+    try std.testing.expectError(error.NotAGitRepository, result);
+}
+
+test "should restore multiple stashed files" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-multiple");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const file1_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file1.txt" });
+    defer allocator.free(file1_path);
+
+    const file2_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file2.txt" });
+    defer allocator.free(file2_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "content1" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"file1.txt"});
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "modified1" });
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "content2" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "Multiple files");
+    defer allocator.free(stash_sha);
+
+    const after_stash_content1 = try cwd.readFileAlloc(io, file1_path, allocator, .unlimited);
+    defer allocator.free(after_stash_content1);
+
+    try std.testing.expectEqualSlices(u8, "content1", after_stash_content1);
+
+    _ = cwd.openFile(io, file2_path, .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+    };
+
+    try unstash(io, allocator, tmp_path);
+
+    const after_unstash_content1 = try cwd.readFileAlloc(io, file1_path, allocator, .unlimited);
+    defer allocator.free(after_unstash_content1);
+
+    try std.testing.expectEqualSlices(u8, "modified1", after_unstash_content1);
+
+    const after_unstash_content2 = try cwd.readFileAlloc(io, file2_path, allocator, .unlimited);
+    defer allocator.free(after_unstash_content2);
+
+    try std.testing.expectEqualSlices(u8, "content2", after_unstash_content2);
+
+    const result = try status(io, allocator, tmp_path);
+
+    const has_modified = blk: {
+        for (result.modified) |file| {
+            if (std.mem.eql(u8, file, "file1.txt")) {
+                break :blk true;
+            }
+        }
+        break :blk false;
+    };
+    try std.testing.expect(has_modified);
+
+    const has_untracked = blk: {
+        for (result.untracked) |file| {
+            if (std.mem.eql(u8, file, "file2.txt")) {
+                break :blk true;
+            }
+        }
+        break :blk false;
+    };
+    try std.testing.expect(has_untracked);
+
+    allocator.free(result.branch);
+    allocator.free(result.up_to_date);
+    for (result.staged) |item| allocator.free(item);
+    allocator.free(result.staged);
+    for (result.modified) |item| allocator.free(item);
+    allocator.free(result.modified);
+    for (result.untracked) |item| allocator.free(item);
+    allocator.free(result.untracked);
+    for (result.deleted) |item| allocator.free(item);
+    allocator.free(result.deleted);
 }

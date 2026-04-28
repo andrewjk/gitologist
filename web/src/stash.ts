@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { status } from "./status.ts";
@@ -279,4 +279,25 @@ async function restoreTree(
 			await restoreTree(path, gitDir, entry.sha, entryPath);
 		}
 	}
+}
+
+export async function unstash(path: string): Promise<void> {
+	const gitDir = join(path, ".git");
+
+	if (!existsSync(gitDir)) {
+		throw new Error("Not a git repository");
+	}
+
+	const stashRefPath = join(gitDir, "refs", "stash");
+
+	if (!existsSync(stashRefPath)) {
+		throw new Error("No stash found");
+	}
+
+	const stashCommitSha = (await readFile(stashRefPath, "utf-8")).trim();
+
+	const stashCommitData = await readObject(gitDir, stashCommitSha);
+	const stashTreeSha = extractTreeFromCommit(stashCommitData);
+
+	await restoreTree(path, gitDir, stashTreeSha, "");
 }
