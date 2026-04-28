@@ -317,5 +317,304 @@ export async function unstash(path: string): Promise<void> {
 	const stashCommitData = await readObject(gitDir, stashCommitSha);
 	const stashTreeSha = extractTreeFromCommit(stashCommitData);
 
-	await restoreTree(path, gitDir, stashTreeSha, "");
+	const mergeBaseSha = extractParentFromCommit(stashCommitData);
+
+	if (!mergeBaseSha) {
+		await restoreTree(path, gitDir, stashTreeSha, "");
+		return;
+	}
+
+	const currentHeadSha = await getCurrentCommit(gitDir);
+
+	if (currentHeadSha === mergeBaseSha) {
+		await restoreTree(path, gitDir, stashTreeSha, "");
+		return;
+	}
+
+	const mergeBaseTreeData = await readObject(gitDir, mergeBaseSha);
+	const mergeBaseTreeSha = extractTreeFromCommit(mergeBaseTreeData);
+	const mergeBaseEntries = await flattenTree(gitDir, mergeBaseTreeSha);
+
+	const currentHeadData = await readObject(gitDir, currentHeadSha!);
+	const currentHeadTreeSha = extractTreeFromCommit(currentHeadData);
+	const currentHeadEntries = await flattenTree(gitDir, currentHeadTreeSha);
+
+	const stashEntries = await flattenTree(gitDir, stashTreeSha);
+
+	const mergedEntries = new Map<string, string>();
+
+	for (const [filePath, sha] of stashEntries) {
+		const baseSha = mergeBaseEntries.get(filePath);
+		const currentSha = currentHeadEntries.get(filePath);
+
+		if (!currentSha || currentSha === baseSha) {
+			mergedEntries.set(filePath, sha);
+			continue;
+		}
+
+		if (sha === baseSha) {
+			mergedEntries.set(filePath, currentSha);
+			continue;
+		}
+
+		const baseContent = baseSha ? await readBlobContent(gitDir, baseSha) : "";
+		const stashContent = await readBlobContent(gitDir, sha);
+		const currentContent = await readBlobContent(gitDir, currentSha);
+
+		const merged = threeWayMerge(baseContent, stashContent, currentContent);
+		const mergedSha = await hashObject(gitDir, merged, "blob");
+		mergedEntries.set(filePath, mergedSha);
+	}
+
+	for (const [filePath, sha] of currentHeadEntries) {
+		if (mergedEntries.has(filePath)) continue;
+
+		const baseSha = mergeBaseEntries.get(filePath);
+		if (baseSha && baseSha !== sha) {
+			mergedEntries.set(filePath, sha);
+		}
+	}
+
+	for (const [filePath, sha] of mergedEntries) {
+		const content = await readBlobContent(gitDir, sha);
+		const fullPath = join(path, filePath);
+		const { mkdir: mkdirAsync } = await import("node:fs/promises");
+		await mkdirAsync(dirname(fullPath), { recursive: true });
+		await writeFile(fullPath, content, "utf-8");
+	}
+}
+
+function extractParentFromCommit(commitData: string): string | null {
+	const lines = commitData.split("\n");
+	for (const line of lines) {
+		if (line.startsWith("parent ")) {
+			return line.slice(7);
+		}
+		if (line === "") {
+			break;
+		}
+	}
+	return null;
+}
+
+async function flattenTree(
+	gitDir: string,
+	treeSha: string,
+	prefix: string = "",
+): Promise<Map<string, string>> {
+	const entries = new Map<string, string>();
+	const treeData = await readObject(gitDir, treeSha);
+	const treeEntries = parseTreeEntries(treeData);
+
+	for (const entry of treeEntries) {
+		const entryPath = prefix === "" ? entry.path : `${prefix}/${entry.path}`;
+
+		if (entry.type === "blob") {
+			entries.set(entryPath, entry.sha);
+		} else if (entry.type === "tree") {
+			const subEntries = await flattenTree(gitDir, entry.sha, entryPath);
+			for (const [subPath, subSha] of subEntries) {
+				entries.set(subPath, subSha);
+			}
+		}
+	}
+
+	return entries;
+}
+
+async function readBlobContent(gitDir: string, sha: string): Promise<string> {
+	const blobData = await readObject(gitDir, sha);
+	return extractContentFromBlob(blobData);
+}
+
+function threeWayMerge(base: string, theirs: string, ours: string): string {
+	const baseLines = base.split("\n");
+	const theirsLines = theirs.split("\n");
+	const oursLines = ours.split("\n");
+
+	if (base === ours) return theirs;
+	if (base === theirs) return ours;
+
+	const baseToTheirs = diffLines(baseLines, theirsLines);
+	const baseToOurs = diffLines(baseLines, oursLines);
+
+	const result: string[] = [];
+	let bi = 0;
+	let ti = 0;
+	let oi = 0;
+
+	while (bi < baseLines.length) {
+		const theirsChange = baseToTheirs.get(bi);
+		const oursChange = baseToOurs.get(bi);
+
+		if (theirsChange && oursChange) {
+			if (theirsChange.type === "replace" && oursChange.type === "replace") {
+				const theirsContent = theirsChange.lines;
+				const oursContent = oursChange.lines;
+
+				if (arraysEqual(theirsContent, oursContent)) {
+					result.push(...theirsContent);
+				} else {
+					result.push(
+						"<<<<<<< Updated upstream",
+						...oursContent,
+						"=======",
+						...theirsContent,
+						">>>>>>> Stashed changes",
+					);
+				}
+			} else if (theirsChange.type === "delete" && oursChange.type === "delete") {
+				// Both deleted - skip
+			} else if (theirsChange.type === "insert" && oursChange.type === "insert") {
+				if (arraysEqual(theirsChange.lines, oursChange.lines)) {
+					result.push(...theirsChange.lines);
+				} else {
+					result.push(...oursChange.lines, ...theirsChange.lines);
+				}
+			} else {
+				result.push(
+					"<<<<<<< Updated upstream",
+					...(oursChange.lines || []),
+					"=======",
+					...(theirsChange.lines || []),
+					">>>>>>> Stashed changes",
+				);
+			}
+		} else if (theirsChange) {
+			result.push(...(theirsChange.lines || []));
+		} else if (oursChange) {
+			result.push(...(oursChange.lines || []));
+		} else {
+			result.push(baseLines[bi]);
+		}
+
+		bi++;
+		ti += (theirsChange?.skip || 0) + 1;
+		oi += (oursChange?.skip || 0) + 1;
+	}
+
+	while (ti < theirsLines.length) {
+		result.push(theirsLines[ti]);
+		ti++;
+	}
+	while (oi < oursLines.length) {
+		result.push(oursLines[oi]);
+		oi++;
+	}
+
+	return result.join("\n");
+}
+
+interface DiffChange {
+	type: "insert" | "delete" | "replace";
+	lines: string[];
+	skip: number;
+}
+
+function diffLines(base: string[], modified: string[]): Map<number, DiffChange> {
+	const changes = new Map<number, DiffChange>();
+	const lcs = longestCommonSubsequence(base, modified);
+
+	let bi = 0;
+	let mi = 0;
+	let lcsIdx = 0;
+
+	while (bi < base.length || mi < modified.length) {
+		if (lcsIdx < lcs.length && bi < base.length && mi < modified.length) {
+			if (base[bi] === lcs[lcsIdx] && modified[mi] === lcs[lcsIdx]) {
+				bi++;
+				mi++;
+				lcsIdx++;
+				continue;
+			}
+		}
+
+		let baseCount = 0;
+		const startBi = bi;
+		while (bi < base.length && (lcsIdx >= lcs.length || base[bi] !== lcs[lcsIdx])) {
+			bi++;
+			baseCount++;
+		}
+
+		let modCount = 0;
+		const startMi = mi;
+		while (mi < modified.length && (lcsIdx >= lcs.length || modified[mi] !== lcs[lcsIdx])) {
+			mi++;
+			modCount++;
+		}
+
+		if (baseCount > 0 || modCount > 0) {
+			const modLines = modified.slice(startMi, mi);
+			if (baseCount === 0 && modCount > 0) {
+				changes.set(startBi, {
+					type: "insert",
+					lines: modLines,
+					skip: 0,
+				});
+			} else if (baseCount > 0 && modCount === 0) {
+				changes.set(startBi, {
+					type: "delete",
+					lines: [],
+					skip: baseCount - 1,
+				});
+			} else {
+				changes.set(startBi, {
+					type: "replace",
+					lines: modLines,
+					skip: baseCount - 1,
+				});
+			}
+		}
+
+		if (lcsIdx < lcs.length && bi < base.length && base[bi] === lcs[lcsIdx]) {
+			bi++;
+			mi++;
+			lcsIdx++;
+		}
+	}
+
+	return changes;
+}
+
+function longestCommonSubsequence(a: string[], b: string[]): string[] {
+	const m = a.length;
+	const n = b.length;
+	const dp: number[][] = Array.from({ length: m + 1 }, () =>
+		Array.from<number>({ length: n + 1 }).fill(0),
+	);
+
+	for (let i = 1; i <= m; i++) {
+		for (let j = 1; j <= n; j++) {
+			if (a[i - 1] === b[j - 1]) {
+				dp[i][j] = dp[i - 1][j - 1] + 1;
+			} else {
+				dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+			}
+		}
+	}
+
+	const result: string[] = [];
+	let i = m;
+	let j = n;
+	while (i > 0 && j > 0) {
+		if (a[i - 1] === b[j - 1]) {
+			result.unshift(a[i - 1]);
+			i--;
+			j--;
+		} else if (dp[i - 1][j] > dp[i][j - 1]) {
+			i--;
+		} else {
+			j--;
+		}
+	}
+
+	return result;
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
 }

@@ -306,6 +306,89 @@ struct StashTests {
 		try? fileManager.removeItem(at: testDirPath)
 	}
 
+	@Test func shouldMergeStashedChangesWithChangesToHEADAfterStash() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "line1\nline2\nline3\nline4\nline5".write(to: testDirPath.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "line1\nline2-modified\nline3\nline4\nline5".write(to: testDirPath.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		try "line1\nline2\nline3\nline4-pulled\nline5".write(to: testDirPath.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Pulled changes")
+
+		try await unstash(at: testDirPath.path)
+
+		let content = try String(contentsOf: testDirPath.appendingPathComponent("file.txt"), encoding: .utf8)
+		#expect(content == "line1\nline2-modified\nline3\nline4-pulled\nline5")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldDetectConflictsWhenBothStashAndHEADModifySameLines() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "line1\nline2\nline3".write(to: testDirPath.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "line1\nline2-local\nline3".write(to: testDirPath.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		try "line1\nline2-remote\nline3".write(to: testDirPath.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Remote changes")
+
+		try await unstash(at: testDirPath.path)
+
+		let content = try String(contentsOf: testDirPath.appendingPathComponent("file.txt"), encoding: .utf8)
+		#expect(content.contains("<<<<<<< Updated upstream"))
+		#expect(content.contains("line2-remote"))
+		#expect(content.contains("======="))
+		#expect(content.contains("line2-local"))
+		#expect(content.contains(">>>>>>> Stashed changes"))
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldKeepHEADChangesWhenStashDidNotModifyAFile() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "a-original".write(to: testDirPath.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+		try "b-original".write(to: testDirPath.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["a.txt", "b.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "a-local".write(to: testDirPath.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		try "b-remote".write(to: testDirPath.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["b.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Remote changes")
+
+		try await unstash(at: testDirPath.path)
+
+		let aContent = try String(contentsOf: testDirPath.appendingPathComponent("a.txt"), encoding: .utf8)
+		#expect(aContent == "a-local")
+
+		let bContent = try String(contentsOf: testDirPath.appendingPathComponent("b.txt"), encoding: .utf8)
+		#expect(bContent == "b-remote")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
 	@Test func shouldRestoreMultipleStashedFiles() async throws {
 		let testDirPath = testDir
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)

@@ -327,6 +327,95 @@ public class StashTests
     }
 
     [TestMethod]
+    public async Task ShouldMergeStashedChangesWithChangesToHEADAfterStash()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file.txt"),
+            "line1\nline2\nline3\nline4\nline5"
+        );
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file.txt"),
+            "line1\nline2-modified\nline3\nline4\nline5"
+        );
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file.txt"),
+            "line1\nline2\nline3\nline4-pulled\nline5"
+        );
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "Pulled changes");
+
+        await Stash.Unstash(_testDir);
+
+        var content = await File.ReadAllTextAsync(Path.Combine(_testDir, "file.txt"));
+        Assert.AreEqual("line1\nline2-modified\nline3\nline4-pulled\nline5", content);
+    }
+
+    [TestMethod]
+    public async Task ShouldDetectConflictsWhenBothStashAndHEADModifySameLines()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file.txt"), "line1\nline2\nline3");
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file.txt"),
+            "line1\nline2-local\nline3"
+        );
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file.txt"),
+            "line1\nline2-remote\nline3"
+        );
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "Remote changes");
+
+        await Stash.Unstash(_testDir);
+
+        var content = await File.ReadAllTextAsync(Path.Combine(_testDir, "file.txt"));
+        Assert.IsTrue(content.Contains("<<<<<<< Updated upstream"));
+        Assert.IsTrue(content.Contains("line2-remote"));
+        Assert.IsTrue(content.Contains("======="));
+        Assert.IsTrue(content.Contains("line2-local"));
+        Assert.IsTrue(content.Contains(">>>>>>> Stashed changes"));
+    }
+
+    [TestMethod]
+    public async Task ShouldKeepHEADChangesWhenStashDidNotModifyAFile()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "a-original");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "b.txt"), "b-original");
+        await Add.AddFiles(_testDir, new[] { "a.txt", "b.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "a-local");
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "b.txt"), "b-remote");
+        await Add.AddFiles(_testDir, new[] { "b.txt" });
+        await Commit.CreateCommit(_testDir, "Remote changes");
+
+        await Stash.Unstash(_testDir);
+
+        var aContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "a.txt"));
+        Assert.AreEqual("a-local", aContent);
+
+        var bContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "b.txt"));
+        Assert.AreEqual("b-remote", bContent);
+    }
+
+    [TestMethod]
     public async Task ShouldRestoreMultipleStashedFiles()
     {
         await Init.InitRepo(_testDir);

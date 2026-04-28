@@ -586,6 +586,131 @@ test "should stash multiple files and preserve ignored" {
     try std.testing.expectEqualSlices(u8, "errors", log_content);
 }
 
+test "should merge stashed changes with changes to HEAD after stash" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-merge");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file.txt" });
+    defer allocator.free(file_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = file_path, .data = "line1\nline2\nline3\nline4\nline5" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"file.txt"});
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = file_path, .data = "line1\nline2-modified\nline3\nline4\nline5" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = file_path, .data = "line1\nline2\nline3\nline4-pulled\nline5" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"file.txt"});
+    const pulled_sha = try commit(io, allocator, tmp_path, "Pulled changes");
+    defer allocator.free(pulled_sha);
+
+    try unstash(io, allocator, tmp_path);
+
+    const content = try cwd.readFileAlloc(io, file_path, allocator, .unlimited);
+    defer allocator.free(content);
+
+    try std.testing.expectEqualSlices(u8, "line1\nline2-modified\nline3\nline4-pulled\nline5", content);
+}
+
+test "should detect conflicts when both stash and HEAD modify same lines" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-conflict");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file.txt" });
+    defer allocator.free(file_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = file_path, .data = "line1\nline2\nline3" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"file.txt"});
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = file_path, .data = "line1\nline2-local\nline3" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = file_path, .data = "line1\nline2-remote\nline3" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"file.txt"});
+    const remote_sha = try commit(io, allocator, tmp_path, "Remote changes");
+    defer allocator.free(remote_sha);
+
+    try unstash(io, allocator, tmp_path);
+
+    const content = try cwd.readFileAlloc(io, file_path, allocator, .unlimited);
+    defer allocator.free(content);
+
+    try std.testing.expect(std.mem.indexOf(u8, content, "<<<<<<< Updated upstream") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "line2-remote") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "=======") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "line2-local") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, ">>>>>>> Stashed changes") != null);
+}
+
+test "should keep HEAD changes when stash did not modify a file" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-keep-head");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const a_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "a.txt" });
+    defer allocator.free(a_path);
+
+    const b_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "b.txt" });
+    defer allocator.free(b_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = a_path, .data = "a-original" });
+    try cwd.writeFile(io, .{ .sub_path = b_path, .data = "b-original" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ "a.txt", "b.txt" });
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = a_path, .data = "a-local" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = b_path, .data = "b-remote" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"b.txt"});
+    const remote_sha = try commit(io, allocator, tmp_path, "Remote changes");
+    defer allocator.free(remote_sha);
+
+    try unstash(io, allocator, tmp_path);
+
+    const a_content = try cwd.readFileAlloc(io, a_path, allocator, .unlimited);
+    defer allocator.free(a_content);
+    try std.testing.expectEqualSlices(u8, "a-local", a_content);
+
+    const b_content = try cwd.readFileAlloc(io, b_path, allocator, .unlimited);
+    defer allocator.free(b_content);
+    try std.testing.expectEqualSlices(u8, "b-remote", b_content);
+}
+
 test "should restore multiple stashed files" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;

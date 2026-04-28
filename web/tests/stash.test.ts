@@ -274,4 +274,69 @@ describe("stash", () => {
 		expect(statusResult.modified).toContain("file1.txt");
 		expect(statusResult.untracked).toContain("file2.txt");
 	});
+
+	it("should merge stashed changes with changes to HEAD after stash", async () => {
+		await writeFile(join(testDir, "file.txt"), "line1\nline2\nline3\nline4\nline5");
+		await add(testDir, ["file.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "file.txt"), "line1\nline2-modified\nline3\nline4\nline5");
+
+		await stash(testDir, "WIP");
+
+		await writeFile(join(testDir, "file.txt"), "line1\nline2\nline3\nline4-pulled\nline5");
+		await add(testDir, ["file.txt"]);
+		await commit(testDir, "Pulled changes");
+
+		await unstash(testDir);
+
+		const content = await readFile(join(testDir, "file.txt"), "utf-8");
+		expect(content).toBe("line1\nline2-modified\nline3\nline4-pulled\nline5");
+	});
+
+	it("should detect conflicts when both stash and HEAD modify same lines", async () => {
+		await writeFile(join(testDir, "file.txt"), "line1\nline2\nline3");
+		await add(testDir, ["file.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "file.txt"), "line1\nline2-local\nline3");
+
+		await stash(testDir, "WIP");
+
+		await writeFile(join(testDir, "file.txt"), "line1\nline2-remote\nline3");
+		await add(testDir, ["file.txt"]);
+		await commit(testDir, "Remote changes");
+
+		await unstash(testDir);
+
+		const content = await readFile(join(testDir, "file.txt"), "utf-8");
+		expect(content).toContain("<<<<<<< Updated upstream");
+		expect(content).toContain("line2-remote");
+		expect(content).contains("=======");
+		expect(content).toContain("line2-local");
+		expect(content).toContain(">>>>>>> Stashed changes");
+	});
+
+	it("should keep HEAD changes when stash did not modify a file", async () => {
+		await writeFile(join(testDir, "a.txt"), "a-original");
+		await writeFile(join(testDir, "b.txt"), "b-original");
+		await add(testDir, ["a.txt", "b.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "a.txt"), "a-local");
+
+		await stash(testDir, "WIP");
+
+		await writeFile(join(testDir, "b.txt"), "b-remote");
+		await add(testDir, ["b.txt"]);
+		await commit(testDir, "Remote changes");
+
+		await unstash(testDir);
+
+		const aContent = await readFile(join(testDir, "a.txt"), "utf-8");
+		expect(aContent).toBe("a-local");
+
+		const bContent = await readFile(join(testDir, "b.txt"), "utf-8");
+		expect(bContent).toBe("b-remote");
+	});
 });
