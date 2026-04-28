@@ -5,6 +5,7 @@ comptime {
     _ = @import("add_test.zig");
     _ = @import("commit_test.zig");
     _ = @import("restore_test.zig");
+    _ = @import("stash_test.zig");
     _ = @import("remote_test.zig");
     _ = @import("clone_test.zig");
     _ = @import("push_test.zig");

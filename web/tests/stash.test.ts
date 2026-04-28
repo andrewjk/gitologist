@@ -1,0 +1,139 @@
+import { existsSync } from "node:fs";
+import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
+
+import { add } from "../src/add";
+import { commit } from "../src/commit";
+import { init } from "../src/init";
+import { stash } from "../src/stash";
+import { status } from "../src/status";
+
+describe("stash", () => {
+	let testDir: string;
+
+	beforeEach(async () => {
+		testDir = join(
+			tmpdir(),
+			`gitologist-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		await mkdir(testDir, { recursive: true });
+		await init(testDir);
+	});
+
+	afterEach(async () => {
+		await rm(testDir, { recursive: true, force: true });
+	});
+
+	it("should stash a modified file", async () => {
+		await writeFile(join(testDir, "test.txt"), "initial content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "test.txt"), "modified content");
+
+		const stashSha = await stash(testDir, "WIP");
+
+		expect(stashSha).toMatch(/^[a-f0-9]{40}$/);
+
+		const result = await status(testDir);
+		expect(result.modified).toEqual([]);
+
+		const fileContent = await readFile(join(testDir, "test.txt"), "utf-8");
+		expect(fileContent).toBe("initial content");
+	});
+
+	it("should stash an untracked file", async () => {
+		await writeFile(join(testDir, "test.txt"), "initial content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "newfile.txt"), "untracked content");
+
+		const stashSha = await stash(testDir, "WIP");
+
+		expect(stashSha).toMatch(/^[a-f0-9]{40}$/);
+
+		const result = await status(testDir);
+		expect(result.untracked).toEqual([]);
+
+		const exists = existsSync(join(testDir, "newfile.txt"));
+		expect(exists).toBe(false);
+	});
+
+	it("should update stash ref", async () => {
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "test.txt"), "modified");
+
+		const stashSha = await stash(testDir, "Save work");
+
+		const stashRefPath = join(testDir, ".git", "refs", "stash");
+		const refContent = await readFile(stashRefPath, "utf-8");
+
+		expect(refContent.trim()).toBe(stashSha);
+	});
+
+	it("should reset index to HEAD after stash", async () => {
+		await writeFile(join(testDir, "test.txt"), "initial content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "test.txt"), "modified content");
+		await add(testDir, ["test.txt"]);
+
+		const preStashStatus = await status(testDir);
+		expect(preStashStatus.staged).toContain("test.txt");
+
+		await stash(testDir, "WIP");
+
+		const postStashStatus = await status(testDir);
+
+		const fileContent = await readFile(join(testDir, "test.txt"), "utf-8");
+		expect(fileContent).toBe("initial content");
+		expect(postStashStatus.modified).toEqual([]);
+	});
+
+	it("should throw error if nothing to stash", async () => {
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await expect(stash(testDir, "WIP")).rejects.toThrow("Nothing to stash");
+	});
+
+	it("should throw error if not a git repository", async () => {
+		const nonGitDir = join(
+			tmpdir(),
+			`not-a-repo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		await mkdir(nonGitDir, { recursive: true });
+
+		await expect(stash(nonGitDir, "WIP")).rejects.toThrow("Not a git repository");
+
+		await rm(nonGitDir, { recursive: true, force: true });
+	});
+
+	it("should handle custom stash message", async () => {
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "test.txt"), "modified");
+
+		const message = "Work in progress on feature X";
+		await stash(testDir, message);
+
+		const stashRefPath = join(testDir, ".git", "refs", "stash");
+		const stashSha = (await readFile(stashRefPath, "utf-8")).trim();
+
+		const commitPath = join(testDir, ".git", "objects", stashSha.slice(0, 2), stashSha.slice(2));
+
+		const exists = existsSync(commitPath);
+		expect(exists).toBe(true);
+	});
+});

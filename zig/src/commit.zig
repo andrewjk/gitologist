@@ -93,7 +93,7 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
     return commit_sha;
 }
 
-fn createTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, index: *const std.StringHashMap(utils.IndexEntry)) ![]const u8 {
+pub fn createTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, index: *const std.StringHashMap(utils.IndexEntry)) ![]const u8 {
     return createTreeRecursive(io, allocator, git_dir_path, index, "");
 }
 
@@ -268,7 +268,7 @@ fn getSubdirectory(path: []const u8, prefix: []const u8) ?[]const u8 {
     return remaining[0..slash_idx];
 }
 
-fn createCommit(
+pub fn createCommit(
     io: std.Io,
     allocator: std.mem.Allocator,
     git_dir_path: []const u8,

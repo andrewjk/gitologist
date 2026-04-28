@@ -4,24 +4,24 @@ namespace Gitologist;
 
 public static class Pull
 {
-public static async Task PullFromRemote(
-    string path,
-    string? remote = null,
-    string? branch = null,
-    RemoteOptions? options = null
-)
-{
-    var gitDir = Path.Combine(path, ".git");
-
-    if (!Directory.Exists(gitDir))
+    public static async Task PullFromRemote(
+        string path,
+        string? remote = null,
+        string? branch = null,
+        RemoteOptions? options = null
+    )
     {
-        throw new InvalidOperationException("Not a git repository");
-    }
+        var gitDir = Path.Combine(path, ".git");
 
-    var remoteName = remote ?? "origin";
-    var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
+        if (!Directory.Exists(gitDir))
+        {
+            throw new InvalidOperationException("Not a git repository");
+        }
 
-    await Fetch.FetchFromRemote(path, remoteName, options);
+        var remoteName = remote ?? "origin";
+        var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
+
+        await Fetch.FetchFromRemote(path, remoteName, options);
 
         var remoteBranchPath = Path.Combine(
             gitDir,
@@ -142,13 +142,13 @@ public static async Task PullFromRemote(
         foreach (var (path, newSha) in newBlobs)
         {
             currentBlobs.TryGetValue(path, out var currentSha);
-            
+
             // Only check files that will be updated (currentSha != newSha)
             if (currentSha == newSha)
             {
                 continue;
             }
-            
+
             var fullPath = Path.Combine(workingPath, path);
             if (!File.Exists(fullPath) || !index.ContainsKey(path))
             {

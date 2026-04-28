@@ -47,7 +47,7 @@ func commit(at path: String, message: String) async throws -> String {
 	return commitSha
 }
 
-private func createTree(at rootPath: String, gitDir: String, index: [String: IndexEntry]) async throws -> String {
+func createTree(at rootPath: String, gitDir: String, index: [String: IndexEntry]) async throws -> String {
 	return try await createTreeRecursive(at: rootPath, gitDir: gitDir, index: index, prefix: "")
 }
 
@@ -134,7 +134,7 @@ private func createTreeRecursive(at rootPath: String, gitDir: String, index: [St
 	return try await hashObject(at: gitDir, data: treeContent, type: "tree")
 }
 
-private func createCommit(at gitDir: String, treeSha: String, message: String, parentSha: String?) async throws -> String {
+func createCommit(at gitDir: String, treeSha: String, message: String, parentSha: String?) async throws -> String {
 	let now = Date()
 	let timestamp = Int(now.timeIntervalSince1970)
 	let offset = TimeZone.current.secondsFromGMT()

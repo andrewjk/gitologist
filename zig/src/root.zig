@@ -8,6 +8,7 @@ pub const addAll = @import("add.zig").addAll;
 pub const commit = @import("commit.zig").commit;
 pub const restore = @import("restore.zig").restore;
 pub const restoreAll = @import("restore.zig").restoreAll;
+pub const stash = @import("stash.zig").stash;
 pub const remoteAdd = @import("remote.zig").remoteAdd;
 pub const hasRemote = @import("remote.zig").hasRemote;
 pub const getRemoteUrl = @import("remote.zig").getRemoteUrl;

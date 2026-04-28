@@ -9,6 +9,7 @@ import { pull } from "./pull.ts";
 import { push, setUpstreamBranch } from "./push.ts";
 import { hasRemote, remoteAdd } from "./remote.ts";
 import { restore } from "./restore.ts";
+import { stash } from "./stash.ts";
 import { status } from "./status.ts";
 export type { FetchResult } from "./types/FetchResult.ts";
 export type { RemoteOptions } from "./types/RemoteOptions.ts";
@@ -26,5 +27,6 @@ export {
 	hasRemote,
 	remoteAdd,
 	restore,
+	stash,
 	status,
 };

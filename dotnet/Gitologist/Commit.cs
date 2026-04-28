@@ -44,7 +44,7 @@ public static class Commit
         return commitSha;
     }
 
-    private static async Task<string> CreateTree(
+    internal static async Task<string> CreateTree(
         string gitDir,
         Dictionary<string, IndexEntry> index
     )
@@ -174,7 +174,7 @@ public static class Commit
         );
     }
 
-    private static async Task<string> CreateCommitObject(
+    internal static async Task<string> CreateCommitObject(
         string gitDir,
         string treeSha,
         string message,

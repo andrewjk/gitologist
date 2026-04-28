@@ -1,0 +1,184 @@
+using Gitologist.Types;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace Gitologist.Tests;
+
+[TestClass]
+public class StashTests
+{
+    private string _testDir = null!;
+
+    [TestInitialize]
+    public void SetupTestDir()
+    {
+        _testDir = Path.Combine(
+            Path.GetTempPath(),
+            $"gitologist-stash-test-{DateTime.UtcNow.Ticks}-{Guid.NewGuid():N}"
+        );
+        Directory.CreateDirectory(_testDir);
+    }
+
+    [TestCleanup]
+    public void CleanupTestDir()
+    {
+        if (Directory.Exists(_testDir))
+        {
+            try
+            {
+                Directory.Delete(_testDir, true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ShouldStashAModifiedFile()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "initial content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified content");
+
+        var stashSha = await Stash.CreateStash(_testDir, "WIP");
+
+        Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(stashSha, @"^[a-f0-9]{40}$"));
+
+        var result = await Status.GetStatus(_testDir);
+        Assert.AreEqual(0, result.Modified.Length);
+
+        var fileContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "test.txt"));
+        Assert.AreEqual("initial content", fileContent);
+    }
+
+    [TestMethod]
+    public async Task ShouldStashAnUntrackedFile()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "initial content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "newfile.txt"), "untracked content");
+
+        var stashSha = await Stash.CreateStash(_testDir, "WIP");
+
+        Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(stashSha, @"^[a-f0-9]{40}$"));
+
+        var result = await Status.GetStatus(_testDir);
+        Assert.AreEqual(0, result.Untracked.Length);
+
+        Assert.IsFalse(File.Exists(Path.Combine(_testDir, "newfile.txt")));
+    }
+
+    [TestMethod]
+    public async Task ShouldUpdateStashRef()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified");
+
+        var stashSha = await Stash.CreateStash(_testDir, "Save work");
+
+        var stashRefPath = Path.Combine(_testDir, ".git", "refs", "stash");
+        var refContent = await File.ReadAllTextAsync(stashRefPath);
+
+        Assert.AreEqual(stashSha, refContent.Trim());
+    }
+
+    [TestMethod]
+    public async Task ShouldResetIndexToHEADAfterStash()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "initial content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+
+        var preStashStatus = await Status.GetStatus(_testDir);
+        Assert.IsTrue(preStashStatus.Staged.Contains("test.txt"));
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        var postStashStatus = await Status.GetStatus(_testDir);
+
+        var fileContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "test.txt"));
+        Assert.AreEqual("initial content", fileContent);
+        Assert.AreEqual(0, postStashStatus.Modified.Length);
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowErrorIfNothingToStash()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => Stash.CreateStash(_testDir, "WIP")
+        );
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowErrorIfNotAGitRepository()
+    {
+        var nonGitDir = Path.Combine(
+            Path.GetTempPath(),
+            $"not-a-repo-{DateTime.UtcNow.Ticks}-{Guid.NewGuid():N}"
+        );
+        Directory.CreateDirectory(nonGitDir);
+
+        try
+        {
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+                () => Stash.CreateStash(nonGitDir, "WIP")
+            );
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(nonGitDir, true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ShouldHandleCustomStashMessage()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "modified");
+
+        var message = "Work in progress on feature X";
+        await Stash.CreateStash(_testDir, message);
+
+        var stashRefPath = Path.Combine(_testDir, ".git", "refs", "stash");
+        var stashSha = (await File.ReadAllTextAsync(stashRefPath)).Trim();
+
+        var commitPath = Path.Combine(
+            _testDir,
+            ".git",
+            "objects",
+            stashSha.Substring(0, 2),
+            stashSha.Substring(2)
+        );
+
+        Assert.IsTrue(File.Exists(commitPath));
+    }
+}
