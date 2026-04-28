@@ -19,6 +19,8 @@ Git in (TS|Swift|C#|Zig) code.
 - [x] merge
 - [x] pull
 - [x] push
+- [x] stash
+- [x] unstash
 
 ## Not Implemented
 
