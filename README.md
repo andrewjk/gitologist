@@ -1,8 +1,8 @@
 # Gitologist
 
-Git in (TS|Swift|C#|Zig) code.
+A Git client in (TS | Swift | C# | Zig) code.
 
-> This is a basic Git interface, built to provide rudimentary sync features on top of Git storage.
+> This is a basic Git client, built to provide rudimentary sync features on top of Git storage.
 > It is missing many Git features, and will likely never have them.
 > Its interface may drift from the Git ways of doing things if it makes its use case simpler.
 
