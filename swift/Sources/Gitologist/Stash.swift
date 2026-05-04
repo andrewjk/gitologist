@@ -117,14 +117,23 @@ private func resetHard(at path: String, gitDir: String, commitSha: String) async
 	let gitignore = IgnoreParser()
 	await gitignore.loadGitignore(repoPath: path)
 
-	try await removeNonIgnored(at: path, repoPath: path, gitignore: gitignore)
+	var targetEntries = try await flattenTree(gitDir: gitDir, treeSha: treeSha)
 
-	try await restoreTree(at: path, gitDir: gitDir, treeSha: treeSha, prefix: "")
+	try await resetHardRecursive(at: path, repoPath: path, currentDir: path, gitDir: gitDir, gitignore: gitignore, targetEntries: &targetEntries)
+
+	// Create any remaining target files
+	for (filePath, sha) in targetEntries {
+		let blobData = try await readObject(at: gitDir, sha: sha)
+		let content = try extractContentFromBlob(blobData)
+		let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
+		try FileManager.default.createDirectory(at: fullPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try content.write(to: fullPath, atomically: true, encoding: .utf8)
+	}
 
 	try await updateIndex(gitDir: gitDir, workingPath: path, treeSha: treeSha)
 }
 
-private func removeNonIgnored(at currentDir: String, repoPath: String, gitignore: IgnoreParser) async throws {
+private func resetHardRecursive(at path: String, repoPath: String, currentDir: String, gitDir: String, gitignore: IgnoreParser, targetEntries: inout [String: String]) async throws {
 	let entries = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: currentDir), includingPropertiesForKeys: [.isDirectoryKey])
 
 	for entry in entries {
@@ -137,7 +146,38 @@ private func removeNonIgnored(at currentDir: String, repoPath: String, gitignore
 			continue
 		}
 
-		try? FileManager.default.removeItem(at: entry)
+		if isDir {
+			// Check if any target file is under this directory
+			var hasTargetFiles = false
+			for targetPath in targetEntries.keys {
+				if targetPath == relPath || targetPath.hasPrefix(relPath + "/") {
+					hasTargetFiles = true
+					break
+				}
+			}
+
+			if !hasTargetFiles {
+				try? FileManager.default.removeItem(at: entry)
+				continue
+			}
+
+			try await resetHardRecursive(at: path, repoPath: repoPath, currentDir: entry.path, gitDir: gitDir, gitignore: gitignore, targetEntries: &targetEntries)
+		} else {
+			if let targetSha = targetEntries[relPath] {
+				let currentContent = try String(contentsOf: entry, encoding: .utf8)
+				let currentHash = try await hashObject(at: gitDir, content: currentContent, type: "blob")
+
+				if currentHash != targetSha {
+					let blobData = try await readObject(at: gitDir, sha: targetSha)
+					let content = try extractContentFromBlob(blobData)
+					try content.write(to: entry, atomically: true, encoding: .utf8)
+				}
+
+				targetEntries.removeValue(forKey: relPath)
+			} else {
+				try? FileManager.default.removeItem(at: entry)
+			}
+		}
 	}
 }
 

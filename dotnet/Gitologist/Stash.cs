@@ -120,14 +120,30 @@ public static class Stash
         var gitignore = new IgnoreParser();
         await gitignore.LoadGitignore(path);
 
-        RemoveNonIgnored(path, path, gitignore);
+        var targetEntries = await FlattenTree(gitDir, treeSha);
 
-        await RestoreTree(path, gitDir, treeSha, "");
+        await ResetHardRecursive(path, path, gitDir, gitignore, targetEntries);
+
+        // Create any remaining target files
+        foreach (var (filePath, sha) in targetEntries)
+        {
+            var blobData = await Utils.ReadObject(gitDir, sha);
+            var content = Utils.ExtractContentFromBlob(blobData);
+            var fullPath = Path.Combine(path, filePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            await File.WriteAllTextAsync(fullPath, content);
+        }
 
         await UpdateIndexFromTree(gitDir, path, treeSha);
     }
 
-    private static void RemoveNonIgnored(string currentDir, string repoPath, IgnoreParser gitignore)
+    private static async Task ResetHardRecursive(
+        string repoPath,
+        string currentDir,
+        string gitDir,
+        IgnoreParser gitignore,
+        Dictionary<string, string> targetEntries
+    )
     {
         var entries = Directory.GetFileSystemEntries(currentDir);
 
@@ -146,20 +162,61 @@ public static class Stash
                 continue;
             }
 
-            try
+            if (isDir)
             {
-                if (isDir)
+                // Check if any target file is under this directory
+                var hasTargetFiles = false;
+                foreach (var targetPath in targetEntries.Keys)
                 {
-                    Directory.Delete(entry, true);
+                    if (targetPath == relPath || targetPath.StartsWith(relPath + "/"))
+                    {
+                        hasTargetFiles = true;
+                        break;
+                    }
+                }
+
+                if (!hasTargetFiles)
+                {
+                    try
+                    {
+                        Directory.Delete(entry, true);
+                    }
+                    catch
+                    {
+                        // Ignore errors
+                    }
+                    continue;
+                }
+
+                await ResetHardRecursive(repoPath, entry, gitDir, gitignore, targetEntries);
+            }
+            else
+            {
+                if (targetEntries.TryGetValue(relPath, out var targetSha))
+                {
+                    var currentContent = await File.ReadAllTextAsync(entry);
+                    var currentHash = await Utils.HashObject(gitDir, currentContent, "blob");
+
+                    if (currentHash != targetSha)
+                    {
+                        var blobData = await Utils.ReadObject(gitDir, targetSha);
+                        var content = Utils.ExtractContentFromBlob(blobData);
+                        await File.WriteAllTextAsync(entry, content);
+                    }
+
+                    targetEntries.Remove(relPath);
                 }
                 else
                 {
-                    File.Delete(entry);
+                    try
+                    {
+                        File.Delete(entry);
+                    }
+                    catch
+                    {
+                        // Ignore errors
+                    }
                 }
-            }
-            catch
-            {
-                // Ignore errors
             }
         }
     }

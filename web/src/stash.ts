@@ -241,17 +241,29 @@ async function resetHard(path: string, gitDir: string, commitSha: string): Promi
 	const gitignore = new IgnoreParser();
 	await gitignore.loadGitignore(path);
 
-	await removeNonIgnored(path, path, gitignore);
+	const targetEntries = await flattenTree(gitDir, treeSha);
 
-	await restoreTree(path, gitDir, treeSha, "");
+	await resetHardRecursive(path, path, gitDir, gitignore, targetEntries);
+
+	// Create any remaining target files
+	for (const [filePath, sha] of targetEntries) {
+		const blobData = await readObject(gitDir, sha);
+		const content = extractContentFromBlob(blobData);
+		const fullPath = join(path, filePath);
+		const { mkdir: mkdirAsync } = await import("node:fs/promises");
+		await mkdirAsync(dirname(fullPath), { recursive: true });
+		await writeFile(fullPath, content, "utf-8");
+	}
 
 	await updateIndex(gitDir, path, treeSha);
 }
 
-async function removeNonIgnored(
+async function resetHardRecursive(
 	repoPath: string,
 	currentDir: string,
+	gitDir: string,
 	gitignore: IgnoreParser,
+	targetEntries: Map<string, string>,
 ): Promise<void> {
 	const { readdir } = await import("node:fs/promises");
 	const entries = await readdir(currentDir, { withFileTypes: true });
@@ -266,10 +278,46 @@ async function removeNonIgnored(
 			continue;
 		}
 
-		try {
-			await rm(fullPath, { recursive: true, force: true });
-		} catch {
-			// Ignore errors
+		if (entry.isDirectory()) {
+			// Check if any target file is under this directory
+			let hasTargetFiles = false;
+			for (const targetPath of targetEntries.keys()) {
+				if (targetPath === relPath || targetPath.startsWith(`${relPath}/`)) {
+					hasTargetFiles = true;
+					break;
+				}
+			}
+
+			if (!hasTargetFiles) {
+				try {
+					await rm(fullPath, { recursive: true, force: true });
+				} catch {
+					// Ignore errors
+				}
+				continue;
+			}
+
+			await resetHardRecursive(repoPath, fullPath, gitDir, gitignore, targetEntries);
+		} else {
+			const targetSha = targetEntries.get(relPath);
+			if (targetSha) {
+				const currentContent = await readFile(fullPath, "utf-8");
+				const currentHash = await hashObject(gitDir, currentContent, "blob");
+
+				if (currentHash !== targetSha) {
+					const blobData = await readObject(gitDir, targetSha);
+					const content = extractContentFromBlob(blobData);
+					await writeFile(fullPath, content, "utf-8");
+				}
+
+				targetEntries.delete(relPath);
+			} else {
+				try {
+					await rm(fullPath, { recursive: true, force: true });
+				} catch {
+					// Ignore errors
+				}
+			}
 		}
 	}
 }

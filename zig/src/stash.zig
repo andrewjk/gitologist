@@ -241,9 +241,63 @@ fn resetHard(
     defer gitignore.deinit();
     gitignore.loadGitignore(io, path) catch {};
 
+    const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha);
+    defer allocator.free(commit_data);
+
+    const tree_sha = try utils.extractTreeFromCommit(commit_data);
+
+    var target_entries = std.StringHashMap([]const u8).init(allocator);
+    defer {
+        var iter = target_entries.iterator();
+        while (iter.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            allocator.free(entry.value_ptr.*);
+        }
+        target_entries.deinit();
+    }
+    try flattenTree(io, allocator, git_dir_path, tree_sha, "", &target_entries);
+
+    try resetHardDir(io, allocator, path, path, git_dir_path, gitignore, &target_entries);
+
+    // Create any remaining target files
+    {
+        var remaining = target_entries.iterator();
+        while (remaining.next()) |entry| {
+            const file_path = entry.key_ptr.*;
+            const sha = entry.value_ptr.*;
+
+            const blob_data = try utils.readObject(io, allocator, git_dir_path, sha);
+            defer allocator.free(blob_data);
+
+            const content = utils.extractContentFromBlob(blob_data);
+            const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, file_path });
+            defer allocator.free(full_path);
+
+            const parent = std.fs.path.dirname(full_path) orelse ".";
+            const cwd = std.Io.Dir.cwd();
+            cwd.createDirPath(io, parent) catch |err| {
+                if (err != error.PathAlreadyExists) return err;
+            };
+
+            try cwd.writeFile(io, .{ .sub_path = full_path, .data = content });
+        }
+    }
+
+    try updateIndexFromTree(io, allocator, git_dir_path, path, tree_sha);
+}
+
+fn resetHardDir(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    repo_path: []const u8,
+    current_dir: []const u8,
+    git_dir_path: []const u8,
+    gitignore: ignore_parser.IgnoreParser,
+    target_entries: *std.StringHashMap([]const u8),
+) !void {
     const cwd = std.Io.Dir.cwd();
-    const repo_dir = cwd.openDir(io, path, .{}) catch return error.NotADirectory;
-    defer repo_dir.close(io);
+    const dir = cwd.openDir(io, current_dir, .{}) catch return;
+    defer dir.close(io);
 
     var entries = std.ArrayList(std.Io.Dir.Entry).initCapacity(allocator, 20) catch unreachable;
     defer {
@@ -254,12 +308,9 @@ fn resetHard(
     }
 
     {
-        var iter = repo_dir.iterate();
+        var iter = dir.iterate();
         while (try iter.next(io)) |entry| {
             if (std.mem.eql(u8, entry.name, ".git")) continue;
-
-            const is_dir = entry.kind == .directory;
-            if (gitignore.isIgnored(entry.name, is_dir)) continue;
 
             const name_copy = try allocator.dupe(u8, entry.name);
             const entry_copy = std.Io.Dir.Entry{
@@ -271,25 +322,84 @@ fn resetHard(
         }
     }
 
+    const dir_rel = if (std.mem.eql(u8, current_dir, repo_path))
+        ""
+    else
+        current_dir[repo_path.len + 1 ..];
+
     for (entries.items) |entry| {
-        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
+        const rel_path = if (dir_rel.len == 0)
+            try allocator.dupe(u8, entry.name)
+        else
+            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_rel, entry.name });
+        defer allocator.free(rel_path);
+
+        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ current_dir, entry.name });
         defer allocator.free(full_path);
 
-        cwd.deleteTree(io, full_path) catch |err| {
-            if (err != error.FileNotFound) {
-                // Ignore errors
+        const is_dir = entry.kind == .directory;
+        if (gitignore.isIgnored(rel_path, is_dir)) continue;
+
+        if (entry.kind == .directory) {
+            // Check if any target file is under this directory
+            var has_target_files = false;
+            var target_iter = target_entries.iterator();
+            while (target_iter.next()) |tentry| {
+                const target_path = tentry.key_ptr.*;
+                if (std.mem.eql(u8, target_path, rel_path) or
+                    (std.mem.startsWith(u8, target_path, rel_path) and target_path.len > rel_path.len and target_path[rel_path.len] == '/'))
+                {
+                    has_target_files = true;
+                    break;
+                }
             }
-        };
+
+            if (!has_target_files) {
+                cwd.deleteTree(io, full_path) catch |err| {
+                    if (err != error.FileNotFound) {
+                        // Ignore errors
+                    }
+                };
+                continue;
+            }
+
+            try resetHardDir(io, allocator, repo_path, full_path, git_dir_path, gitignore, target_entries);
+        } else {
+            const target_sha = target_entries.get(rel_path);
+            if (target_sha) |sha| {
+                const file_content = cwd.readFileAlloc(io, full_path, allocator, .unlimited) catch |err| {
+                    if (err == error.FileNotFound) {
+                        _ = target_entries.fetchRemove(rel_path);
+                        continue;
+                    }
+                    return err;
+                };
+                defer allocator.free(file_content);
+
+                const current_hash = try utils.hashObject(io, allocator, git_dir_path, file_content, "blob");
+                defer allocator.free(current_hash);
+
+                if (!std.mem.eql(u8, current_hash, sha)) {
+                    const blob_data = try utils.readObject(io, allocator, git_dir_path, sha);
+                    defer allocator.free(blob_data);
+                    const content = utils.extractContentFromBlob(blob_data);
+                    try cwd.writeFile(io, .{ .sub_path = full_path, .data = content });
+                }
+
+                const removed = target_entries.fetchRemove(rel_path);
+                if (removed) |kv| {
+                    allocator.free(kv.key);
+                    allocator.free(kv.value);
+                }
+            } else {
+                cwd.deleteFile(io, full_path) catch |err| {
+                    if (err != error.FileNotFound) {
+                        // Ignore errors
+                    }
+                };
+            }
+        }
     }
-
-    const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha);
-    defer allocator.free(commit_data);
-
-    const tree_sha = try utils.extractTreeFromCommit(commit_data);
-
-    try restoreTree(io, allocator, path, git_dir_path, tree_sha, "");
-
-    try updateIndexFromTree(io, allocator, git_dir_path, path, tree_sha);
 }
 
 fn restoreTree(
