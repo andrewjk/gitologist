@@ -1,7 +1,7 @@
 {
 	"name": "gitologist",
-	"version": "0.0.0",
-	"description": "Git in TS code.",
+	"version": "1.0.0",
+	"description": "Git in TS code",
 	"homepage": "https://github.com/andrewjk/gitologist#readme",
 	"bugs": {
 		"url": "https://github.com/andrewjk/gitologist/issues"
@@ -28,7 +28,8 @@
 		"dev": "vp pack --watch",
 		"test": "vp test",
 		"check": "vp check",
-		"prepublishOnly": "vp run build"
+		"prepublishOnly": "vp run build",
+		"package": "vp check && vp pack && tsx ./scripts/package.ts"
 	},
 	"devDependencies": {
 		"@types/node": "^25.5.0",
