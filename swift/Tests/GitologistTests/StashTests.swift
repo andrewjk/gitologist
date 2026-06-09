@@ -423,4 +423,59 @@ struct StashTests {
 
 		try? fileManager.removeItem(at: testDirPath)
 	}
+
+	@Test func shouldDeleteFilesThatExistInHEADButNotInStashWhenHEADHasNotMoved() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "a-original".write(to: testDirPath.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+		try "b-original".write(to: testDirPath.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["a.txt", "b.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try "a-local".write(to: testDirPath.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+		try fileManager.removeItem(at: testDirPath.appendingPathComponent("b.txt"))
+
+		_ = try await stash(at: testDirPath.path, message: "WIP")
+
+		try await unstash(at: testDirPath.path)
+
+		#expect(fileManager.fileExists(atPath: testDirPath.appendingPathComponent("a.txt").path))
+		#expect(!fileManager.fileExists(atPath: testDirPath.appendingPathComponent("b.txt").path))
+
+		let aContent = try String(contentsOf: testDirPath.appendingPathComponent("a.txt"), encoding: .utf8)
+		#expect(aContent == "a-local")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldDeleteFilesThatWereDeletedInStashAndNotModifiedInCurrentHEAD() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "a-original".write(to: testDirPath.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+		try "b-original".write(to: testDirPath.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["a.txt", "b.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try fileManager.removeItem(at: testDirPath.appendingPathComponent("b.txt"))
+
+		_ = try await stash(at: testDirPath.path, message: "Delete b")
+
+		try "a-remote".write(to: testDirPath.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["a.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Remote changes")
+
+		try await unstash(at: testDirPath.path)
+
+		#expect(fileManager.fileExists(atPath: testDirPath.appendingPathComponent("a.txt").path))
+		#expect(!fileManager.fileExists(atPath: testDirPath.appendingPathComponent("b.txt").path))
+
+		let aContent = try String(contentsOf: testDirPath.appendingPathComponent("a.txt"), encoding: .utf8)
+		#expect(aContent == "a-remote")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
 }

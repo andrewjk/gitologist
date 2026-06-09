@@ -794,3 +794,160 @@ test "should restore multiple stashed files" {
     for (result.deleted) |item| allocator.free(item);
     allocator.free(result.deleted);
 }
+
+test "should restore stashed deleted file" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-restore-deleted");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "test.txt" });
+    defer allocator.free(file_path);
+
+    const other_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "other.txt" });
+    defer allocator.free(other_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = file_path, .data = "initial content" });
+    try cwd.writeFile(io, .{ .sub_path = other_path, .data = "other content" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ "test.txt", "other.txt" });
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    cwd.deleteFile(io, file_path) catch {};
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    const after_stash_content = try cwd.readFileAlloc(io, other_path, allocator, .unlimited);
+    defer allocator.free(after_stash_content);
+
+    try std.testing.expectEqualSlices(u8, "other content", after_stash_content);
+
+    try std.testing.expectEqual(@as(usize, 2), try countFilesInDir(io, allocator, tmp_path));
+
+    try unstash(io, allocator, tmp_path);
+
+    try std.testing.expectEqual(@as(usize, 1), try countFilesInDir(io, allocator, tmp_path));
+
+    _ = cwd.openFile(io, file_path, .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+        return;
+    };
+    try std.testing.expect(false);
+}
+
+test "should delete files that exist in HEAD but not in stash when HEAD has not moved" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-delete-head");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const a_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "a.txt" });
+    defer allocator.free(a_path);
+
+    const b_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "b.txt" });
+    defer allocator.free(b_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = a_path, .data = "a-original" });
+    try cwd.writeFile(io, .{ .sub_path = b_path, .data = "b-original" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ "a.txt", "b.txt" });
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = a_path, .data = "a-local" });
+    cwd.deleteFile(io, b_path) catch {};
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    try unstash(io, allocator, tmp_path);
+
+    const a_content = try cwd.readFileAlloc(io, a_path, allocator, .unlimited);
+    defer allocator.free(a_content);
+    try std.testing.expectEqualSlices(u8, "a-local", a_content);
+
+    _ = cwd.openFile(io, b_path, .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+        return;
+    };
+    try std.testing.expect(false);
+}
+
+test "should delete files that were deleted in stash and not modified in current HEAD" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-delete-stash");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const a_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "a.txt" });
+    defer allocator.free(a_path);
+
+    const b_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "b.txt" });
+    defer allocator.free(b_path);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = a_path, .data = "a-original" });
+    try cwd.writeFile(io, .{ .sub_path = b_path, .data = "b-original" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ "a.txt", "b.txt" });
+
+    const init_commit_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(init_commit_sha);
+
+    cwd.deleteFile(io, b_path) catch {};
+
+    const stash_sha = try stash(io, allocator, tmp_path, "Delete b");
+    defer allocator.free(stash_sha);
+
+    try cwd.writeFile(io, .{ .sub_path = a_path, .data = "a-remote" });
+    try add(io, allocator, tmp_path, &[_][]const u8{"a.txt"});
+    const remote_sha = try commit(io, allocator, tmp_path, "Remote changes");
+    defer allocator.free(remote_sha);
+
+    try unstash(io, allocator, tmp_path);
+
+    const a_content = try cwd.readFileAlloc(io, a_path, allocator, .unlimited);
+    defer allocator.free(a_content);
+    try std.testing.expectEqualSlices(u8, "a-remote", a_content);
+
+    _ = cwd.openFile(io, b_path, .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+        return;
+    };
+    try std.testing.expect(false);
+}
+
+fn countFilesInDir(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !usize {
+    const cwd = std.Io.Dir.cwd();
+    const dir = cwd.openDir(io, path, .{}) catch return 0;
+    defer dir.close(io);
+
+    var count: usize = 0;
+    var iter = dir.iterate();
+    while (try iter.next(io)) |entry| {
+        if (std.mem.eql(u8, entry.name, ".git")) continue;
+        if (entry.kind == .directory) {
+            const sub_path = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
+            defer allocator.free(sub_path);
+            count += try countFilesInDir(io, allocator, sub_path);
+        } else {
+            count += 1;
+        }
+    }
+    return count;
+}

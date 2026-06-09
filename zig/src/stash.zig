@@ -608,11 +608,6 @@ pub fn unstash(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void
     };
     defer allocator.free(current_head_sha);
 
-    if (std.mem.eql(u8, current_head_sha, merge_base_sha)) {
-        try restoreTree(io, allocator, path, git_dir_path, stash_tree_sha, "");
-        return;
-    }
-
     const merge_base_tree_data = try utils.readObject(io, allocator, git_dir_path, merge_base_sha);
     defer allocator.free(merge_base_tree_data);
 
@@ -653,6 +648,26 @@ pub fn unstash(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void
         stash_entries.deinit();
     }
     try flattenTree(io, allocator, git_dir_path, stash_tree_sha, "", &stash_entries);
+
+    if (std.mem.eql(u8, current_head_sha, merge_base_sha)) {
+        try restoreTree(io, allocator, path, git_dir_path, stash_tree_sha, "");
+
+        // Delete files that exist in HEAD but not in stash
+        var head_iter = current_head_entries.iterator();
+        while (head_iter.next()) |entry| {
+            const file_path = entry.key_ptr.*;
+            if (stash_entries.contains(file_path)) continue;
+
+            const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, file_path });
+            defer allocator.free(full_path);
+
+            cwd.deleteFile(io, full_path) catch |err| {
+                if (err != error.FileNotFound) return err;
+            };
+        }
+
+        return;
+    }
 
     var merged_entries = std.StringHashMap([]const u8).init(allocator);
     defer {
@@ -740,6 +755,28 @@ pub fn unstash(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void
             };
 
             try cwd.writeFile(io, .{ .sub_path = full_path, .data = content });
+        }
+    }
+
+    // Delete files that were deleted in stash and not modified in current HEAD
+    {
+        var base_iter = merge_base_entries.iterator();
+        while (base_iter.next()) |entry| {
+            const file_path = entry.key_ptr.*;
+            if (stash_entries.contains(file_path)) continue;
+            if (merged_entries.contains(file_path)) continue;
+
+            const base_sha = entry.value_ptr.*;
+            const current_sha = current_head_entries.get(file_path);
+
+            if (current_sha == null or std.mem.eql(u8, current_sha.?, base_sha)) {
+                const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, file_path });
+                defer allocator.free(full_path);
+
+                cwd.deleteFile(io, full_path) catch |err| {
+                    if (err != error.FileNotFound) return err;
+                };
+            }
         }
     }
 }

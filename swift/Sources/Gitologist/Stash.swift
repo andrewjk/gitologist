@@ -234,11 +234,6 @@ func unstash(at path: String) async throws {
 		return
 	}
 
-	if currentHeadSha == mergeBaseSha {
-		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "")
-		return
-	}
-
 	let mergeBaseTreeData = try await readObject(at: gitDir.path, sha: mergeBaseSha)
 	let mergeBaseTreeSha = try extractTreeFromCommit(mergeBaseTreeData)
 	let mergeBaseEntries = try await flattenTree(gitDir: gitDir.path, treeSha: mergeBaseTreeSha)
@@ -248,6 +243,18 @@ func unstash(at path: String) async throws {
 	let currentHeadEntries = try await flattenTree(gitDir: gitDir.path, treeSha: currentHeadTreeSha)
 
 	let stashEntries = try await flattenTree(gitDir: gitDir.path, treeSha: stashTreeSha)
+
+	if currentHeadSha == mergeBaseSha {
+		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "")
+
+		// Delete files that exist in HEAD but not in stash
+		for (filePath, _) in currentHeadEntries {
+			if stashEntries[filePath] != nil { continue }
+			let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
+			try? FileManager.default.removeItem(at: fullPath)
+		}
+		return
+	}
 
 	var mergedEntries: [String: String] = [:]
 
@@ -287,6 +294,18 @@ func unstash(at path: String) async throws {
 		let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
 		try FileManager.default.createDirectory(at: fullPath.deletingLastPathComponent(), withIntermediateDirectories: true)
 		try content.write(to: fullPath, atomically: true, encoding: .utf8)
+	}
+
+	// Delete files that were deleted in stash and not modified in current HEAD
+	for (filePath, baseSha) in mergeBaseEntries {
+		if stashEntries[filePath] != nil { continue }
+		if mergedEntries[filePath] != nil { continue }
+
+		let currentSha = currentHeadEntries[filePath]
+		if currentSha == nil || currentSha == baseSha {
+			let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
+			try? FileManager.default.removeItem(at: fullPath)
+		}
 	}
 }
 

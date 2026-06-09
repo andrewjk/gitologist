@@ -339,4 +339,47 @@ describe("stash", () => {
 		const bContent = await readFile(join(testDir, "b.txt"), "utf-8");
 		expect(bContent).toBe("b-remote");
 	});
+
+	it("should delete files that exist in HEAD but not in stash when HEAD has not moved", async () => {
+		await writeFile(join(testDir, "a.txt"), "a-original");
+		await writeFile(join(testDir, "b.txt"), "b-original");
+		await add(testDir, ["a.txt", "b.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await writeFile(join(testDir, "a.txt"), "a-local");
+		await rm(join(testDir, "b.txt"));
+
+		await stash(testDir, "WIP");
+
+		await unstash(testDir);
+
+		expect(existsSync(join(testDir, "a.txt"))).toBe(true);
+		expect(existsSync(join(testDir, "b.txt"))).toBe(false);
+
+		const aContent = await readFile(join(testDir, "a.txt"), "utf-8");
+		expect(aContent).toBe("a-local");
+	});
+
+	it("should delete files that were deleted in stash and not modified in current HEAD", async () => {
+		await writeFile(join(testDir, "a.txt"), "a-original");
+		await writeFile(join(testDir, "b.txt"), "b-original");
+		await add(testDir, ["a.txt", "b.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await rm(join(testDir, "b.txt"));
+
+		await stash(testDir, "Delete b");
+
+		await writeFile(join(testDir, "a.txt"), "a-remote");
+		await add(testDir, ["a.txt"]);
+		await commit(testDir, "Remote changes");
+
+		await unstash(testDir);
+
+		expect(existsSync(join(testDir, "a.txt"))).toBe(true);
+		expect(existsSync(join(testDir, "b.txt"))).toBe(false);
+
+		const aContent = await readFile(join(testDir, "a.txt"), "utf-8");
+		expect(aContent).toBe("a-remote");
+	});
 });

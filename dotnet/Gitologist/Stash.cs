@@ -353,21 +353,36 @@ public static class Stash
 
         var currentHeadSha = await Utils.GetCurrentCommit(gitDir);
 
-        if (currentHeadSha == null || currentHeadSha == mergeBaseSha)
-        {
-            await RestoreTree(path, gitDir, stashTreeSha, "");
-            return;
-        }
-
         var mergeBaseTreeData = await Utils.ReadObject(gitDir, mergeBaseSha);
         var mergeBaseTreeSha = Utils.ExtractTreeFromCommit(mergeBaseTreeData);
         var mergeBaseEntries = await FlattenTree(gitDir, mergeBaseTreeSha);
 
-        var currentHeadData = await Utils.ReadObject(gitDir, currentHeadSha);
-        var currentHeadTreeSha = Utils.ExtractTreeFromCommit(currentHeadData);
-        var currentHeadEntries = await FlattenTree(gitDir, currentHeadTreeSha);
+        var currentHeadData = currentHeadSha != null ? await Utils.ReadObject(gitDir, currentHeadSha) : null;
+        var currentHeadTreeSha = currentHeadData != null ? Utils.ExtractTreeFromCommit(currentHeadData) : null;
+        var currentHeadEntries = currentHeadTreeSha != null ? await FlattenTree(gitDir, currentHeadTreeSha) : new Dictionary<string, string>();
 
         var stashEntries = await FlattenTree(gitDir, stashTreeSha);
+
+        if (currentHeadSha == mergeBaseSha)
+        {
+            await RestoreTree(path, gitDir, stashTreeSha, "");
+
+            // Delete files that exist in HEAD but not in stash
+            foreach (var (filePath, _) in currentHeadEntries)
+            {
+                if (stashEntries.ContainsKey(filePath)) continue;
+                var fullPath = Path.Combine(path, filePath);
+                try
+                {
+                    File.Delete(fullPath);
+                }
+                catch
+                {
+                    // Ignore errors
+                }
+            }
+            return;
+        }
 
         var mergedEntries = new Dictionary<string, string>();
 
@@ -415,6 +430,27 @@ public static class Stash
             var fullPath = Path.Combine(path, filePath);
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             await File.WriteAllTextAsync(fullPath, content);
+        }
+
+        // Delete files that were deleted in stash and not modified in current HEAD
+        foreach (var (filePath, baseSha) in mergeBaseEntries)
+        {
+            if (stashEntries.ContainsKey(filePath)) continue;
+            if (mergedEntries.ContainsKey(filePath)) continue;
+
+            var currentSha = currentHeadEntries.TryGetValue(filePath, out var cs) ? cs : null;
+            if (currentSha == null || currentSha == baseSha)
+            {
+                var fullPath = Path.Combine(path, filePath);
+                try
+                {
+                    File.Delete(fullPath);
+                }
+                catch
+                {
+                    // Ignore errors
+                }
+            }
         }
     }
 

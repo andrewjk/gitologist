@@ -446,4 +446,53 @@ public class StashTests
         Assert.IsTrue(statusResult.Modified.Contains("file1.txt"));
         Assert.IsTrue(statusResult.Untracked.Contains("file2.txt"));
     }
+
+    [TestMethod]
+    public async Task ShouldDeleteFilesThatExistInHEADButNotInStashWhenHEADHasNotMoved()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "a-original");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "b.txt"), "b-original");
+        await Add.AddFiles(_testDir, new[] { "a.txt", "b.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "a-local");
+        File.Delete(Path.Combine(_testDir, "b.txt"));
+
+        await Stash.CreateStash(_testDir, "WIP");
+
+        await Stash.Unstash(_testDir);
+
+        Assert.IsTrue(File.Exists(Path.Combine(_testDir, "a.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(_testDir, "b.txt")));
+
+        var aContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "a.txt"));
+        Assert.AreEqual("a-local", aContent);
+    }
+
+    [TestMethod]
+    public async Task ShouldDeleteFilesThatWereDeletedInStashAndNotModifiedInCurrentHEAD()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "a-original");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "b.txt"), "b-original");
+        await Add.AddFiles(_testDir, new[] { "a.txt", "b.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        File.Delete(Path.Combine(_testDir, "b.txt"));
+
+        await Stash.CreateStash(_testDir, "Delete b");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "a-remote");
+        await Add.AddFiles(_testDir, new[] { "a.txt" });
+        await Commit.CreateCommit(_testDir, "Remote changes");
+
+        await Stash.Unstash(_testDir);
+
+        Assert.IsTrue(File.Exists(Path.Combine(_testDir, "a.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(_testDir, "b.txt")));
+
+        var aContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "a.txt"));
+        Assert.AreEqual("a-remote", aContent);
+    }
 }

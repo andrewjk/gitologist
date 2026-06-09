@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import { IgnoreParser } from "./IgnoreParser.ts";
@@ -372,22 +372,35 @@ export async function unstash(path: string): Promise<void> {
 		return;
 	}
 
-	const currentHeadSha = await getCurrentCommit(gitDir);
-
-	if (currentHeadSha === mergeBaseSha) {
-		await restoreTree(path, gitDir, stashTreeSha, "");
-		return;
-	}
-
 	const mergeBaseTreeData = await readObject(gitDir, mergeBaseSha);
 	const mergeBaseTreeSha = extractTreeFromCommit(mergeBaseTreeData);
 	const mergeBaseEntries = await flattenTree(gitDir, mergeBaseTreeSha);
 
-	const currentHeadData = await readObject(gitDir, currentHeadSha!);
-	const currentHeadTreeSha = extractTreeFromCommit(currentHeadData);
-	const currentHeadEntries = await flattenTree(gitDir, currentHeadTreeSha);
+	const currentHeadSha = await getCurrentCommit(gitDir);
+
+	const currentHeadData = currentHeadSha ? await readObject(gitDir, currentHeadSha) : null;
+	const currentHeadTreeSha = currentHeadData ? extractTreeFromCommit(currentHeadData) : null;
+	const currentHeadEntries = currentHeadTreeSha
+		? await flattenTree(gitDir, currentHeadTreeSha)
+		: new Map<string, string>();
 
 	const stashEntries = await flattenTree(gitDir, stashTreeSha);
+
+	if (currentHeadSha === mergeBaseSha) {
+		await restoreTree(path, gitDir, stashTreeSha, "");
+
+		// Delete files that exist in HEAD but not in stash
+		for (const [filePath] of currentHeadEntries) {
+			if (stashEntries.has(filePath)) continue;
+			const fullPath = join(path, filePath);
+			try {
+				await unlink(fullPath);
+			} catch {
+				// Ignore errors
+			}
+		}
+		return;
+	}
 
 	const mergedEntries = new Map<string, string>();
 
@@ -429,6 +442,22 @@ export async function unstash(path: string): Promise<void> {
 		const { mkdir: mkdirAsync } = await import("node:fs/promises");
 		await mkdirAsync(dirname(fullPath), { recursive: true });
 		await writeFile(fullPath, content, "utf-8");
+	}
+
+	// Delete files that were deleted in stash and not modified in current HEAD
+	for (const [filePath, baseSha] of mergeBaseEntries) {
+		if (stashEntries.has(filePath)) continue;
+		if (mergedEntries.has(filePath)) continue;
+
+		const currentSha = currentHeadEntries.get(filePath);
+		if (!currentSha || currentSha === baseSha) {
+			const fullPath = join(path, filePath);
+			try {
+				await unlink(fullPath);
+			} catch {
+				// Ignore errors
+			}
+		}
 	}
 }
 
