@@ -157,18 +157,37 @@ public static class Packfile
 
     private static (byte[] decompressed, int bytesConsumed) DecompressStreamData(byte[] data, int offset)
     {
-        using var input = new MemoryStream(data, offset, data.Length - offset);
-        using var output = new MemoryStream();
-        using var zlib = new ZLibStream(input, CompressionMode.Decompress);
+        var remainingData = new byte[data.Length - offset];
+        Array.Copy(data, offset, remainingData, 0, remainingData.Length);
 
-        zlib.CopyTo(output);
-        var decompressed = output.ToArray();
+        var inflated = Utils.Decompress(remainingData);
 
-        // In a real streaming implementation, we would track bytes consumed
-        // For now, we'll return the entire remaining data as consumed
-        var bytesConsumed = data.Length - offset;
+        var lo = 1;
+        var hi = remainingData.Length;
+        while (lo < hi)
+        {
+            var mid = (lo + hi) / 2;
+            try
+            {
+                var slice = new byte[mid];
+                Array.Copy(remainingData, 0, slice, 0, mid);
+                var test = Utils.Decompress(slice);
+                if (test.Length == inflated.Length && test.SequenceEqual(inflated))
+                {
+                    hi = mid;
+                }
+                else
+                {
+                    lo = mid + 1;
+                }
+            }
+            catch
+            {
+                lo = mid + 1;
+            }
+        }
 
-        return (decompressed, bytesConsumed);
+        return (inflated, lo);
     }
 
     private static string GetObjectType(int typeNum)

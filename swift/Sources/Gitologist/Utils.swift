@@ -314,8 +314,37 @@ func readObjectData(at gitDir: String, sha: String) async throws -> Data {
 		.appendingPathComponent(String(sha.prefix(2)))
 		.appendingPathComponent(String(sha.dropFirst(2)))
 
-	let compressedData = try Data(contentsOf: objectPath)
-	return try decompressData(compressedData)
+	if let compressedData = try? Data(contentsOf: objectPath) {
+		return try decompressData(compressedData)
+	}
+
+	let packDir = URL(fileURLWithPath: gitDir)
+		.appendingPathComponent("objects")
+		.appendingPathComponent("pack")
+
+	guard let packFiles = try? FileManager.default.contentsOfDirectory(
+		at: packDir,
+		includingPropertiesForKeys: nil
+	).filter({ $0.pathExtension == "pack" }) else {
+		throw GitError.invalidIndexFile("Object not found: \(sha)")
+	}
+
+	for packFile in packFiles {
+		guard let packData = try? Data(contentsOf: packFile),
+		      let objects = try? parsePackfile(packData)
+		else {
+			continue
+		}
+
+		for obj in objects {
+			if obj.sha == sha {
+				let header = "\(obj.type.rawValue) \(obj.content.count)\0"
+				return header.data(using: .utf8)! + obj.content
+			}
+		}
+	}
+
+	throw GitError.invalidIndexFile("Object not found: \(sha)")
 }
 
 func readObject(at gitDir: String, sha: String) async throws -> String {

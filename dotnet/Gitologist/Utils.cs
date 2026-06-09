@@ -367,8 +367,37 @@ public static class Utils
     public static async Task<byte[]> ReadObjectData(string gitDir, string sha)
     {
         var objectPath = Path.Combine(gitDir, "objects", sha.Substring(0, 2), sha.Substring(2));
-        var compressed = await File.ReadAllBytesAsync(objectPath);
-        return Decompress(compressed);
+        try
+        {
+            var compressed = await File.ReadAllBytesAsync(objectPath);
+            return Decompress(compressed);
+        }
+        catch
+        {
+            var packDir = Path.Combine(gitDir, "objects", "pack");
+            if (!Directory.Exists(packDir))
+            {
+                throw new InvalidOperationException($"Object not found: {sha}");
+            }
+
+            var packFiles = Directory.GetFiles(packDir, "*.pack");
+            foreach (var packFile in packFiles)
+            {
+                var packData = await File.ReadAllBytesAsync(packFile);
+                var objects = Packfile.ParsePackfile(packData);
+
+                foreach (var obj in objects)
+                {
+                    if (obj.Sha == sha)
+                    {
+                        var headerBytes = Encoding.UTF8.GetBytes($"{obj.Type} {obj.Content.Length}\0");
+                        return headerBytes.Concat(obj.Content).ToArray();
+                    }
+                }
+            }
+
+            throw new InvalidOperationException($"Object not found: {sha}");
+        }
     }
 
     public static byte[] Decompress(byte[] compressed)

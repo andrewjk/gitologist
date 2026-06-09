@@ -522,6 +522,8 @@ pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
 }
 
 pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) ![]const u8 {
+    const flate = std.compress.flate;
+
     const obj_dir = sha[0..2];
     const obj_name = sha[2..];
 
@@ -529,20 +531,75 @@ pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []
     defer allocator.free(obj_path);
 
     const cwd = std.Io.Dir.cwd();
-    var file = try cwd.openFile(io, obj_path, .{});
-    defer file.close(io);
+    if (cwd.openFile(io, obj_path, .{})) |file| {
+        defer file.close(io);
 
-    const flate = std.compress.flate;
+        var read_buffer: [flate.max_window_len]u8 = undefined;
+        var file_reader = std.Io.File.Reader.init(file, io, &read_buffer);
+        var flate_buffer: [flate.max_window_len]u8 = undefined;
+        var decompress = flate.Decompress.init(&file_reader.interface, .zlib, &flate_buffer);
+        var writer: std.Io.Writer.Allocating = .init(allocator);
+        defer writer.deinit();
+        _ = try decompress.reader.streamRemaining(&writer.writer);
 
-    var read_buffer: [flate.max_window_len]u8 = undefined;
-    var file_reader = std.Io.File.Reader.init(file, io, &read_buffer);
-    var flate_buffer: [flate.max_window_len]u8 = undefined;
-    var decompress = flate.Decompress.init(&file_reader.interface, .zlib, &flate_buffer);
-    var writer: std.Io.Writer.Allocating = .init(allocator);
-    defer writer.deinit();
-    _ = try decompress.reader.streamRemaining(&writer.writer);
+        return writer.toOwnedSlice();
+    } else |_| {}
 
-    return writer.toOwnedSlice();
+    const pack_dir_path = try std.fmt.allocPrint(allocator, "{s}/objects/pack", .{git_dir_path});
+    defer allocator.free(pack_dir_path);
+
+    var pack_dir = cwd.openDir(io, pack_dir_path, .{}) catch {
+        return error.ObjectNotFound;
+    };
+    defer pack_dir.close(io);
+
+    var dir_iter = pack_dir.iterate();
+    while (try dir_iter.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+
+        if (!std.mem.endsWith(u8, entry.name, ".pack")) continue;
+
+        const pack_file_path = try std.fs.path.join(allocator, &[_][]const u8{ pack_dir_path, entry.name });
+        defer allocator.free(pack_file_path);
+
+        const pack_file = cwd.openFile(io, pack_file_path, .{}) catch continue;
+        defer pack_file.close(io);
+
+        var pack_read_buffer: [flate.max_window_len]u8 = undefined;
+        var pack_file_reader = std.Io.File.Reader.init(pack_file, io, &pack_read_buffer);
+        var pack_writer: std.Io.Writer.Allocating = .init(allocator);
+        defer pack_writer.deinit();
+
+        _ = try pack_file_reader.interface.streamRemaining(&pack_writer.writer);
+
+        const pack_data = try pack_writer.toOwnedSlice();
+        defer allocator.free(pack_data);
+
+        const packfile = @import("packfile.zig");
+        var objects = packfile.parsePackfile(allocator, pack_data) catch continue;
+        defer {
+            for (objects.items) |obj| {
+                allocator.free(obj.obj_type);
+                allocator.free(obj.sha);
+                allocator.free(obj.content);
+            }
+            objects.deinit(allocator);
+        }
+
+        for (objects.items) |obj| {
+            if (std.mem.eql(u8, obj.sha, sha)) {
+                const header = try std.fmt.allocPrint(allocator, "{s} {d}\x00", .{ obj.obj_type, obj.content.len });
+                defer allocator.free(header);
+
+                const result = try allocator.alloc(u8, header.len + obj.content.len);
+                @memcpy(result[0..header.len], header);
+                @memcpy(result[header.len..], obj.content);
+                return result;
+            }
+        }
+    }
+
+    return error.ObjectNotFound;
 }
 
 pub fn extractContentFromBlob(blob_data: []const u8) []const u8 {

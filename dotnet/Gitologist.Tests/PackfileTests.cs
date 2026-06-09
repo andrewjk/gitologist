@@ -352,4 +352,122 @@ public class PackfileTests
 
         Assert.ThrowsException<InvalidOperationException>(() => Packfile.ParsePackfile(packfile.ToArray()));
     }
+
+    private string _testDir = null!;
+    private string _gitDir = null!;
+
+    [TestInitialize]
+    public void SetupReadObjectTest()
+    {
+        _testDir = Path.Combine(
+            Path.GetTempPath(),
+            $"gitologist-test-{DateTime.UtcNow.Ticks}-{Guid.NewGuid():N}"
+        );
+        Directory.CreateDirectory(_testDir);
+        _gitDir = Path.Combine(_testDir, ".git");
+        Directory.CreateDirectory(Path.Combine(_gitDir, "objects"));
+    }
+
+    [TestCleanup]
+    public void CleanupReadObjectTest()
+    {
+        if (Directory.Exists(_testDir))
+        {
+            Directory.Delete(_testDir, true);
+        }
+    }
+
+    private static string ComputeSha(string type, byte[] content)
+    {
+        var header = $"{type} {content.Length}\0";
+        var headerBytes = Encoding.UTF8.GetBytes(header);
+        var fullData = headerBytes.Concat(content).ToArray();
+        using var sha1 = SHA1.Create();
+        var hashBytes = sha1.ComputeHash(fullData);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    [TestMethod]
+    public async Task ShouldReadLooseObject()
+    {
+        var content = "hello world";
+        var sha = await Utils.HashObject(_gitDir, content, "blob");
+
+        var data = await Utils.ReadObjectData(_gitDir, sha);
+        var nullIndex = Array.IndexOf(data, (byte)0);
+        var header = Encoding.UTF8.GetString(data, 0, nullIndex);
+        var body = Encoding.UTF8.GetString(data, nullIndex + 1, data.Length - nullIndex - 1);
+
+        Assert.AreEqual($"blob {content.Length}", header);
+        Assert.AreEqual(content, body);
+    }
+
+    [TestMethod]
+    public async Task ShouldReadObjectFromPackfile()
+    {
+        var blobContent = Encoding.UTF8.GetBytes("packfile content");
+        var sha = ComputeSha("blob", blobContent);
+        var objects = new List<PackObject>
+        {
+            new PackObject
+            {
+                Type = "blob",
+                Sha = sha,
+                Content = blobContent
+            }
+        };
+
+        var packfile = Packfile.CreatePackfile(objects);
+        var packDir = Path.Combine(_gitDir, "objects", "pack");
+        Directory.CreateDirectory(packDir);
+        await File.WriteAllBytesAsync(Path.Combine(packDir, "test.pack"), packfile);
+
+        var data = await Utils.ReadObjectData(_gitDir, sha);
+        var nullIndex = Array.IndexOf(data, (byte)0);
+        var header = Encoding.UTF8.GetString(data, 0, nullIndex);
+        var body = new byte[data.Length - nullIndex - 1];
+        Array.Copy(data, nullIndex + 1, body, 0, body.Length);
+
+        Assert.AreEqual($"blob {blobContent.Length}", header);
+        CollectionAssert.AreEqual(blobContent, body);
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowWhenObjectNotFound()
+    {
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => Utils.ReadObjectData(_gitDir, "0000000000000000000000000000000000000000")
+        );
+    }
+
+    [TestMethod]
+    public async Task ShouldReadObjectViaPackfile()
+    {
+        var commitContent = Encoding.UTF8.GetBytes(
+            "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n" +
+            "author Test <test@example.com> 1234567890 +0000\n" +
+            "committer Test <test@example.com> 1234567890 +0000\n" +
+            "\n" +
+            "Initial commit\n"
+        );
+        var sha = ComputeSha("commit", commitContent);
+        var objects = new List<PackObject>
+        {
+            new PackObject
+            {
+                Type = "commit",
+                Sha = sha,
+                Content = commitContent
+            }
+        };
+
+        var packfile = Packfile.CreatePackfile(objects);
+        var packDir = Path.Combine(_gitDir, "objects", "pack");
+        Directory.CreateDirectory(packDir);
+        await File.WriteAllBytesAsync(Path.Combine(packDir, "commits.pack"), packfile);
+
+        var data = await Utils.ReadObject(_gitDir, sha);
+        StringAssert.Contains(data, "commit");
+        StringAssert.Contains(data, "Initial commit");
+    }
 }

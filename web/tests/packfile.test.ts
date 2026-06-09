@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, it, expect } from "vite-plus/test";
 
 import {
@@ -126,6 +128,80 @@ describe("packfile", () => {
 			buffer.writeUInt32BE(99, 4);
 
 			expect(() => parsePackfile(buffer)).toThrow("Unsupported packfile version");
+		});
+
+		it("should parse single blob object with correct SHA", () => {
+			const content = Buffer.from("hello world");
+			const sha = createHash("sha1")
+				.update(`blob ${content.length}\0`)
+				.update(content)
+				.digest("hex");
+
+			const objects: PackObject[] = [{ type: "blob", sha, content }];
+			const packfile = createPackfile(objects);
+			const parsed = parsePackfile(packfile);
+
+			expect(parsed).toHaveLength(1);
+			expect(parsed[0].type).toBe("blob");
+			expect(parsed[0].sha).toBe(sha);
+			expect(parsed[0].content).toEqual(content);
+		});
+
+		it("should parse multiple objects with correct SHAs", () => {
+			const blob1 = Buffer.from("hello world");
+			const blob2 = Buffer.from("another file");
+
+			const sha1 = createHash("sha1").update(`blob ${blob1.length}\0`).update(blob1).digest("hex");
+			const sha2 = createHash("sha1").update(`blob ${blob2.length}\0`).update(blob2).digest("hex");
+
+			const objects: PackObject[] = [
+				{ type: "blob", sha: sha1, content: blob1 },
+				{ type: "blob", sha: sha2, content: blob2 },
+			];
+			const packfile = createPackfile(objects);
+			const parsed = parsePackfile(packfile);
+
+			expect(parsed).toHaveLength(2);
+			expect(parsed[0].sha).toBe(sha1);
+			expect(parsed[0].content).toEqual(blob1);
+			expect(parsed[1].sha).toBe(sha2);
+			expect(parsed[1].content).toEqual(blob2);
+		});
+
+		it("should parse commit object with correct content", () => {
+			const content = Buffer.from(
+				"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\nauthor Test <test@example.com> 1234567890 +0000\ncommitter Test <test@example.com> 1234567890 +0000\n\nInitial commit\n",
+			);
+			const sha = createHash("sha1")
+				.update(`commit ${content.length}\0`)
+				.update(content)
+				.digest("hex");
+
+			const objects: PackObject[] = [{ type: "commit", sha, content }];
+			const packfile = createPackfile(objects);
+			const parsed = parsePackfile(packfile);
+
+			expect(parsed).toHaveLength(1);
+			expect(parsed[0].type).toBe("commit");
+			expect(parsed[0].sha).toBe(sha);
+			expect(parsed[0].content).toEqual(content);
+		});
+
+		it("should parse tree object with binary content", () => {
+			const content = Buffer.from("100644 file.txt\x00b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0");
+			const sha = createHash("sha1")
+				.update(`tree ${content.length}\0`)
+				.update(content)
+				.digest("hex");
+
+			const objects: PackObject[] = [{ type: "tree", sha, content }];
+			const packfile = createPackfile(objects);
+			const parsed = parsePackfile(packfile);
+
+			expect(parsed).toHaveLength(1);
+			expect(parsed[0].type).toBe("tree");
+			expect(parsed[0].sha).toBe(sha);
+			expect(parsed[0].content).toEqual(content);
 		});
 	});
 

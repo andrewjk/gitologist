@@ -343,3 +343,144 @@ test "getObjectType should throw error for unknown type" {
     const result = packfile.getObjectType(99);
     try std.testing.expectError(error.UnknownObjectType, result);
 }
+
+fn computeSha(obj_type: []const u8, content: []const u8) [40]u8 {
+    var hasher = std.crypto.hash.Sha1.init(.{});
+    var header_buf: [64]u8 = undefined;
+    const header = std.fmt.bufPrint(&header_buf, "{s} {d}\x00", .{ obj_type, content.len }) catch unreachable;
+    hasher.update(header);
+    hasher.update(content);
+
+    var hash: [20]u8 = undefined;
+    hasher.final(&hash);
+
+    var hex: [40]u8 = undefined;
+    const hex_digits = "0123456789abcdef";
+    for (0..20) |i| {
+        hex[2 * i] = hex_digits[hash[i] >> 4];
+        hex[2 * i + 1] = hex_digits[hash[i] & 0x0f];
+    }
+    return hex;
+}
+
+fn createTempDir(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", name });
+    const cwd = std.Io.Dir.cwd();
+    cwd.createDirPath(std.testing.io, path) catch {};
+    return path;
+}
+
+test "should read loose object" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-test-loose");
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
+    defer allocator.free(git_dir_path);
+
+    const init = @import("gitologist").init;
+    try init(io, allocator, tmp_path);
+
+    const content = "hello world";
+    const sha = try @import("gitologist").utils.hashObject(io, allocator, git_dir_path, content, "blob");
+    defer allocator.free(sha);
+
+    const data = try @import("gitologist").utils.readObjectData(io, allocator, git_dir_path, sha);
+    defer allocator.free(data);
+
+    const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse return error.TestExpectedEqual;
+    const header = data[0..null_idx];
+    const body = data[null_idx + 1 ..];
+
+    try std.testing.expectEqualStrings("blob 11", header);
+    try std.testing.expectEqualStrings(content, body);
+}
+
+test "should read object from packfile" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-test-packfile-read");
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
+    defer allocator.free(git_dir_path);
+
+    const init = @import("gitologist").init;
+    try init(io, allocator, tmp_path);
+
+    const blob_content = "packfile content";
+    const sha_hex = computeSha("blob", blob_content);
+
+    var objects = std.ArrayList(packfile.PackObject).initCapacity(allocator, 0) catch unreachable;
+    defer {
+        for (objects.items) |obj| {
+            allocator.free(obj.obj_type);
+            allocator.free(obj.sha);
+            allocator.free(obj.content);
+        }
+        objects.deinit(allocator);
+    }
+
+    const obj_type = try allocator.dupe(u8, "blob");
+    const sha = try allocator.dupe(u8, &sha_hex);
+    const content = try allocator.dupe(u8, blob_content);
+
+    try objects.append(allocator, .{
+        .obj_type = obj_type,
+        .sha = sha,
+        .content = content,
+    });
+
+    const pack_data = try packfile.createPackfile(allocator, objects);
+    defer allocator.free(pack_data);
+
+    const pack_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "objects", "pack" });
+    defer allocator.free(pack_dir_path);
+
+    cwd.createDirPath(io, pack_dir_path) catch {};
+    var pack_dir = try cwd.openDir(io, pack_dir_path, .{});
+    defer pack_dir.close(io);
+
+    try pack_dir.writeFile(io, .{ .sub_path = "test.pack", .data = pack_data });
+
+    const utils = @import("gitologist").utils;
+    const data = try utils.readObjectData(io, allocator, git_dir_path, &sha_hex);
+    defer allocator.free(data);
+
+    const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse return error.TestExpectedEqual;
+    const header = data[0..null_idx];
+    const body = data[null_idx + 1 ..];
+
+    try std.testing.expectEqualStrings("blob 16", header);
+    try std.testing.expectEqualStrings(blob_content, body);
+}
+
+test "should throw error when object not found" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-test-not-found");
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
+    defer allocator.free(git_dir_path);
+
+    const init = @import("gitologist").init;
+    try init(io, allocator, tmp_path);
+
+    const utils = @import("gitologist").utils;
+    const result = utils.readObjectData(io, allocator, git_dir_path, "0000000000000000000000000000000000000000");
+    try std.testing.expectError(error.ObjectNotFound, result);
+}

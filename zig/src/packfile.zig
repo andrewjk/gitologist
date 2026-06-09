@@ -172,6 +172,7 @@ const DecompressResult = struct {
 
 fn decompressStreamData(allocator: std.mem.Allocator, data: []const u8, offset: usize) !DecompressResult {
     const flate = std.compress.flate;
+
     var reader = std.Io.Reader.fixed(data[offset..]);
     var flate_buffer: [flate.max_window_len]u8 = undefined;
     var decompress = flate.Decompress.init(&reader, .zlib, &flate_buffer);
@@ -181,13 +182,33 @@ fn decompressStreamData(allocator: std.mem.Allocator, data: []const u8, offset: 
 
     const inflated = try writer.toOwnedSlice();
 
-    // In a true streaming implementation, we would track bytes consumed
-    // For now, return the entire remaining data as consumed
-    const bytes_consumed = data.len - offset;
+    const remaining = data[offset..];
+    var lo: usize = 1;
+    var hi: usize = remaining.len;
+    while (lo < hi) {
+        const mid = (lo + hi) / 2;
+        var test_reader = std.Io.Reader.fixed(remaining[0..mid]);
+        var test_flate_buffer: [flate.max_window_len]u8 = undefined;
+        var test_decompress = flate.Decompress.init(&test_reader, .zlib, &test_flate_buffer);
+        var test_writer: std.Io.Writer.Allocating = .init(allocator);
+        defer test_writer.deinit();
+
+        if (test_decompress.reader.streamRemaining(&test_writer.writer)) |_| {
+            const test_inflated = try test_writer.toOwnedSlice();
+            defer allocator.free(test_inflated);
+            if (test_inflated.len == inflated.len and std.mem.eql(u8, test_inflated, inflated)) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        } else |_| {
+            lo = mid + 1;
+        }
+    }
 
     return DecompressResult{
         .decompressed = inflated,
-        .bytes_consumed = bytes_consumed,
+        .bytes_consumed = lo,
     };
 }
 

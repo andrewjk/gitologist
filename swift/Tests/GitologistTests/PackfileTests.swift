@@ -213,4 +213,95 @@ struct PackfileTests {
 	@Test func shouldReturnNilForUnknownType() {
 		#expect(getObjectType(99) == nil)
 	}
+
+	func computeSha(type: String, content: Data) -> String {
+		let header = "\(type) \(content.count)\0"
+		let data = header.data(using: .utf8)! + content
+		let sha = Insecure.SHA1.hash(data: data)
+		return sha.map { String(format: "%02x", $0) }.joined()
+	}
+
+	@Test func shouldReadLooseObject() async throws {
+		let testDir = FileManager.default.temporaryDirectory
+			.appendingPathComponent("gitologist-test-\(UUID().uuidString.prefix(8))")
+		let gitDir = testDir.appendingPathComponent(".git")
+		try FileManager.default.createDirectory(at: gitDir.appendingPathComponent("objects"), withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: testDir) }
+
+		let content = "hello world"
+		let sha = try await hashObject(at: gitDir.path, content: content, type: "blob")
+
+		let data = try await readObjectData(at: gitDir.path, sha: sha)
+		let nullIndex = data.firstIndex(of: 0)!
+		let header = String(data: data.prefix(upTo: nullIndex), encoding: .utf8)!
+		let body = String(data: data.suffix(from: data.index(after: nullIndex)), encoding: .utf8)!
+
+		#expect(header == "blob \(content.count)")
+		#expect(body == content)
+	}
+
+	@Test func shouldReadObjectFromPackfile() async throws {
+		let testDir = FileManager.default.temporaryDirectory
+			.appendingPathComponent("gitologist-test-\(UUID().uuidString.prefix(8))")
+		let gitDir = testDir.appendingPathComponent(".git")
+		try FileManager.default.createDirectory(at: gitDir.appendingPathComponent("objects").appendingPathComponent("pack"), withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: testDir) }
+
+		let blobContent = Data("packfile content".utf8)
+		let sha = computeSha(type: "blob", content: blobContent)
+		let objects: [PackObject] = [
+			PackObject(type: .blob, sha: sha, content: blobContent),
+		]
+
+		let packfile = createPackfile(objects)
+		let packDir = gitDir.appendingPathComponent("objects").appendingPathComponent("pack")
+		try packfile.write(to: packDir.appendingPathComponent("test.pack"))
+
+		let data = try await readObjectData(at: gitDir.path, sha: sha)
+		let nullIndex = data.firstIndex(of: 0)!
+		let header = String(data: data.prefix(upTo: nullIndex), encoding: .utf8)!
+		let body = data.suffix(from: data.index(after: nullIndex))
+
+		#expect(header == "blob \(blobContent.count)")
+		#expect(body == blobContent)
+	}
+
+	@Test func shouldThrowWhenObjectNotFound() async throws {
+		let testDir = FileManager.default.temporaryDirectory
+			.appendingPathComponent("gitologist-test-\(UUID().uuidString.prefix(8))")
+		let gitDir = testDir.appendingPathComponent(".git")
+		try FileManager.default.createDirectory(at: gitDir.appendingPathComponent("objects"), withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: testDir) }
+
+		do {
+			_ = try await readObjectData(at: gitDir.path, sha: "0000000000000000000000000000000000000000")
+		 fatalError("Should have thrown")
+		} catch {
+			#expect(error.localizedDescription.contains("Object not found") || (error as? GitError) != nil)
+		}
+	}
+
+	@Test func shouldReadObjectViaPackfile() async throws {
+		let testDir = FileManager.default.temporaryDirectory
+			.appendingPathComponent("gitologist-test-\(UUID().uuidString.prefix(8))")
+		let gitDir = testDir.appendingPathComponent(".git")
+		try FileManager.default.createDirectory(at: gitDir.appendingPathComponent("objects").appendingPathComponent("pack"), withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: testDir) }
+
+		let commitContent = Data(
+			"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\nauthor Test <test@example.com> 1234567890 +0000\ncommitter Test <test@example.com> 1234567890 +0000\n\nInitial commit\n".utf8
+		)
+		let sha = computeSha(type: "commit", content: commitContent)
+		let objects: [PackObject] = [
+			PackObject(type: .commit, sha: sha, content: commitContent),
+		]
+
+		let packfile = createPackfile(objects)
+		let packDir = gitDir.appendingPathComponent("objects").appendingPathComponent("pack")
+		try packfile.write(to: packDir.appendingPathComponent("commits.pack"))
+
+		let data = try await readObject(at: gitDir.path, sha: sha)
+		#expect(data.contains("commit"))
+		#expect(data.contains("Initial commit"))
+	}
 }

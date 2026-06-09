@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createInflate, deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
 export interface PackObject {
 	type: "commit" | "tree" | "blob" | "tag";
@@ -116,26 +116,27 @@ function decompressStreamData(
 	data: Buffer,
 	offset: number,
 ): { inflated: Buffer; bytesConsumed: number } {
-	const inflate = createInflate();
-	const chunks: Buffer[] = [];
-	let bytesConsumed = 0;
-
-	inflate.on("data", (chunk: Buffer) => {
-		chunks.push(chunk);
-	});
-
-	inflate.on("error", (err: Error) => {
-		throw err;
-	});
-
 	const remainingData = data.slice(offset);
-	bytesConsumed = remainingData.length;
+	const inflated = inflateSync(remainingData);
 
-	inflate.write(remainingData);
-	inflate.end();
+	// Find the exact compressed length using binary search
+	let lo = 1;
+	let hi = remainingData.length;
+	while (lo < hi) {
+		const mid = Math.floor((lo + hi) / 2);
+		try {
+			const test = inflateSync(remainingData.slice(0, mid));
+			if (test.length === inflated.length && test.equals(inflated)) {
+				hi = mid;
+			} else {
+				lo = mid + 1;
+			}
+		} catch {
+			lo = mid + 1;
+		}
+	}
 
-	const inflated = Buffer.concat(chunks);
-	return { inflated, bytesConsumed };
+	return { inflated, bytesConsumed: lo };
 }
 
 const OBJECT_TYPES: Record<number, PackObject["type"]> = {

@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+import { parsePackfile } from "./packfile.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
 
@@ -27,8 +28,34 @@ export async function readObjectData(gitDir: string, sha: string): Promise<Buffe
 	const zlib = await import("node:zlib");
 
 	const objectPath = join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
-	const compressed = await readFile(objectPath);
-	return zlib.inflateSync(compressed);
+	try {
+		const compressed = await readFile(objectPath);
+		return zlib.inflateSync(compressed);
+	} catch {
+		// Fallback to packfiles
+		const packDir = join(gitDir, "objects", "pack");
+		if (!existsSync(packDir)) {
+			throw new Error(`Object not found: ${sha}`);
+		}
+
+		const files = await readdir(packDir);
+		const packFiles = files.filter((f) => f.endsWith(".pack"));
+
+		for (const packFile of packFiles) {
+			const packPath = join(packDir, packFile);
+			const packData = await readFile(packPath);
+			const objects = parsePackfile(packData);
+
+			for (const obj of objects) {
+				if (obj.sha === sha) {
+					const header = Buffer.from(`${obj.type} ${obj.content.length}\0`, "utf-8");
+					return Buffer.concat([header, obj.content]);
+				}
+			}
+		}
+
+		throw new Error(`Object not found: ${sha}`);
+	}
 }
 
 export async function getCurrentBranch(gitDir: string): Promise<string> {
