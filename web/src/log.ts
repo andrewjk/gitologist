@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import type { LogEntry } from "./types/LogEntry.ts";
 import type { LogOptions } from "./types/LogOptions.ts";
-import { getCurrentBranch, readObject } from "./utils.ts";
+import { getCurrentBranch, parseTreeEntries, readObject } from "./utils.ts";
 
 export async function log(path: string, options?: LogOptions): Promise<LogEntry[]> {
 	const gitDir = join(path, ".git");
@@ -29,6 +29,37 @@ export async function log(path: string, options?: LogOptions): Promise<LogEntry[
 	let currentSha: string | null = commitSha;
 
 	const limit = options?.limit || Number.POSITIVE_INFINITY;
+
+	if (options?.file) {
+		const treeCache = new Map<string, string | null>();
+
+		while (currentSha !== null) {
+			const entry = await parseCommitEntry(gitDir, currentSha);
+			const currentBlobSha = await getFileBlobSha(gitDir, entry.tree, options.file, treeCache);
+
+			if (!entry.parent) {
+				if (currentBlobSha !== null) {
+					entries.push(entry);
+				}
+			} else {
+				const parentEntry = await parseCommitEntry(gitDir, entry.parent);
+				const parentBlobSha = await getFileBlobSha(
+					gitDir,
+					parentEntry.tree,
+					options.file,
+					treeCache,
+				);
+				if (currentBlobSha !== parentBlobSha) {
+					entries.push(entry);
+				}
+			}
+
+			if (entries.length >= limit) break;
+			currentSha = entry.parent;
+		}
+
+		return entries;
+	}
 
 	while (currentSha !== null && entries.length < limit) {
 		const entry = await parseCommitEntry(gitDir, currentSha);
@@ -98,4 +129,42 @@ function formatAuthor(author: string): string {
 	}
 
 	return author.trim();
+}
+
+async function getFileBlobSha(
+	gitDir: string,
+	treeSha: string,
+	filePath: string,
+	cache: Map<string, string | null>,
+): Promise<string | null> {
+	if (cache.has(treeSha)) {
+		return cache.get(treeSha)!;
+	}
+
+	const treeData = await readObject(gitDir, treeSha);
+	const entries = parseTreeEntries(treeData);
+
+	const parts = filePath.split("/");
+	let current = entries.find((e) => e.path === parts[0]);
+	if (!current) {
+		cache.set(treeSha, null);
+		return null;
+	}
+
+	for (let i = 1; i < parts.length; i++) {
+		if (current.type !== "tree") {
+			cache.set(treeSha, null);
+			return null;
+		}
+		const subTreeData = await readObject(gitDir, current.sha);
+		const subEntries = parseTreeEntries(subTreeData);
+		current = subEntries.find((e) => e.path === parts[i]);
+		if (!current) {
+			cache.set(treeSha, null);
+			return null;
+		}
+	}
+
+	cache.set(treeSha, current.sha);
+	return current.sha;
 }

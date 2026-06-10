@@ -275,4 +275,110 @@ public class LogTests
         Assert.AreEqual(firstSha, result[0].Parent);
         Assert.IsNull(result[1].Parent);
     }
+
+    [TestMethod]
+    public async Task ShouldReturnEmptyWhenFileNeverExisted()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "First commit");
+
+        var result = await Log.GetLog(_testDir, new LogOptions { File = "nonexistent.txt" });
+
+        Assert.AreEqual(0, result.Count);
+    }
+
+    [TestMethod]
+    public async Task ShouldReturnOnlyCommitsThatTouchedFile()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "content a");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "b.txt"), "content b");
+        await Add.AddFiles(_testDir, new[] { "a.txt", "b.txt" });
+        await Commit.CreateCommit(_testDir, "Add both files");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "a.txt"), "modified a");
+        await Add.AddFiles(_testDir, new[] { "a.txt" });
+        await Commit.CreateCommit(_testDir, "Modify a.txt");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "b.txt"), "modified b");
+        await Add.AddFiles(_testDir, new[] { "b.txt" });
+        await Commit.CreateCommit(_testDir, "Modify b.txt");
+
+        var resultA = await Log.GetLog(_testDir, new LogOptions { File = "a.txt" });
+        Assert.AreEqual(2, resultA.Count);
+        Assert.AreEqual("Modify a.txt", resultA[0].Message);
+        Assert.AreEqual("Add both files", resultA[1].Message);
+
+        var resultB = await Log.GetLog(_testDir, new LogOptions { File = "b.txt" });
+        Assert.AreEqual(2, resultB.Count);
+        Assert.AreEqual("Modify b.txt", resultB[0].Message);
+        Assert.AreEqual("Add both files", resultB[1].Message);
+    }
+
+    [TestMethod]
+    public async Task ShouldWorkWithNestedFilePaths()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "outer.txt"), "outer");
+        await Add.AddFiles(_testDir, new[] { "outer.txt" });
+        await Commit.CreateCommit(_testDir, "Add outer.txt");
+
+        Directory.CreateDirectory(Path.Combine(_testDir, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "sub", "inner.txt"), "inner");
+        await Add.AddFiles(_testDir, new[] { "sub/inner.txt" });
+        await Commit.CreateCommit(_testDir, "Add sub/inner.txt");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "sub", "inner.txt"), "modified");
+        await Add.AddFiles(_testDir, new[] { "sub/inner.txt" });
+        await Commit.CreateCommit(_testDir, "Modify sub/inner.txt");
+
+        var result = await Log.GetLog(_testDir, new LogOptions { File = "sub/inner.txt" });
+
+        Assert.AreEqual(2, result.Count);
+        Assert.AreEqual("Modify sub/inner.txt", result[0].Message);
+        Assert.AreEqual("Add sub/inner.txt", result[1].Message);
+    }
+
+    [TestMethod]
+    public async Task ShouldRespectLimitWithFileFilter()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file.txt"), "v1");
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "First");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file.txt"), "v2");
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "Second");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file.txt"), "v3");
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "Third");
+
+        var result = await Log.GetLog(_testDir, new LogOptions { File = "file.txt", Limit = 2 });
+
+        Assert.AreEqual(2, result.Count);
+        Assert.AreEqual("Third", result[0].Message);
+        Assert.AreEqual("Second", result[1].Message);
+    }
+
+    [TestMethod]
+    public async Task ShouldIncludeInitialCommitWhenFileWasAdded()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "file.txt"), "initial");
+        await Add.AddFiles(_testDir, new[] { "file.txt" });
+        await Commit.CreateCommit(_testDir, "Add file.txt");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "other.txt"), "other");
+        await Add.AddFiles(_testDir, new[] { "other.txt" });
+        await Commit.CreateCommit(_testDir, "Add other.txt");
+
+        var result = await Log.GetLog(_testDir, new LogOptions { File = "file.txt" });
+
+        Assert.AreEqual(1, result.Count);
+        Assert.AreEqual("Add file.txt", result[0].Message);
+    }
 }

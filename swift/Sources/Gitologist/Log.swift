@@ -46,6 +46,39 @@ func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry]
 	var currentSha: String? = commitSha
 	let limit = options?.limit ?? Int.max
 
+	if let fileFilter = options?.file {
+		var treeCache: [String: String?] = [:]
+
+		while let sha = currentSha {
+			let entry = try await parseCommitEntry(gitDir: gitDir.path, commitSha: sha)
+			let currentBlobSha = try await getFileBlobSha(
+				gitDir: gitDir.path, treeSha: entry.tree, filePath: fileFilter, cache: &treeCache
+			)
+
+			if entry.parent == nil {
+				if currentBlobSha != nil {
+					entries.append(entry)
+				}
+			} else {
+				let parentEntry = try await parseCommitEntry(
+					gitDir: gitDir.path, commitSha: entry.parent!
+				)
+				let parentBlobSha = try await getFileBlobSha(
+					gitDir: gitDir.path, treeSha: parentEntry.tree, filePath: fileFilter,
+					cache: &treeCache
+				)
+				if currentBlobSha != parentBlobSha {
+					entries.append(entry)
+				}
+			}
+
+			if entries.count >= limit { break }
+			currentSha = entry.parent
+		}
+
+		return entries
+	}
+
 	while let sha = currentSha, entries.count < limit {
 		let entry = try await parseCommitEntry(gitDir: gitDir.path, commitSha: sha)
 		entries.append(entry)
@@ -77,8 +110,50 @@ private func parseCommitEntry(gitDir: String, commitSha: String) async throws ->
 	)
 }
 
+private func getFileBlobSha(
+	gitDir: String, treeSha: String, filePath: String,
+	cache: inout [String: String?]
+) async throws -> String? {
+	if let cached = cache[treeSha] {
+		return cached
+	}
+
+	let treeData = try await readObject(at: gitDir, sha: treeSha)
+	let entries = try parseTreeEntries(treeData)
+
+	let parts = filePath.split(separator: "/").map(String.init)
+	guard var current = entries.first(where: { $0.path == parts[0] }) else {
+		cache[treeSha] = nil
+		return nil
+	}
+
+	for i in 1 ..< parts.count {
+		guard current.type == .tree else {
+			cache[treeSha] = nil
+			return nil
+		}
+
+		let subTreeData = try await readObject(at: gitDir, sha: current.sha)
+		let subEntries = try parseTreeEntries(subTreeData)
+
+		guard let next = subEntries.first(where: { $0.path == parts[i] }) else {
+			cache[treeSha] = nil
+			return nil
+		}
+		current = next
+	}
+
+	cache[treeSha] = current.sha
+	return current.sha
+}
+
 private func extractField(from commitData: String, fieldName: String) -> String? {
-	let lines = commitData.components(separatedBy: .newlines)
+	var content = commitData
+	if let nullIndex = content.firstIndex(of: "\0") {
+		content = String(content[content.index(after: nullIndex)...])
+	}
+
+	let lines = content.components(separatedBy: .newlines)
 	for line in lines {
 		if line.starts(with: "\(fieldName) ") {
 			return String(line.dropFirst(fieldName.count + 1))

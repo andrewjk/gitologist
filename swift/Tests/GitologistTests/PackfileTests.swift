@@ -232,9 +232,9 @@ struct PackfileTests {
 		let sha = try await hashObject(at: gitDir.path, content: content, type: "blob")
 
 		let data = try await readObjectData(at: gitDir.path, sha: sha)
-		let nullIndex = data.firstIndex(of: 0)!
-		let header = String(data: data.prefix(upTo: nullIndex), encoding: .utf8)!
-		let body = String(data: data.suffix(from: data.index(after: nullIndex)), encoding: .utf8)!
+		let nullIndex = try #require(data.firstIndex(of: 0))
+		let header = try #require(String(data: data.prefix(upTo: nullIndex), encoding: .utf8))
+		let body = try #require(String(data: data.suffix(from: data.index(after: nullIndex)), encoding: .utf8))
 
 		#expect(header == "blob \(content.count)")
 		#expect(body == content)
@@ -258,8 +258,8 @@ struct PackfileTests {
 		try packfile.write(to: packDir.appendingPathComponent("test.pack"))
 
 		let data = try await readObjectData(at: gitDir.path, sha: sha)
-		let nullIndex = data.firstIndex(of: 0)!
-		let header = String(data: data.prefix(upTo: nullIndex), encoding: .utf8)!
+		let nullIndex = try #require(data.firstIndex(of: 0))
+		let header = try #require(String(data: data.prefix(upTo: nullIndex), encoding: .utf8))
 		let body = data.suffix(from: data.index(after: nullIndex))
 
 		#expect(header == "blob \(blobContent.count)")
@@ -275,7 +275,7 @@ struct PackfileTests {
 
 		do {
 			_ = try await readObjectData(at: gitDir.path, sha: "0000000000000000000000000000000000000000")
-		 fatalError("Should have thrown")
+			fatalError("Should have thrown")
 		} catch {
 			#expect(error.localizedDescription.contains("Object not found") || (error as? GitError) != nil)
 		}

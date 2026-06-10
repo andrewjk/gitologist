@@ -62,6 +62,58 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
 
     const limit = opts.limit orelse std.math.maxInt(usize);
 
+    if (opts.file) |file_path| {
+        var cache = std.AutoHashMap([40]u8, ?[]const u8).init(allocator);
+        defer {
+            var cache_iter = cache.iterator();
+            while (cache_iter.next()) |cache_entry| {
+                if (cache_entry.value_ptr.*) |sha| {
+                    allocator.free(sha);
+                }
+            }
+            cache.deinit();
+        }
+
+        while (true) {
+            const sha_to_parse = if (current_sha) |s| s else commit_sha;
+            const entry = try parseCommitEntry(io, allocator, git_dir_path, sha_to_parse);
+
+            if (current_sha) |s| {
+                allocator.free(s);
+            }
+
+        const current_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, entry.tree, file_path, &cache);
+
+        var should_include = false;
+
+        if (entry.parent) |p| {
+            const parent_entry = try parseCommitEntry(io, allocator, git_dir_path, p);
+            defer freeLogEntry(allocator, parent_entry);
+            const parent_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, parent_entry.tree, file_path, &cache);
+            should_include = !blobShaEqual(current_blob_sha, parent_blob_sha);
+                current_sha = try allocator.dupe(u8, p);
+            } else {
+                should_include = current_blob_sha != null;
+                current_sha = null;
+            }
+
+            if (should_include) {
+                try entries.append(allocator, entry);
+                if (entries.items.len >= limit) break;
+            } else {
+                freeLogEntry(allocator, entry);
+            }
+
+            if (current_sha == null) break;
+        }
+
+        if (current_sha) |s| {
+            allocator.free(s);
+        }
+
+        return entries.toOwnedSlice(allocator);
+    }
+
     while (entries.items.len < limit) {
         const sha_to_parse = if (current_sha) |s| s else commit_sha;
 
@@ -196,4 +248,115 @@ fn formatAuthor(allocator: std.mem.Allocator, author: []const u8) ![]const u8 {
 
     const name = author[0..space_before_angle];
     return try allocator.dupe(u8, std.mem.trim(u8, name, &std.ascii.whitespace));
+}
+
+fn freeLogEntry(allocator: std.mem.Allocator, entry: LogEntry) void {
+    allocator.free(entry.sha);
+    allocator.free(entry.abbreviated_sha);
+    allocator.free(entry.tree);
+    if (entry.parent) |p| allocator.free(p);
+    allocator.free(entry.author);
+    allocator.free(entry.committer);
+    allocator.free(entry.message);
+}
+
+fn blobShaEqual(a: ?[]const u8, b: ?[]const u8) bool {
+    if (a == null and b == null) return true;
+    if (a == null or b == null) return false;
+    return std.mem.eql(u8, a.?, b.?);
+}
+
+fn getFileBlobSha(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    git_dir_path: []const u8,
+    tree_sha: []const u8,
+    file_path: []const u8,
+    cache: *std.AutoHashMap([40]u8, ?[]const u8),
+) !?[]const u8 {
+    var key: [40]u8 = undefined;
+    @memcpy(&key, tree_sha[0..40]);
+
+    if (cache.get(key)) |cached| {
+        return cached;
+    }
+
+    var parts = std.mem.splitScalar(u8, file_path, '/');
+    const first_part = parts.next() orelse {
+        try cache.put(key, null);
+        return null;
+    };
+
+    var current_sha: ?[]const u8 = null;
+    var current_is_tree = false;
+
+    {
+        const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha);
+        defer allocator.free(tree_data);
+
+        var tree_entries = try utils.parseTreeEntries(allocator, tree_data);
+        defer {
+            for (tree_entries.items) |e| {
+                allocator.free(e.path);
+                allocator.free(e.sha);
+                allocator.free(e.mode);
+                allocator.free(e.entry_type);
+            }
+            tree_entries.deinit(allocator);
+        }
+
+        for (tree_entries.items) |e| {
+            if (std.mem.eql(u8, e.path, first_part)) {
+                current_sha = try allocator.dupe(u8, e.sha);
+                current_is_tree = std.mem.eql(u8, e.entry_type, "tree");
+                break;
+            }
+        }
+    }
+
+    if (current_sha == null) {
+        try cache.put(key, null);
+        return null;
+    }
+
+    while (parts.next()) |part| {
+        if (!current_is_tree) {
+            allocator.free(current_sha.?);
+            try cache.put(key, null);
+            return null;
+        }
+        const sub_tree_data = try utils.readObject(io, allocator, git_dir_path, current_sha.?);
+        defer allocator.free(sub_tree_data);
+        var sub_entries = try utils.parseTreeEntries(allocator, sub_tree_data);
+        defer {
+            for (sub_entries.items) |e| {
+                allocator.free(e.path);
+                allocator.free(e.sha);
+                allocator.free(e.mode);
+                allocator.free(e.entry_type);
+            }
+            sub_entries.deinit(allocator);
+        }
+
+        var found = false;
+        for (sub_entries.items) |e| {
+            if (std.mem.eql(u8, e.path, part)) {
+                const new_sha = try allocator.dupe(u8, e.sha);
+                allocator.free(current_sha.?);
+                current_sha = new_sha;
+                current_is_tree = std.mem.eql(u8, e.entry_type, "tree");
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            allocator.free(current_sha.?);
+            try cache.put(key, null);
+            return null;
+        }
+    }
+
+    try cache.put(key, current_sha.?);
+    return current_sha.?;
 }
