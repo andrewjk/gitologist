@@ -3,8 +3,11 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { parsePackfile } from "./packfile.ts";
+import type { PackObject } from "./packfile.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
+
+const packfileCache = new Map<string, PackObject[]>();
 
 export async function readObject(gitDir: string, sha: string): Promise<string> {
 	const data = await readObjectData(gitDir, sha);
@@ -43,8 +46,12 @@ export async function readObjectData(gitDir: string, sha: string): Promise<Buffe
 
 		for (const packFile of packFiles) {
 			const packPath = join(packDir, packFile);
-			const packData = await readFile(packPath);
-			const objects = parsePackfile(packData);
+			let objects = packfileCache.get(packPath);
+			if (!objects) {
+				const packData = await readFile(packPath);
+				objects = parsePackfile(packData);
+				packfileCache.set(packPath, objects);
+			}
 
 			for (const obj of objects) {
 				if (obj.sha === sha) {
@@ -328,7 +335,7 @@ export function parseTreeEntries(treeData: string): TreeEntry[] {
 		const sha = content.slice(shaStart, shaEnd).toString("hex");
 
 		// Determine type from mode
-		const type = mode === "040000" ? "tree" : "blob";
+		const type = mode === "040000" || mode === "40000" ? "tree" : "blob";
 
 		entries.push({
 			path: name,
@@ -369,7 +376,7 @@ export function parseTreeEntriesFromData(content: Buffer): TreeEntry[] {
 		const sha = content.slice(shaStart, shaEnd).toString("hex");
 
 		// Determine type from mode
-		const type = mode === "040000" ? "tree" : "blob";
+		const type = mode === "040000" || mode === "40000" ? "tree" : "blob";
 
 		entries.push({
 			path: name,

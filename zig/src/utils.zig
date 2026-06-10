@@ -1,5 +1,12 @@
 const std = @import("std");
 
+const CachedPack = struct {
+    path: []const u8,
+    objects: std.ArrayList(@import("packfile.zig").PackObject),
+};
+
+var pack_cache: ?std.ArrayList(CachedPack) = null;
+
 pub fn hashFile(io: std.Io, allocator: std.mem.Allocator, file_path: []const u8) ![]const u8 {
     const cwd = std.Io.Dir.cwd();
     const file = try cwd.openFile(io, file_path, .{});
@@ -553,6 +560,11 @@ pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []
     };
     defer pack_dir.close(io);
 
+    if (pack_cache == null) {
+        pack_cache = std.ArrayList(CachedPack).initCapacity(std.heap.page_allocator, 0) catch unreachable;
+    }
+    var cache = &pack_cache.?;
+
     var dir_iter = pack_dir.iterate();
     while (try dir_iter.next(io)) |entry| {
         if (entry.kind != .file) continue;
@@ -562,29 +574,33 @@ pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []
         const pack_file_path = try std.fs.path.join(allocator, &[_][]const u8{ pack_dir_path, entry.name });
         defer allocator.free(pack_file_path);
 
-        const pack_file = cwd.openFile(io, pack_file_path, .{}) catch continue;
-        defer pack_file.close(io);
-
-        var pack_read_buffer: [flate.max_window_len]u8 = undefined;
-        var pack_file_reader = std.Io.File.Reader.init(pack_file, io, &pack_read_buffer);
-        var pack_writer: std.Io.Writer.Allocating = .init(allocator);
-        defer pack_writer.deinit();
-
-        _ = try pack_file_reader.interface.streamRemaining(&pack_writer.writer);
-
-        const pack_data = try pack_writer.toOwnedSlice();
-        defer allocator.free(pack_data);
-
-        const packfile = @import("packfile.zig");
-        var objects = packfile.parsePackfile(allocator, pack_data) catch continue;
-        defer {
-            for (objects.items) |obj| {
-                allocator.free(obj.obj_type);
-                allocator.free(obj.sha);
-                allocator.free(obj.content);
+        var cached_objects: ?std.ArrayList(@import("packfile.zig").PackObject) = null;
+        for (cache.items) |cached| {
+            if (std.mem.eql(u8, cached.path, pack_file_path)) {
+                cached_objects = cached.objects;
+                break;
             }
-            objects.deinit(allocator);
         }
+
+        const pf = @import("packfile.zig");
+        const objects = cached_objects orelse blk: {
+            const pack_file = cwd.openFile(io, pack_file_path, .{}) catch continue;
+            defer pack_file.close(io);
+
+            var pack_read_buffer: [flate.max_window_len]u8 = undefined;
+            var pack_file_reader = std.Io.File.Reader.init(pack_file, io, &pack_read_buffer);
+            var pack_writer: std.Io.Writer.Allocating = .init(allocator);
+            defer pack_writer.deinit();
+
+            _ = pack_file_reader.interface.streamRemaining(&pack_writer.writer) catch continue;
+            const pack_data = try pack_writer.toOwnedSlice();
+            defer allocator.free(pack_data);
+
+            const parsed = pf.parsePackfile(std.heap.page_allocator, pack_data) catch continue;
+            const cached_path = std.heap.page_allocator.dupe(u8, pack_file_path) catch continue;
+            cache.append(std.heap.page_allocator, .{ .path = cached_path, .objects = parsed }) catch continue;
+            break :blk parsed;
+        };
 
         for (objects.items) |obj| {
             if (std.mem.eql(u8, obj.sha, sha)) {
@@ -693,7 +709,7 @@ pub fn parseTreeEntries(allocator: std.mem.Allocator, tree_data: []const u8) !st
         }
 
         // Determine type from mode
-        const entry_type = if (std.mem.eql(u8, mode, "040000")) "tree" else "blob";
+        const entry_type = if (std.mem.eql(u8, mode, "040000") or std.mem.eql(u8, mode, "40000")) "tree" else "blob";
 
         try entries.append(allocator, .{
             .path = try allocator.dupe(u8, name_data),
@@ -750,7 +766,7 @@ pub fn parseTreeEntriesFromData(allocator: std.mem.Allocator, content: []const u
         }
 
         // Determine type from mode
-        const entry_type = if (std.mem.eql(u8, mode, "040000")) "tree" else "blob";
+        const entry_type = if (std.mem.eql(u8, mode, "040000") or std.mem.eql(u8, mode, "40000")) "tree" else "blob";
 
         try entries.append(allocator, .{
             .path = try allocator.dupe(u8, name_data),

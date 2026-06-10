@@ -9,6 +9,7 @@ namespace Gitologist;
 
 public static class Utils
 {
+    private static readonly Dictionary<string, List<PackObject>> _packfileCache = new();
     public static async Task<string> HashFile(string filePath)
     {
         var content = await File.ReadAllTextAsync(filePath);
@@ -383,8 +384,12 @@ public static class Utils
             var packFiles = Directory.GetFiles(packDir, "*.pack");
             foreach (var packFile in packFiles)
             {
-                var packData = await File.ReadAllBytesAsync(packFile);
-                var objects = Packfile.ParsePackfile(packData);
+                if (!_packfileCache.TryGetValue(packFile, out var objects))
+                {
+                    var packData = await File.ReadAllBytesAsync(packFile);
+                    objects = Packfile.ParsePackfile(packData);
+                    _packfileCache[packFile] = objects;
+                }
 
                 foreach (var obj in objects)
                 {
@@ -499,7 +504,7 @@ public static class Utils
             var sha = Convert.ToHexString(shaBytes).ToLowerInvariant();
 
             // Determine type from mode
-            var type = mode == "040000" ? "tree" : "blob";
+            var type = mode == "040000" || mode == "40000" ? "tree" : "blob";
 
             entries.Add(
                 new TreeEntry
@@ -558,7 +563,7 @@ public static class Utils
             var sha = Convert.ToHexString(shaBytes).ToLowerInvariant();
 
             // Determine type from mode
-            var type = mode == "040000" ? "tree" : "blob";
+            var type = mode == "040000" || mode == "40000" ? "tree" : "blob";
 
             entries.Add(
                 new TreeEntry

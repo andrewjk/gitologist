@@ -308,6 +308,8 @@ func updateBranch(at gitDir: String, branchName: String, commitSha: String) asyn
 	try "\(commitSha)\n".write(to: branchPath, atomically: true, encoding: .utf8)
 }
 
+private nonisolated(unsafe) let packfileCache = NSCache<NSString, NSArray>()
+
 func readObjectData(at gitDir: String, sha: String) async throws -> Data {
 	let objectPath = URL(fileURLWithPath: gitDir)
 		.appendingPathComponent("objects")
@@ -330,10 +332,19 @@ func readObjectData(at gitDir: String, sha: String) async throws -> Data {
 	}
 
 	for packFile in packFiles {
-		guard let packData = try? Data(contentsOf: packFile),
-		      let objects = try? parsePackfile(packData)
-		else {
-			continue
+		let cacheKey = packFile.path as NSString
+		let objects: [PackObject]
+
+		if let cached = packfileCache.object(forKey: cacheKey) {
+			objects = cached as! [PackObject]
+		} else {
+			guard let packData = try? Data(contentsOf: packFile),
+			      let parsed = try? parsePackfile(packData)
+			else {
+				continue
+			}
+			objects = parsed
+			packfileCache.setObject(objects as NSArray, forKey: cacheKey)
 		}
 
 		for obj in objects {
@@ -534,7 +545,7 @@ func parseTreeEntriesFromData(_ content: Data) throws -> [TreeEntry] {
 		let sha = shaData.map { String(format: "%02x", $0) }.joined()
 
 		// Determine type from mode
-		let type: TreeEntryType = mode == "040000" ? .tree : .blob
+		let type: TreeEntryType = (mode == "40000" || mode == "040000") ? .tree : .blob
 
 		entries.append(TreeEntry(
 			path: name,
