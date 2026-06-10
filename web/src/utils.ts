@@ -7,10 +7,14 @@ import type { PackObject } from "./packfile.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
 
-const packfileCache = new Map<string, PackObject[]>();
+export type PackfileCache = Map<string, PackObject[]>;
 
-export async function readObject(gitDir: string, sha: string): Promise<string> {
-	const data = await readObjectData(gitDir, sha);
+export async function readObject(
+	gitDir: string,
+	sha: string,
+	cache: PackfileCache,
+): Promise<string> {
+	const data = await readObjectData(gitDir, sha, cache);
 
 	const nullIndex = data.indexOf(0);
 	const header = data.slice(0, nullIndex).toString("utf-8");
@@ -27,7 +31,11 @@ export async function readObject(gitDir: string, sha: string): Promise<string> {
 	return `${header}\n${content.toString("utf-8")}`;
 }
 
-export async function readObjectData(gitDir: string, sha: string): Promise<Buffer> {
+export async function readObjectData(
+	gitDir: string,
+	sha: string,
+	cache: PackfileCache,
+): Promise<Buffer> {
 	const zlib = await import("node:zlib");
 
 	const objectPath = join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
@@ -46,11 +54,11 @@ export async function readObjectData(gitDir: string, sha: string): Promise<Buffe
 
 		for (const packFile of packFiles) {
 			const packPath = join(packDir, packFile);
-			let objects = packfileCache.get(packPath);
+			let objects = cache.get(packPath);
 			if (!objects) {
 				const packData = await readFile(packPath);
 				objects = parsePackfile(packData);
-				packfileCache.set(packPath, objects);
+				cache.set(packPath, objects);
 			}
 
 			for (const obj of objects) {
@@ -417,9 +425,10 @@ export async function updateIndex(
 	gitDir: string,
 	workingPath: string,
 	treeSha: string,
+	cache: PackfileCache,
 ): Promise<void> {
 	const indexPath = join(gitDir, "index");
-	const treeData = await readObject(gitDir, treeSha);
+	const treeData = await readObject(gitDir, treeSha, cache);
 	const entries = parseTreeEntries(treeData);
 
 	const newIndex = new Map<string, IndexEntry>();

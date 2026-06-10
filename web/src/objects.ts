@@ -3,18 +3,20 @@ import { join } from "node:path";
 
 import type { PackObject } from "./packfile.ts";
 import { parseTreeEntriesFromData, readObject, readObjectData } from "./utils.ts";
+import type { PackfileCache } from "./utils.ts";
 
 export async function enumerateObjects(
 	gitDir: string,
 	sha: string,
 	visited: Set<string> = new Set(),
+	cache: PackfileCache = new Map(),
 ): Promise<PackObject[]> {
 	if (visited.has(sha)) {
 		return [];
 	}
 	visited.add(sha);
 
-	const objectData = await readObjectData(gitDir, sha);
+	const objectData = await readObjectData(gitDir, sha, cache);
 	const nullIndex = objectData.indexOf(0);
 
 	if (nullIndex === -1) {
@@ -48,18 +50,18 @@ export async function enumerateObjects(
 		for (const line of lines) {
 			if (line.startsWith("parent ")) {
 				const parentSha = line.slice(7);
-				const parentObjects = await enumerateObjects(gitDir, parentSha, visited);
+				const parentObjects = await enumerateObjects(gitDir, parentSha, visited, cache);
 				objects.push(...parentObjects);
 			} else if (line.startsWith("tree ")) {
 				const treeSha = line.slice(5);
-				const treeObjects = await enumerateObjects(gitDir, treeSha, visited);
+				const treeObjects = await enumerateObjects(gitDir, treeSha, visited, cache);
 				objects.push(...treeObjects);
 			}
 		}
 	} else if (type === "tree") {
 		const entries = parseTreeEntriesFromData(contentData);
 		for (const entry of entries) {
-			const entryObjects = await enumerateObjects(gitDir, entry.sha, visited);
+			const entryObjects = await enumerateObjects(gitDir, entry.sha, visited, cache);
 			objects.push(...entryObjects);
 		}
 	}
@@ -67,7 +69,10 @@ export async function enumerateObjects(
 	return objects;
 }
 
-export async function getAllObjects(gitDir: string): Promise<PackObject[]> {
+export async function getAllObjects(
+	gitDir: string,
+	cache: PackfileCache = new Map(),
+): Promise<PackObject[]> {
 	const objectsDir = join(gitDir, "objects");
 	const objects: PackObject[] = [];
 
@@ -87,7 +92,7 @@ export async function getAllObjects(gitDir: string): Promise<PackObject[]> {
 		for (const file of files) {
 			const sha = dir + file;
 			try {
-				const objectData = await readObject(gitDir, sha);
+				const objectData = await readObject(gitDir, sha, cache);
 				const headerEnd = objectData.indexOf("\n");
 				const header = objectData.slice(0, headerEnd);
 				const content = objectData.slice(headerEnd + 1);

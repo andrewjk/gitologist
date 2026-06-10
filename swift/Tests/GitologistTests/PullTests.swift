@@ -264,6 +264,7 @@ struct PullTests {
 		try "modified".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
 		try await add(at: testDirPath.path, files: ["test.txt"])
 		let secondSha = try await commit(at: testDirPath.path, message: "Second commit")
+		_ = secondSha
 
 		try await push(at: testDirPath.path)
 
@@ -306,6 +307,7 @@ struct PullTests {
 		try "modified1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
 		try await add(at: testDirPath.path, files: ["file1.txt"])
 		let secondSha = try await commit(at: testDirPath.path, message: "Second commit")
+		_ = secondSha
 
 		try await push(at: testDirPath.path)
 

@@ -23,21 +23,23 @@ public static class Restore
             }
         }
 
+        var cache = new Utils.PackfileCache();
+
         var branchPath = Path.Combine(gitDir, "refs", "heads", "main");
         var commitSha = (await File.ReadAllTextAsync(branchPath)).Trim();
 
-        var commitData = await Utils.ReadObject(gitDir, commitSha);
+        var commitData = await Utils.ReadObject(gitDir, commitSha, cache);
         var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
         foreach (var file in files)
         {
-            var blobSha = await FindBlobInTree(gitDir, treeSha, file);
+            var blobSha = await FindBlobInTree(gitDir, treeSha, file, cache);
             if (blobSha == null)
             {
                 throw new InvalidOperationException($"File not in commit: {file}");
             }
 
-            var blobData = await Utils.ReadObject(gitDir, blobSha);
+            var blobData = await Utils.ReadObject(gitDir, blobSha, cache);
             var content = Utils.ExtractContentFromBlob(blobData);
             var filePath = Path.Combine(path, file);
             await File.WriteAllTextAsync(filePath, content);
@@ -67,14 +69,15 @@ public static class Restore
     private static async Task<string?> FindBlobInTree(
         string gitDir,
         string treeSha,
-        string filePath
+        string filePath,
+        Utils.PackfileCache cache
     )
     {
         var parts = filePath.Split('/');
         var name = parts[0];
         var rest = parts.Skip(1).ToArray();
 
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, cache);
         var entries = Utils.ParseTreeEntries(treeData);
 
         foreach (var entry in entries)
@@ -98,7 +101,8 @@ public static class Restore
                         return await FindBlobInTree(
                                 gitDir,
                                 entry.Sha,
-                                string.Join("/", rest)
+                                string.Join("/", rest),
+                                cache
                             );
                     }
 

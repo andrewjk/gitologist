@@ -17,6 +17,8 @@ public static class Merge
             throw new InvalidOperationException("Not a git repository");
         }
 
+        var cache = new Utils.PackfileCache();
+
         var currentBranch = await Utils.GetCurrentBranch(gitDir);
         if (currentBranch == branchName)
         {
@@ -46,7 +48,7 @@ public static class Merge
             };
         }
 
-        var isAncestor = await IsAncestorOf(gitDir, currentSha, branchSha);
+        var isAncestor = await IsAncestorOf(gitDir, currentSha, branchSha, cache);
 
         if (isAncestor && !(options?.NoFastForward ?? false))
         {
@@ -60,7 +62,7 @@ public static class Merge
             };
         }
 
-        var mergeBase = await FindMergeBase(gitDir, currentSha, branchSha);
+        var mergeBase = await FindMergeBase(gitDir, currentSha, branchSha, cache);
 
         if (mergeBase == branchSha)
         {
@@ -74,7 +76,7 @@ public static class Merge
 
         var mergeMessage = options?.Message ?? $"Merge branch '{branchName}' into '{currentBranch}'";
 
-        var mergeCommitSha = await CreateMergeCommit(gitDir, currentSha, branchSha, mergeMessage);
+        var mergeCommitSha = await CreateMergeCommit(gitDir, currentSha, branchSha, mergeMessage, cache);
 
         await Utils.UpdateBranch(gitDir, currentBranch, mergeCommitSha);
 
@@ -102,7 +104,8 @@ public static class Merge
     private static async Task<bool> IsAncestorOf(
         string gitDir,
         string ancestorSha,
-        string descendantSha
+        string descendantSha,
+        Utils.PackfileCache cache
     )
     {
         var visited = new HashSet<string>();
@@ -124,7 +127,7 @@ public static class Merge
             }
             visited.Add(current);
 
-            var parents = await GetParents(gitDir, current);
+            var parents = await GetParents(gitDir, current, cache);
             foreach (var parent in parents)
             {
                 queue.Enqueue(parent);
@@ -134,15 +137,15 @@ public static class Merge
         return false;
     }
 
-    private static async Task<string?> FindMergeBase(string gitDir, string sha1, string sha2)
+    private static async Task<string?> FindMergeBase(string gitDir, string sha1, string sha2, Utils.PackfileCache cache)
     {
         if (sha1 == sha2)
         {
             return sha1;
         }
 
-        var ancestors1 = await GetAllAncestors(gitDir, sha1);
-        var ancestors2 = await GetAllAncestors(gitDir, sha2);
+        var ancestors1 = await GetAllAncestors(gitDir, sha1, cache);
+        var ancestors2 = await GetAllAncestors(gitDir, sha2, cache);
 
         ancestors1.Add(sha1);
         ancestors2.Add(sha2);
@@ -158,7 +161,7 @@ public static class Merge
         return null;
     }
 
-    private static async Task<HashSet<string>> GetAllAncestors(string gitDir, string sha)
+    private static async Task<HashSet<string>> GetAllAncestors(string gitDir, string sha, Utils.PackfileCache cache)
     {
         var ancestors = new HashSet<string>();
         var queue = new Queue<string>();
@@ -173,7 +176,7 @@ public static class Merge
                 continue;
             }
 
-            var parents = await GetParents(gitDir, current);
+            var parents = await GetParents(gitDir, current, cache);
             foreach (var parent in parents)
             {
                 ancestors.Add(parent);
@@ -184,11 +187,11 @@ public static class Merge
         return ancestors;
     }
 
-    private static async Task<List<string>> GetParents(string gitDir, string sha)
+    private static async Task<List<string>> GetParents(string gitDir, string sha, Utils.PackfileCache cache)
     {
         try
         {
-            var commitData = await Utils.ReadObject(gitDir, sha);
+            var commitData = await Utils.ReadObject(gitDir, sha, cache);
             var parents = new List<string>();
             var lines = commitData.Split('\n');
 
@@ -208,11 +211,11 @@ public static class Merge
         }
     }
 
-    private static async Task<string?> GetTree(string gitDir, string sha)
+    private static async Task<string?> GetTree(string gitDir, string sha, Utils.PackfileCache cache)
     {
         try
         {
-            var commitData = await Utils.ReadObject(gitDir, sha);
+            var commitData = await Utils.ReadObject(gitDir, sha, cache);
             return Utils.ExtractTreeFromCommit(commitData);
         }
         catch
@@ -225,10 +228,11 @@ public static class Merge
         string gitDir,
         string parent1,
         string parent2,
-        string message
+        string message,
+        Utils.PackfileCache cache
     )
     {
-        var treeSha = await GetTree(gitDir, parent1);
+        var treeSha = await GetTree(gitDir, parent1, cache);
 
         if (string.IsNullOrEmpty(treeSha))
         {

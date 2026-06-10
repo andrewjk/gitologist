@@ -15,6 +15,7 @@ import {
 	parseTreeEntries,
 	readObject,
 	updateBranch,
+	type PackfileCache,
 } from "./utils.ts";
 
 export async function pull(
@@ -42,13 +43,15 @@ export async function pull(
 	const remoteCommitSha = (await readFile(remoteBranchPath, "utf-8")).trim();
 	const currentCommitSha = await getCurrentCommit(gitDir);
 
+	let cache = new Map();
+
 	if (!currentCommitSha) {
 		await updateBranch(gitDir, branchName, remoteCommitSha);
-		const commitData = await readObject(gitDir, remoteCommitSha);
+		const commitData = await readObject(gitDir, remoteCommitSha, cache);
 		const treeSha = extractTreeFromCommit(commitData);
 
-		await extractTreeToWorkingDirectory(gitDir, path, treeSha, new Map());
-		await updateIndex(gitDir, path, treeSha);
+		await extractTreeToWorkingDirectory(gitDir, path, treeSha, new Map(), cache);
+		await updateIndex(gitDir, path, treeSha, cache);
 		return;
 	}
 
@@ -56,23 +59,25 @@ export async function pull(
 		return;
 	}
 
-	const isAncestor = await isAncestorOf(gitDir, currentCommitSha, remoteCommitSha);
+	const isAncestor = await isAncestorOf(gitDir, currentCommitSha, remoteCommitSha, cache);
 
-	const currentTreeSha = await getTree(gitDir, currentCommitSha);
-	const currentBlobs = currentTreeSha ? await getTreeBlobs(gitDir, currentTreeSha) : new Map();
+	const currentTreeSha = await getTree(gitDir, currentCommitSha, cache);
+	const currentBlobs = currentTreeSha
+		? await getTreeBlobs(gitDir, currentTreeSha, undefined, cache)
+		: new Map();
 
 	if (isAncestor) {
 		await updateBranch(gitDir, branchName, remoteCommitSha);
-		const commitData = await readObject(gitDir, remoteCommitSha);
+		const commitData = await readObject(gitDir, remoteCommitSha, cache);
 		const treeSha = extractTreeFromCommit(commitData);
 
-		await checkForLocalChanges(gitDir, path, currentBlobs, treeSha);
-		await extractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs);
-		await updateIndex(gitDir, path, treeSha);
+		await checkForLocalChanges(gitDir, path, currentBlobs, treeSha, cache);
+		await extractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs, cache);
+		await updateIndex(gitDir, path, treeSha, cache);
 		return;
 	}
 
-	const mergeBase = await findMergeBase(gitDir, currentCommitSha, remoteCommitSha);
+	const mergeBase = await findMergeBase(gitDir, currentCommitSha, remoteCommitSha, cache);
 
 	if (mergeBase === remoteCommitSha) {
 		return;
@@ -83,24 +88,26 @@ export async function pull(
 		currentCommitSha,
 		remoteCommitSha,
 		`Merge branch '${branchName}' of ${remoteName}`,
+		cache,
 	);
 
 	await updateBranch(gitDir, branchName, mergeCommitSha);
-	const commitData = await readObject(gitDir, mergeCommitSha);
+	const commitData = await readObject(gitDir, mergeCommitSha, cache);
 	const treeSha = extractTreeFromCommit(commitData);
 
-	await checkForLocalChanges(gitDir, path, currentBlobs, treeSha);
-	await extractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs);
-	await updateIndex(gitDir, path, treeSha);
+	await checkForLocalChanges(gitDir, path, currentBlobs, treeSha, cache);
+	await extractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs, cache);
+	await updateIndex(gitDir, path, treeSha, cache);
 }
 
 async function getTreeBlobs(
 	gitDir: string,
 	treeSha: string,
 	prefix: string = "",
+	cache: PackfileCache,
 ): Promise<Map<string, string>> {
 	const blobs = new Map<string, string>();
-	const treeData = await readObject(gitDir, treeSha);
+	const treeData = await readObject(gitDir, treeSha, cache);
 	const entries = parseTreeEntries(treeData);
 
 	for (const entry of entries) {
@@ -108,7 +115,7 @@ async function getTreeBlobs(
 		if (entry.type === "blob") {
 			blobs.set(path, entry.sha);
 		} else if (entry.type === "tree") {
-			const childBlobs = await getTreeBlobs(gitDir, entry.sha, path);
+			const childBlobs = await getTreeBlobs(gitDir, entry.sha, path, cache);
 			for (const [childPath, childSha] of childBlobs) {
 				blobs.set(childPath, childSha);
 			}
@@ -123,10 +130,11 @@ async function checkForLocalChanges(
 	workingPath: string,
 	currentBlobs: Map<string, string>,
 	newTreeSha: string,
+	cache: PackfileCache,
 ): Promise<void> {
 	const indexPath = join(gitDir, "index");
 	const index = await getIndex(indexPath);
-	const newBlobs = await getTreeBlobs(gitDir, newTreeSha);
+	const newBlobs = await getTreeBlobs(gitDir, newTreeSha, undefined, cache);
 
 	// Check if any files that will be changed have uncommitted modifications
 	for (const [path, newSha] of newBlobs) {
@@ -160,8 +168,9 @@ async function extractTreeToWorkingDirectory(
 	workingPath: string,
 	treeSha: string,
 	currentBlobs: Map<string, string>,
+	cache: PackfileCache,
 ): Promise<void> {
-	await extractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs);
+	await extractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs, cache);
 }
 
 async function extractTreeRecursive(
@@ -170,8 +179,9 @@ async function extractTreeRecursive(
 	treeSha: string,
 	prefix: string,
 	currentBlobs: Map<string, string>,
+	cache: PackfileCache,
 ): Promise<void> {
-	const treeData = await readObject(gitDir, treeSha);
+	const treeData = await readObject(gitDir, treeSha, cache);
 	const entries = parseTreeEntries(treeData);
 
 	for (const entry of entries) {
@@ -183,7 +193,7 @@ async function extractTreeRecursive(
 			if (currentSha === entry.sha) {
 				continue;
 			}
-			const blobData = await readObject(gitDir, entry.sha);
+			const blobData = await readObject(gitDir, entry.sha, cache);
 			const content = extractContentFromBlob(blobData);
 			await writeFile(entryPath, content, "utf-8");
 		} else if (entry.type === "tree") {
@@ -196,16 +206,22 @@ async function extractTreeRecursive(
 				entry.sha,
 				prefix ? `${prefix}/${entry.path}` : entry.path,
 				currentBlobs,
+				cache,
 			);
 		}
 	}
 }
 
-async function updateIndex(gitDir: string, workingPath: string, treeSha: string): Promise<void> {
+async function updateIndex(
+	gitDir: string,
+	workingPath: string,
+	treeSha: string,
+	cache: PackfileCache,
+): Promise<void> {
 	const indexPath = join(gitDir, "index");
 
 	let indexContent = "";
-	indexContent = await updateIndexRecursive(gitDir, treeSha, "", indexContent);
+	indexContent = await updateIndexRecursive(gitDir, treeSha, "", indexContent, cache);
 
 	await writeFile(indexPath, indexContent + "\n", "utf-8");
 }
@@ -215,14 +231,15 @@ async function updateIndexRecursive(
 	treeSha: string,
 	prefix: string,
 	indexContent: string,
+	cache: PackfileCache,
 ): Promise<string> {
-	const treeData = await readObject(gitDir, treeSha);
+	const treeData = await readObject(gitDir, treeSha, cache);
 	const entries = parseTreeEntries(treeData);
 	let content = indexContent;
 
 	for (const entry of entries) {
 		if (entry.type === "blob") {
-			const blobData = await readObject(gitDir, entry.sha);
+			const blobData = await readObject(gitDir, entry.sha, cache);
 			const fileContent = extractContentFromBlob(blobData);
 			// Use git blob hash format (with "blob <size>\0" header)
 			const crypto = await import("node:crypto");
@@ -237,6 +254,7 @@ async function updateIndexRecursive(
 				entry.sha,
 				prefix ? `${prefix}/${entry.path}` : entry.path,
 				content,
+				cache,
 			);
 		}
 	}
@@ -248,6 +266,7 @@ async function isAncestorOf(
 	gitDir: string,
 	ancestorSha: string,
 	descendantSha: string,
+	cache: PackfileCache,
 ): Promise<boolean> {
 	const visited = new Set<string>();
 	const queue: string[] = [descendantSha];
@@ -264,20 +283,25 @@ async function isAncestorOf(
 		}
 		visited.add(current);
 
-		const parents = await getParents(gitDir, current);
+		const parents = await getParents(gitDir, current, cache);
 		queue.push(...parents);
 	}
 
 	return false;
 }
 
-async function findMergeBase(gitDir: string, sha1: string, sha2: string): Promise<string | null> {
+async function findMergeBase(
+	gitDir: string,
+	sha1: string,
+	sha2: string,
+	cache: PackfileCache,
+): Promise<string | null> {
 	if (sha1 === sha2) {
 		return sha1;
 	}
 
-	const ancestors1 = await getAllAncestors(gitDir, sha1);
-	const ancestors2 = await getAllAncestors(gitDir, sha2);
+	const ancestors1 = await getAllAncestors(gitDir, sha1, cache);
+	const ancestors2 = await getAllAncestors(gitDir, sha2, cache);
 
 	ancestors1.add(sha1);
 	ancestors2.add(sha2);
@@ -291,7 +315,11 @@ async function findMergeBase(gitDir: string, sha1: string, sha2: string): Promis
 	return null;
 }
 
-async function getAllAncestors(gitDir: string, sha: string): Promise<Set<string>> {
+async function getAllAncestors(
+	gitDir: string,
+	sha: string,
+	cache: PackfileCache,
+): Promise<Set<string>> {
 	const ancestors = new Set<string>();
 	const queue: string[] = [sha];
 
@@ -302,7 +330,7 @@ async function getAllAncestors(gitDir: string, sha: string): Promise<Set<string>
 			continue;
 		}
 
-		const parents = await getParents(gitDir, current);
+		const parents = await getParents(gitDir, current, cache);
 		for (const parent of parents) {
 			ancestors.add(parent);
 			queue.push(parent);
@@ -312,9 +340,9 @@ async function getAllAncestors(gitDir: string, sha: string): Promise<Set<string>
 	return ancestors;
 }
 
-async function getParents(gitDir: string, sha: string): Promise<string[]> {
+async function getParents(gitDir: string, sha: string, cache: PackfileCache): Promise<string[]> {
 	try {
-		const commitData = await readObject(gitDir, sha);
+		const commitData = await readObject(gitDir, sha, cache);
 		const parents: string[] = [];
 		const lines = commitData.split("\n");
 
@@ -330,9 +358,9 @@ async function getParents(gitDir: string, sha: string): Promise<string[]> {
 	}
 }
 
-async function getTree(gitDir: string, sha: string): Promise<string | null> {
+async function getTree(gitDir: string, sha: string, cache: PackfileCache): Promise<string | null> {
 	try {
-		const commitData = await readObject(gitDir, sha);
+		const commitData = await readObject(gitDir, sha, cache);
 		const lines = commitData.split("\n");
 
 		for (const line of lines) {
@@ -351,8 +379,9 @@ async function createMergeCommit(
 	parent1: string,
 	parent2: string,
 	message: string,
+	cache: PackfileCache,
 ): Promise<string> {
-	const treeSha = await getTree(gitDir, parent1);
+	const treeSha = await getTree(gitDir, parent1, cache);
 
 	if (!treeSha) {
 		throw new Error("Could not get tree for merge commit");

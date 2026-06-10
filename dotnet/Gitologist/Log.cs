@@ -14,6 +14,8 @@ public static class Log
             throw new InvalidOperationException("Not a git repository");
         }
 
+        var cache = new Utils.PackfileCache();
+
         var branchName = options?.Branch ?? await Utils.GetCurrentBranch(gitDir);
         var branchPath = Path.Combine(gitDir, "refs", "heads", branchName);
 
@@ -39,8 +41,8 @@ public static class Log
 
             while (currentSha != null)
             {
-                var entry = await ParseCommitEntry(gitDir, currentSha);
-                var currentBlobSha = await GetFileBlobSha(gitDir, entry.Tree, options.File!, treeCache);
+                var entry = await ParseCommitEntry(gitDir, currentSha, cache);
+                var currentBlobSha = await GetFileBlobSha(gitDir, entry.Tree, options.File!, treeCache, cache);
 
                 if (entry.Parent == null)
                 {
@@ -51,8 +53,8 @@ public static class Log
                 }
                 else
                 {
-                    var parentEntry = await ParseCommitEntry(gitDir, entry.Parent);
-                    var parentBlobSha = await GetFileBlobSha(gitDir, parentEntry.Tree, options.File!, treeCache);
+                    var parentEntry = await ParseCommitEntry(gitDir, entry.Parent, cache);
+                    var parentBlobSha = await GetFileBlobSha(gitDir, parentEntry.Tree, options.File!, treeCache, cache);
                     if (currentBlobSha != parentBlobSha)
                     {
                         entries.Add(entry);
@@ -68,7 +70,7 @@ public static class Log
 
         while (currentSha != null && entries.Count < limit)
         {
-            var entry = await ParseCommitEntry(gitDir, currentSha);
+            var entry = await ParseCommitEntry(gitDir, currentSha, cache);
             entries.Add(entry);
             currentSha = entry.Parent;
         }
@@ -76,14 +78,14 @@ public static class Log
         return entries;
     }
 
-    private static async Task<string?> GetFileBlobSha(string gitDir, string treeSha, string filePath, Dictionary<string, string?> cache)
+    private static async Task<string?> GetFileBlobSha(string gitDir, string treeSha, string filePath, Dictionary<string, string?> cache, Utils.PackfileCache packCache)
     {
         if (cache.ContainsKey(treeSha))
         {
             return cache[treeSha];
         }
 
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, packCache);
         var hexContent = treeData.Split('\n').Skip(1).Aggregate("", (a, b) => a + b);
         var content = Convert.FromHexString(hexContent);
         var entries = Utils.ParseTreeEntriesFromData(content);
@@ -105,7 +107,7 @@ public static class Log
                 return null;
             }
 
-            var subTreeData = await Utils.ReadObject(gitDir, current.Sha);
+            var subTreeData = await Utils.ReadObject(gitDir, current.Sha, packCache);
             var subHexContent = subTreeData.Split('\n').Skip(1).Aggregate("", (a, b) => a + b);
             var subContent = Convert.FromHexString(subHexContent);
             var subEntries = Utils.ParseTreeEntriesFromData(subContent);
@@ -122,9 +124,9 @@ public static class Log
         return current.Sha;
     }
 
-    private static async Task<LogEntry> ParseCommitEntry(string gitDir, string commitSha)
+    private static async Task<LogEntry> ParseCommitEntry(string gitDir, string commitSha, Utils.PackfileCache cache)
     {
-        var commitData = await Utils.ReadObject(gitDir, commitSha);
+        var commitData = await Utils.ReadObject(gitDir, commitSha, cache);
 
         var tree = ExtractField(commitData, "tree") ?? "";
         var parent = ExtractField(commitData, "parent");

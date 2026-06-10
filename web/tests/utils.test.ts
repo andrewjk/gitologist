@@ -37,7 +37,7 @@ describe("utils", () => {
 			const content = "hello world";
 			const sha = await hashObject(gitDir, content, "blob");
 
-			const data = await readObjectData(gitDir, sha);
+			const data = await readObjectData(gitDir, sha, new Map());
 			const header = data.slice(0, data.indexOf(0)).toString("utf-8");
 			const body = data.slice(data.indexOf(0) + 1).toString("utf-8");
 
@@ -61,7 +61,7 @@ describe("utils", () => {
 			await mkdir(packDir, { recursive: true });
 			await writeFile(join(packDir, "test.pack"), packfile);
 
-			const data = await readObjectData(gitDir, sha);
+			const data = await readObjectData(gitDir, sha, new Map());
 			const header = data.slice(0, data.indexOf(0)).toString("utf-8");
 			const body = data.slice(data.indexOf(0) + 1);
 
@@ -71,7 +71,7 @@ describe("utils", () => {
 
 		it("should throw error when object not found in loose objects or packfiles", async () => {
 			await expect(
-				readObjectData(gitDir, "0000000000000000000000000000000000000000"),
+				readObjectData(gitDir, "0000000000000000000000000000000000000000", new Map()),
 			).rejects.toThrow("Object not found");
 		});
 	});
@@ -95,7 +95,7 @@ describe("utils", () => {
 			await mkdir(packDir, { recursive: true });
 			await writeFile(join(packDir, "commits.pack"), packfile);
 
-			const data = await readObject(gitDir, sha);
+			const data = await readObject(gitDir, sha, new Map());
 			expect(data).toContain("commit");
 			expect(data).toContain("Initial commit");
 		});

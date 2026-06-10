@@ -308,9 +308,19 @@ func updateBranch(at gitDir: String, branchName: String, commitSha: String) asyn
 	try "\(commitSha)\n".write(to: branchPath, atomically: true, encoding: .utf8)
 }
 
-private nonisolated(unsafe) let packfileCache = NSCache<NSString, NSArray>()
+final class PackfileCache {
+	private let cache = NSCache<NSString, NSArray>()
 
-func readObjectData(at gitDir: String, sha: String) async throws -> Data {
+	func get(_ key: String) -> [PackObject]? {
+		cache.object(forKey: key as NSString) as? [PackObject]
+	}
+
+	func set(_ key: String, objects: [PackObject]) {
+		cache.setObject(objects as NSArray, forKey: key as NSString)
+	}
+}
+
+func readObjectData(at gitDir: String, sha: String, cache: PackfileCache) async throws -> Data {
 	let objectPath = URL(fileURLWithPath: gitDir)
 		.appendingPathComponent("objects")
 		.appendingPathComponent(String(sha.prefix(2)))
@@ -332,11 +342,11 @@ func readObjectData(at gitDir: String, sha: String) async throws -> Data {
 	}
 
 	for packFile in packFiles {
-		let cacheKey = packFile.path as NSString
+		let cacheKey = packFile.path
 		let objects: [PackObject]
 
-		if let cached = packfileCache.object(forKey: cacheKey) {
-			objects = cached as! [PackObject]
+		if let cached = cache.get(cacheKey) {
+			objects = cached
 		} else {
 			guard let packData = try? Data(contentsOf: packFile),
 			      let parsed = try? parsePackfile(packData)
@@ -344,7 +354,7 @@ func readObjectData(at gitDir: String, sha: String) async throws -> Data {
 				continue
 			}
 			objects = parsed
-			packfileCache.setObject(objects as NSArray, forKey: cacheKey)
+			cache.set(cacheKey, objects: objects)
 		}
 
 		for obj in objects {
@@ -358,8 +368,8 @@ func readObjectData(at gitDir: String, sha: String) async throws -> Data {
 	throw GitError.invalidIndexFile("Object not found: \(sha)")
 }
 
-func readObject(at gitDir: String, sha: String) async throws -> String {
-	let data = try await readObjectData(at: gitDir, sha: sha)
+func readObject(at gitDir: String, sha: String, cache: PackfileCache) async throws -> String {
+	let data = try await readObjectData(at: gitDir, sha: sha, cache: cache)
 
 	// Find the null byte separating header from content
 	guard let nullIndex = data.firstIndex(of: 0) else {

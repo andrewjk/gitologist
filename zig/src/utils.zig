@@ -1,11 +1,39 @@
 const std = @import("std");
 
-const CachedPack = struct {
-    path: []const u8,
-    objects: std.ArrayList(@import("packfile.zig").PackObject),
-};
+pub const PackfileCache = struct {
+    allocator: std.mem.Allocator,
+    entries: std.StringHashMap(std.ArrayList(@import("packfile.zig").PackObject)),
 
-var pack_cache: ?std.ArrayList(CachedPack) = null;
+    pub fn init(allocator: std.mem.Allocator) PackfileCache {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringHashMap(std.ArrayList(@import("packfile.zig").PackObject)).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *PackfileCache) void {
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            for (entry.value_ptr.items) |obj| {
+                self.allocator.free(obj.obj_type);
+                self.allocator.free(obj.sha);
+                self.allocator.free(obj.content);
+            }
+            entry.value_ptr.deinit(self.allocator);
+        }
+        self.entries.deinit();
+    }
+
+    pub fn get(self: *const PackfileCache, path: []const u8) ?std.ArrayList(@import("packfile.zig").PackObject) {
+        return self.entries.get(path);
+    }
+
+    pub fn put(self: *PackfileCache, path: []const u8, objects: std.ArrayList(@import("packfile.zig").PackObject)) !void {
+        const owned_path = try self.allocator.dupe(u8, path);
+        try self.entries.put(owned_path, objects);
+    }
+};
 
 pub fn hashFile(io: std.Io, allocator: std.mem.Allocator, file_path: []const u8) ![]const u8 {
     const cwd = std.Io.Dir.cwd();
@@ -494,8 +522,8 @@ pub const TreeEntry = struct {
     entry_type: []const u8,
 };
 
-pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) ![]const u8 {
-    const data = try readObjectData(io, allocator, git_dir_path, sha);
+pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *PackfileCache) ![]const u8 {
+    const data = try readObjectData(io, allocator, git_dir_path, sha, pack_cache);
 
     // Find the null byte separating header from content
     const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse {
@@ -528,7 +556,7 @@ pub fn readObject(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
     return data;
 }
 
-pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) ![]const u8 {
+pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *PackfileCache) ![]const u8 {
     const flate = std.compress.flate;
 
     const obj_dir = sha[0..2];
@@ -560,11 +588,6 @@ pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []
     };
     defer pack_dir.close(io);
 
-    if (pack_cache == null) {
-        pack_cache = std.ArrayList(CachedPack).initCapacity(std.heap.page_allocator, 0) catch unreachable;
-    }
-    var cache = &pack_cache.?;
-
     var dir_iter = pack_dir.iterate();
     while (try dir_iter.next(io)) |entry| {
         if (entry.kind != .file) continue;
@@ -574,16 +597,11 @@ pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []
         const pack_file_path = try std.fs.path.join(allocator, &[_][]const u8{ pack_dir_path, entry.name });
         defer allocator.free(pack_file_path);
 
-        var cached_objects: ?std.ArrayList(@import("packfile.zig").PackObject) = null;
-        for (cache.items) |cached| {
-            if (std.mem.eql(u8, cached.path, pack_file_path)) {
-                cached_objects = cached.objects;
-                break;
-            }
-        }
-
         const pf = @import("packfile.zig");
-        const objects = cached_objects orelse blk: {
+        const cached = pack_cache.get(pack_file_path);
+
+        var did_cache = false;
+        var objects = cached orelse blk: {
             const pack_file = cwd.openFile(io, pack_file_path, .{}) catch continue;
             defer pack_file.close(io);
 
@@ -596,11 +614,22 @@ pub fn readObjectData(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []
             const pack_data = try pack_writer.toOwnedSlice();
             defer allocator.free(pack_data);
 
-            const parsed = pf.parsePackfile(std.heap.page_allocator, pack_data) catch continue;
-            const cached_path = std.heap.page_allocator.dupe(u8, pack_file_path) catch continue;
-            cache.append(std.heap.page_allocator, .{ .path = cached_path, .objects = parsed }) catch continue;
+            const parsed = pf.parsePackfile(allocator, pack_data) catch continue;
+            pack_cache.put(pack_file_path, parsed) catch {};
+            did_cache = true;
             break :blk parsed;
         };
+
+        defer {
+            if (!did_cache) {
+                for (objects.items) |obj| {
+                    allocator.free(obj.obj_type);
+                    allocator.free(obj.sha);
+                    allocator.free(obj.content);
+                }
+                objects.deinit(allocator);
+            }
+        }
 
         for (objects.items) |obj| {
             if (std.mem.eql(u8, obj.sha, sha)) {

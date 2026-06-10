@@ -16,6 +16,7 @@ import {
 	parseTreeEntries,
 	readObject,
 	updateIndex,
+	type PackfileCache,
 } from "./utils.ts";
 
 export async function stash(path: string, message: string = "WIP"): Promise<string> {
@@ -35,11 +36,13 @@ export async function stash(path: string, message: string = "WIP"): Promise<stri
 	const indexPath = join(gitDir, "index");
 	let index = await getIndex(indexPath);
 
-	const headCommitData = await readObject(gitDir, headCommitSha);
+	let cache = new Map();
+
+	const headCommitData = await readObject(gitDir, headCommitSha, cache);
 	const headTreeSha = extractTreeFromCommit(headCommitData);
 	const headTreeEntries = new Map<string, string>();
 
-	const headEntries = parseTreeEntries(await readObject(gitDir, headTreeSha));
+	const headEntries = parseTreeEntries(await readObject(gitDir, headTreeSha, cache));
 	for (const entry of headEntries) {
 		headTreeEntries.set(entry.path, entry.sha);
 	}
@@ -83,7 +86,7 @@ export async function stash(path: string, message: string = "WIP"): Promise<stri
 	await mkdir(dirname(stashRefPath), { recursive: true });
 	await writeFile(stashRefPath, `${stashCommitSha}\n`, "utf-8");
 
-	await resetHard(path, gitDir, headCommitSha);
+	await resetHard(path, gitDir, headCommitSha, cache);
 
 	return stashCommitSha;
 }
@@ -234,20 +237,25 @@ async function createCommit(
 	return hashObject(gitDir, commitContent, "commit");
 }
 
-async function resetHard(path: string, gitDir: string, commitSha: string): Promise<void> {
-	const commitData = await readObject(gitDir, commitSha);
+async function resetHard(
+	path: string,
+	gitDir: string,
+	commitSha: string,
+	cache: PackfileCache,
+): Promise<void> {
+	const commitData = await readObject(gitDir, commitSha, cache);
 	const treeSha = extractTreeFromCommit(commitData);
 
 	const gitignore = new IgnoreParser();
 	await gitignore.loadGitignore(path);
 
-	const targetEntries = await flattenTree(gitDir, treeSha);
+	const targetEntries = await flattenTree(gitDir, treeSha, "", cache);
 
-	await resetHardRecursive(path, path, gitDir, gitignore, targetEntries);
+	await resetHardRecursive(path, path, gitDir, gitignore, targetEntries, cache);
 
 	// Create any remaining target files
 	for (const [filePath, sha] of targetEntries) {
-		const blobData = await readObject(gitDir, sha);
+		const blobData = await readObject(gitDir, sha, cache);
 		const content = extractContentFromBlob(blobData);
 		const fullPath = join(path, filePath);
 		const { mkdir: mkdirAsync } = await import("node:fs/promises");
@@ -255,7 +263,7 @@ async function resetHard(path: string, gitDir: string, commitSha: string): Promi
 		await writeFile(fullPath, content, "utf-8");
 	}
 
-	await updateIndex(gitDir, path, treeSha);
+	await updateIndex(gitDir, path, treeSha, cache);
 }
 
 async function resetHardRecursive(
@@ -264,6 +272,7 @@ async function resetHardRecursive(
 	gitDir: string,
 	gitignore: IgnoreParser,
 	targetEntries: Map<string, string>,
+	cache: PackfileCache,
 ): Promise<void> {
 	const { readdir } = await import("node:fs/promises");
 	const entries = await readdir(currentDir, { withFileTypes: true });
@@ -297,7 +306,7 @@ async function resetHardRecursive(
 				continue;
 			}
 
-			await resetHardRecursive(repoPath, fullPath, gitDir, gitignore, targetEntries);
+			await resetHardRecursive(repoPath, fullPath, gitDir, gitignore, targetEntries, cache);
 		} else {
 			const targetSha = targetEntries.get(relPath);
 			if (targetSha) {
@@ -305,7 +314,7 @@ async function resetHardRecursive(
 				const currentHash = await hashObject(gitDir, currentContent, "blob");
 
 				if (currentHash !== targetSha) {
-					const blobData = await readObject(gitDir, targetSha);
+					const blobData = await readObject(gitDir, targetSha, cache);
 					const content = extractContentFromBlob(blobData);
 					await writeFile(fullPath, content, "utf-8");
 				}
@@ -327,22 +336,23 @@ async function restoreTree(
 	gitDir: string,
 	treeSha: string,
 	prefix: string,
+	cache: PackfileCache,
 ): Promise<void> {
-	const treeData = await readObject(gitDir, treeSha);
+	const treeData = await readObject(gitDir, treeSha, cache);
 	const entries = parseTreeEntries(treeData);
 
 	for (const entry of entries) {
 		const entryPath = prefix === "" ? entry.path : `${prefix}/${entry.path}`;
 
 		if (entry.type === "blob") {
-			const blobData = await readObject(gitDir, entry.sha);
+			const blobData = await readObject(gitDir, entry.sha, cache);
 			const content = extractContentFromBlob(blobData);
 			const fullPath = join(path, entryPath);
 			const { mkdir } = await import("node:fs/promises");
 			await mkdir(dirname(fullPath), { recursive: true });
 			await writeFile(fullPath, content, "utf-8");
 		} else if (entry.type === "tree") {
-			await restoreTree(path, gitDir, entry.sha, entryPath);
+			await restoreTree(path, gitDir, entry.sha, entryPath, cache);
 		}
 	}
 }
@@ -362,32 +372,34 @@ export async function unstash(path: string): Promise<void> {
 
 	const stashCommitSha = (await readFile(stashRefPath, "utf-8")).trim();
 
-	const stashCommitData = await readObject(gitDir, stashCommitSha);
+	let cache = new Map();
+
+	const stashCommitData = await readObject(gitDir, stashCommitSha, cache);
 	const stashTreeSha = extractTreeFromCommit(stashCommitData);
 
 	const mergeBaseSha = extractParentFromCommit(stashCommitData);
 
 	if (!mergeBaseSha) {
-		await restoreTree(path, gitDir, stashTreeSha, "");
+		await restoreTree(path, gitDir, stashTreeSha, "", cache);
 		return;
 	}
 
-	const mergeBaseTreeData = await readObject(gitDir, mergeBaseSha);
+	const mergeBaseTreeData = await readObject(gitDir, mergeBaseSha, cache);
 	const mergeBaseTreeSha = extractTreeFromCommit(mergeBaseTreeData);
-	const mergeBaseEntries = await flattenTree(gitDir, mergeBaseTreeSha);
+	const mergeBaseEntries = await flattenTree(gitDir, mergeBaseTreeSha, "", cache);
 
 	const currentHeadSha = await getCurrentCommit(gitDir);
 
-	const currentHeadData = currentHeadSha ? await readObject(gitDir, currentHeadSha) : null;
+	const currentHeadData = currentHeadSha ? await readObject(gitDir, currentHeadSha, cache) : null;
 	const currentHeadTreeSha = currentHeadData ? extractTreeFromCommit(currentHeadData) : null;
 	const currentHeadEntries = currentHeadTreeSha
-		? await flattenTree(gitDir, currentHeadTreeSha)
+		? await flattenTree(gitDir, currentHeadTreeSha, "", cache)
 		: new Map<string, string>();
 
-	const stashEntries = await flattenTree(gitDir, stashTreeSha);
+	const stashEntries = await flattenTree(gitDir, stashTreeSha, "", cache);
 
 	if (currentHeadSha === mergeBaseSha) {
-		await restoreTree(path, gitDir, stashTreeSha, "");
+		await restoreTree(path, gitDir, stashTreeSha, "", cache);
 
 		// Delete files that exist in HEAD but not in stash
 		for (const [filePath] of currentHeadEntries) {
@@ -418,9 +430,9 @@ export async function unstash(path: string): Promise<void> {
 			continue;
 		}
 
-		const baseContent = baseSha ? await readBlobContent(gitDir, baseSha) : "";
-		const stashContent = await readBlobContent(gitDir, sha);
-		const currentContent = await readBlobContent(gitDir, currentSha);
+		const baseContent = baseSha ? await readBlobContent(gitDir, baseSha, cache) : "";
+		const stashContent = await readBlobContent(gitDir, sha, cache);
+		const currentContent = await readBlobContent(gitDir, currentSha, cache);
 
 		const merged = threeWayMerge(baseContent, stashContent, currentContent);
 		const mergedSha = await hashObject(gitDir, merged, "blob");
@@ -437,7 +449,7 @@ export async function unstash(path: string): Promise<void> {
 	}
 
 	for (const [filePath, sha] of mergedEntries) {
-		const content = await readBlobContent(gitDir, sha);
+		const content = await readBlobContent(gitDir, sha, cache);
 		const fullPath = join(path, filePath);
 		const { mkdir: mkdirAsync } = await import("node:fs/promises");
 		await mkdirAsync(dirname(fullPath), { recursive: true });
@@ -478,9 +490,10 @@ async function flattenTree(
 	gitDir: string,
 	treeSha: string,
 	prefix: string = "",
+	cache: PackfileCache,
 ): Promise<Map<string, string>> {
 	const entries = new Map<string, string>();
-	const treeData = await readObject(gitDir, treeSha);
+	const treeData = await readObject(gitDir, treeSha, cache);
 	const treeEntries = parseTreeEntries(treeData);
 
 	for (const entry of treeEntries) {
@@ -489,7 +502,7 @@ async function flattenTree(
 		if (entry.type === "blob") {
 			entries.set(entryPath, entry.sha);
 		} else if (entry.type === "tree") {
-			const subEntries = await flattenTree(gitDir, entry.sha, entryPath);
+			const subEntries = await flattenTree(gitDir, entry.sha, entryPath, cache);
 			for (const [subPath, subSha] of subEntries) {
 				entries.set(subPath, subSha);
 			}
@@ -499,8 +512,8 @@ async function flattenTree(
 	return entries;
 }
 
-async function readBlobContent(gitDir: string, sha: string): Promise<string> {
-	const blobData = await readObject(gitDir, sha);
+async function readBlobContent(gitDir: string, sha: string, cache: PackfileCache): Promise<string> {
+	const blobData = await readObject(gitDir, sha, cache);
 	return extractContentFromBlob(blobData);
 }
 

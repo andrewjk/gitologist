@@ -9,6 +9,7 @@ import {
 	hashObject,
 	readObject,
 	updateBranch,
+	type PackfileCache,
 } from "./utils.ts";
 
 export async function merge(
@@ -46,7 +47,9 @@ export async function merge(
 		};
 	}
 
-	const isAncestor = await isAncestorOf(gitDir, currentSha, branchSha);
+	let cache = new Map();
+
+	const isAncestor = await isAncestorOf(gitDir, currentSha, branchSha, cache);
 
 	if (isAncestor && !options?.noFastForward) {
 		await updateBranch(gitDir, currentBranch, branchSha);
@@ -58,7 +61,7 @@ export async function merge(
 		};
 	}
 
-	const mergeBase = await findMergeBase(gitDir, currentSha, branchSha);
+	const mergeBase = await findMergeBase(gitDir, currentSha, branchSha, cache);
 
 	if (mergeBase === branchSha) {
 		return {
@@ -70,7 +73,13 @@ export async function merge(
 
 	const mergeMessage = options?.message || `Merge branch '${branchName}' into '${currentBranch}'`;
 
-	const mergeCommitSha = await createMergeCommit(gitDir, currentSha, branchSha, mergeMessage);
+	const mergeCommitSha = await createMergeCommit(
+		gitDir,
+		currentSha,
+		branchSha,
+		mergeMessage,
+		cache,
+	);
 
 	await updateBranch(gitDir, currentBranch, mergeCommitSha);
 
@@ -96,6 +105,7 @@ async function isAncestorOf(
 	gitDir: string,
 	ancestorSha: string,
 	descendantSha: string,
+	cache: PackfileCache,
 ): Promise<boolean> {
 	const visited = new Set<string>();
 	const queue: string[] = [descendantSha];
@@ -112,20 +122,25 @@ async function isAncestorOf(
 		}
 		visited.add(current);
 
-		const parents = await getParents(gitDir, current);
+		const parents = await getParents(gitDir, current, cache);
 		queue.push(...parents);
 	}
 
 	return false;
 }
 
-async function findMergeBase(gitDir: string, sha1: string, sha2: string): Promise<string | null> {
+async function findMergeBase(
+	gitDir: string,
+	sha1: string,
+	sha2: string,
+	cache: PackfileCache,
+): Promise<string | null> {
 	if (sha1 === sha2) {
 		return sha1;
 	}
 
-	const ancestors1 = await getAllAncestors(gitDir, sha1);
-	const ancestors2 = await getAllAncestors(gitDir, sha2);
+	const ancestors1 = await getAllAncestors(gitDir, sha1, cache);
+	const ancestors2 = await getAllAncestors(gitDir, sha2, cache);
 
 	ancestors1.add(sha1);
 	ancestors2.add(sha2);
@@ -139,7 +154,11 @@ async function findMergeBase(gitDir: string, sha1: string, sha2: string): Promis
 	return null;
 }
 
-async function getAllAncestors(gitDir: string, sha: string): Promise<Set<string>> {
+async function getAllAncestors(
+	gitDir: string,
+	sha: string,
+	cache: PackfileCache,
+): Promise<Set<string>> {
 	const ancestors = new Set<string>();
 	const queue: string[] = [sha];
 
@@ -150,7 +169,7 @@ async function getAllAncestors(gitDir: string, sha: string): Promise<Set<string>
 			continue;
 		}
 
-		const parents = await getParents(gitDir, current);
+		const parents = await getParents(gitDir, current, cache);
 		for (const parent of parents) {
 			ancestors.add(parent);
 			queue.push(parent);
@@ -160,9 +179,9 @@ async function getAllAncestors(gitDir: string, sha: string): Promise<Set<string>
 	return ancestors;
 }
 
-async function getParents(gitDir: string, sha: string): Promise<string[]> {
+async function getParents(gitDir: string, sha: string, cache: PackfileCache): Promise<string[]> {
 	try {
-		const commitData = await readObject(gitDir, sha);
+		const commitData = await readObject(gitDir, sha, cache);
 		const parents: string[] = [];
 		const lines = commitData.split("\n");
 
@@ -178,9 +197,9 @@ async function getParents(gitDir: string, sha: string): Promise<string[]> {
 	}
 }
 
-async function getTree(gitDir: string, sha: string): Promise<string | null> {
+async function getTree(gitDir: string, sha: string, cache: PackfileCache): Promise<string | null> {
 	try {
-		const commitData = await readObject(gitDir, sha);
+		const commitData = await readObject(gitDir, sha, cache);
 		const lines = commitData.split("\n");
 
 		for (const line of lines) {
@@ -199,8 +218,9 @@ async function createMergeCommit(
 	parent1: string,
 	parent2: string,
 	message: string,
+	cache: PackfileCache,
 ): Promise<string> {
-	const treeSha = await getTree(gitDir, parent1);
+	const treeSha = await getTree(gitDir, parent1, cache);
 
 	if (!treeSha) {
 		throw new Error("Could not get tree for merge commit");

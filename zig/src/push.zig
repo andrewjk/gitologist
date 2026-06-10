@@ -11,6 +11,9 @@ pub fn push(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_n
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+
     const cwd = std.Io.Dir.cwd();
     const git_dir = cwd.openDir(io, git_dir_path, .{}) catch {
         return error.NotAGitRepository;
@@ -96,6 +99,9 @@ fn pushToRemote(
     git_dir_path: []const u8,
     options: ?*const RemoteOptions,
 ) !void {
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+
     var old_sha: []const u8 = undefined;
     var free_old_sha = false;
 
@@ -105,7 +111,7 @@ fn pushToRemote(
         @memset(zeros, '0');
         var visited = std.StringHashMap(void).init(allocator);
         defer visited.deinit();
-        var pack_objects = try objects.enumerateObjects(io, allocator, git_dir_path, commit_sha, &visited);
+        var pack_objects = try objects.enumerateObjects(io, allocator, git_dir_path, commit_sha, &visited, &cache);
         defer {
             for (pack_objects.items) |obj| {
                 allocator.free(obj.obj_type);
@@ -151,7 +157,7 @@ fn pushToRemote(
     var visited = std.StringHashMap(void).init(allocator);
     defer visited.deinit();
 
-    var pack_objects = try objects.enumerateObjects(io, allocator, git_dir_path, commit_sha, &visited);
+    var pack_objects = try objects.enumerateObjects(io, allocator, git_dir_path, commit_sha, &visited, &cache);
     defer {
         for (pack_objects.items) |obj| {
             allocator.free(obj.obj_type);

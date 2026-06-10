@@ -8,6 +8,9 @@ pub fn restore(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+
     const cwd = std.Io.Dir.cwd();
     const git_dir = cwd.openDir(io, git_dir_path, .{}) catch {
         return error.NotAGitRepository;
@@ -31,13 +34,13 @@ pub fn restore(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files
 
     const commit_sha = std.mem.trim(u8, commit_sha_bytes, &std.ascii.whitespace);
 
-    const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha);
+    const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha, &cache);
     defer allocator.free(commit_data);
 
     const tree_sha = try utils.extractTreeFromCommit(commit_data);
 
     for (files) |file| {
-        const blob_sha = try findBlobInTree(io, allocator, git_dir_path, tree_sha, file);
+        const blob_sha = try findBlobInTree(io, allocator, git_dir_path, tree_sha, file, &cache);
         defer {
             if (blob_sha) |sha| allocator.free(sha);
         }
@@ -45,7 +48,7 @@ pub fn restore(io: std.Io, allocator: std.mem.Allocator, path: []const u8, files
             return error.FileNotInCommit;
         }
 
-        const blob_data = try utils.readObject(io, allocator, git_dir_path, blob_sha.?);
+        const blob_data = try utils.readObject(io, allocator, git_dir_path, blob_sha.?, &cache);
         defer allocator.free(blob_data);
 
         const content = utils.extractContentFromBlob(blob_data);
@@ -102,12 +105,12 @@ pub fn restoreAll(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !v
     }
 }
 
-fn findBlobInTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, tree_sha: []const u8, file_path: []const u8) !?[]const u8 {
+fn findBlobInTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, tree_sha: []const u8, file_path: []const u8, pack_cache: *utils.PackfileCache) !?[]const u8 {
     var parts = std.mem.splitScalar(u8, file_path, '/');
     const name = parts.first();
     const rest = parts.rest();
 
-    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha);
+    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha, pack_cache);
     defer allocator.free(tree_data);
 
     var entries = try utils.parseTreeEntries(allocator, tree_data);
@@ -131,7 +134,7 @@ fn findBlobInTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []cons
             }
             if (std.mem.eql(u8, entry.entry_type, "tree")) {
                 if (rest.len > 0) {
-                    const sub_result = try findBlobInTree(io, allocator, git_dir_path, entry.sha, rest);
+                    const sub_result = try findBlobInTree(io, allocator, git_dir_path, entry.sha, rest, pack_cache);
                     if (sub_result) |sha| {
                         const sha_copy = try allocator.dupe(u8, sha);
                         allocator.free(sha);

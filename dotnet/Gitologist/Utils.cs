@@ -9,7 +9,14 @@ namespace Gitologist;
 
 public static class Utils
 {
-    private static readonly Dictionary<string, List<PackObject>> _packfileCache = new();
+    public class PackfileCache
+    {
+        private readonly Dictionary<string, List<PackObject>> _cache = new();
+
+        public bool TryGet(string path, out List<PackObject>? objects) => _cache.TryGetValue(path, out objects);
+
+        public void Set(string path, List<PackObject> objects) => _cache[path] = objects;
+    }
     public static async Task<string> HashFile(string filePath)
     {
         var content = await File.ReadAllTextAsync(filePath);
@@ -340,9 +347,9 @@ public static class Utils
         await File.WriteAllTextAsync(branchPath, commitSha + "\n");
     }
 
-    public static async Task<string> ReadObject(string gitDir, string sha)
+    public static async Task<string> ReadObject(string gitDir, string sha, PackfileCache cache)
     {
-        var data = await ReadObjectData(gitDir, sha);
+        var data = await ReadObjectData(gitDir, sha, cache);
 
         // Find the null byte separating header from content
         var nullIndex = Array.IndexOf(data, (byte)0);
@@ -365,7 +372,7 @@ public static class Utils
         return Encoding.UTF8.GetString(data);
     }
 
-    public static async Task<byte[]> ReadObjectData(string gitDir, string sha)
+    public static async Task<byte[]> ReadObjectData(string gitDir, string sha, PackfileCache cache)
     {
         var objectPath = Path.Combine(gitDir, "objects", sha.Substring(0, 2), sha.Substring(2));
         try
@@ -384,11 +391,14 @@ public static class Utils
             var packFiles = Directory.GetFiles(packDir, "*.pack");
             foreach (var packFile in packFiles)
             {
-                if (!_packfileCache.TryGetValue(packFile, out var objects))
+                if (cache.TryGet(packFile, out var objects))
+                {
+                }
+                else
                 {
                     var packData = await File.ReadAllBytesAsync(packFile);
                     objects = Packfile.ParsePackfile(packData);
-                    _packfileCache[packFile] = objects;
+                    cache.Set(packFile, objects);
                 }
 
                 foreach (var obj in objects)

@@ -564,7 +564,8 @@ public class PackfileTests
         var content = "hello world";
         var sha = await Utils.HashObject(_gitDir, content, "blob");
 
-        var data = await Utils.ReadObjectData(_gitDir, sha);
+        var cache = new Utils.PackfileCache();
+        var data = await Utils.ReadObjectData(_gitDir, sha, cache);
         var nullIndex = Array.IndexOf(data, (byte)0);
         var header = Encoding.UTF8.GetString(data, 0, nullIndex);
         var body = Encoding.UTF8.GetString(data, nullIndex + 1, data.Length - nullIndex - 1);
@@ -593,7 +594,8 @@ public class PackfileTests
         Directory.CreateDirectory(packDir);
         await File.WriteAllBytesAsync(Path.Combine(packDir, "test.pack"), packfile);
 
-        var data = await Utils.ReadObjectData(_gitDir, sha);
+        var cache = new Utils.PackfileCache();
+        var data = await Utils.ReadObjectData(_gitDir, sha, cache);
         var nullIndex = Array.IndexOf(data, (byte)0);
         var header = Encoding.UTF8.GetString(data, 0, nullIndex);
         var body = new byte[data.Length - nullIndex - 1];
@@ -606,8 +608,9 @@ public class PackfileTests
     [TestMethod]
     public async Task ShouldThrowWhenObjectNotFound()
     {
+        var cache = new Utils.PackfileCache();
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
-            () => Utils.ReadObjectData(_gitDir, "0000000000000000000000000000000000000000")
+            () => Utils.ReadObjectData(_gitDir, "0000000000000000000000000000000000000000", cache)
         );
     }
 
@@ -637,7 +640,8 @@ public class PackfileTests
         Directory.CreateDirectory(packDir);
         await File.WriteAllBytesAsync(Path.Combine(packDir, "commits.pack"), packfile);
 
-        var data = await Utils.ReadObject(_gitDir, sha);
+        var cache = new Utils.PackfileCache();
+        var data = await Utils.ReadObject(_gitDir, sha, cache);
         StringAssert.Contains(data, "commit");
         StringAssert.Contains(data, "Initial commit");
     }

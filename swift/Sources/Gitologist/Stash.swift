@@ -22,6 +22,7 @@ enum StashError: Error, LocalizedError {
 
 func stash(at path: String, message: String = "WIP") async throws -> String {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+	let cache = PackfileCache()
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
 		throw StashError.notAGitRepository
@@ -37,11 +38,11 @@ func stash(at path: String, message: String = "WIP") async throws -> String {
 	let indexPath = gitDir.appendingPathComponent("index")
 	var index = try await getIndex(at: indexPath.path)
 
-	let headCommitData = try await readObject(at: gitDir.path, sha: headCommitSha)
+	let headCommitData = try await readObject(at: gitDir.path, sha: headCommitSha, cache: cache)
 	let headTreeSha = try extractTreeFromCommit(headCommitData)
 	var headTreeEntries: [String: String] = [:]
 
-	let headEntries = try parseTreeEntries(await readObject(at: gitDir.path, sha: headTreeSha))
+	let headEntries = try parseTreeEntries(await readObject(at: gitDir.path, sha: headTreeSha, cache: cache))
 	for entry in headEntries {
 		headTreeEntries[entry.path] = entry.sha
 	}
@@ -79,7 +80,7 @@ func stash(at path: String, message: String = "WIP") async throws -> String {
 	try FileManager.default.createDirectory(at: stashRefPath.deletingLastPathComponent(), withIntermediateDirectories: true)
 	try "\(stashCommitSha)\n".write(to: stashRefPath, atomically: true, encoding: .utf8)
 
-	try await resetHard(at: path, gitDir: gitDir.path, commitSha: headCommitSha)
+	try await resetHard(at: path, gitDir: gitDir.path, commitSha: headCommitSha, cache: cache)
 
 	return stashCommitSha
 }
@@ -110,20 +111,20 @@ private func stageFile(at repoPath: String, gitDir: String, filePath: String, in
 	)
 }
 
-private func resetHard(at path: String, gitDir: String, commitSha: String) async throws {
-	let commitData = try await readObject(at: gitDir, sha: commitSha)
+private func resetHard(at path: String, gitDir: String, commitSha: String, cache: PackfileCache) async throws {
+	let commitData = try await readObject(at: gitDir, sha: commitSha, cache: cache)
 	let treeSha = try extractTreeFromCommit(commitData)
 
 	let gitignore = IgnoreParser()
 	await gitignore.loadGitignore(repoPath: path)
 
-	var targetEntries = try await flattenTree(gitDir: gitDir, treeSha: treeSha)
+	var targetEntries = try await flattenTree(gitDir: gitDir, treeSha: treeSha, cache: cache)
 
-	try await resetHardRecursive(at: path, repoPath: path, currentDir: path, gitDir: gitDir, gitignore: gitignore, targetEntries: &targetEntries)
+	try await resetHardRecursive(at: path, repoPath: path, currentDir: path, gitDir: gitDir, gitignore: gitignore, targetEntries: &targetEntries, cache: cache)
 
 	// Create any remaining target files
 	for (filePath, sha) in targetEntries {
-		let blobData = try await readObject(at: gitDir, sha: sha)
+		let blobData = try await readObject(at: gitDir, sha: sha, cache: cache)
 		let content = try extractContentFromBlob(blobData)
 		let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
 		try FileManager.default.createDirectory(at: fullPath.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -133,7 +134,7 @@ private func resetHard(at path: String, gitDir: String, commitSha: String) async
 	try await updateIndex(gitDir: gitDir, workingPath: path, treeSha: treeSha)
 }
 
-private func resetHardRecursive(at path: String, repoPath: String, currentDir: String, gitDir: String, gitignore: IgnoreParser, targetEntries: inout [String: String]) async throws {
+private func resetHardRecursive(at path: String, repoPath: String, currentDir: String, gitDir: String, gitignore: IgnoreParser, targetEntries: inout [String: String], cache: PackfileCache) async throws {
 	let entries = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: currentDir), includingPropertiesForKeys: [.isDirectoryKey])
 
 	for entry in entries {
@@ -161,14 +162,14 @@ private func resetHardRecursive(at path: String, repoPath: String, currentDir: S
 				continue
 			}
 
-			try await resetHardRecursive(at: path, repoPath: repoPath, currentDir: entry.path, gitDir: gitDir, gitignore: gitignore, targetEntries: &targetEntries)
+			try await resetHardRecursive(at: path, repoPath: repoPath, currentDir: entry.path, gitDir: gitDir, gitignore: gitignore, targetEntries: &targetEntries, cache: cache)
 		} else {
 			if let targetSha = targetEntries[relPath] {
 				let currentContent = try String(contentsOf: entry, encoding: .utf8)
 				let currentHash = try await hashObject(at: gitDir, content: currentContent, type: "blob")
 
 				if currentHash != targetSha {
-					let blobData = try await readObject(at: gitDir, sha: targetSha)
+					let blobData = try await readObject(at: gitDir, sha: targetSha, cache: cache)
 					let content = try extractContentFromBlob(blobData)
 					try content.write(to: entry, atomically: true, encoding: .utf8)
 				}
@@ -187,27 +188,28 @@ private func relativePath(from base: String, to fullPath: String) -> String {
 	return fullComponents.dropFirst(baseComponents.count).joined(separator: "/")
 }
 
-private func restoreTree(at path: String, gitDir: String, treeSha: String, prefix: String) async throws {
-	let treeData = try await readObject(at: gitDir, sha: treeSha)
+private func restoreTree(at path: String, gitDir: String, treeSha: String, prefix: String, cache: PackfileCache) async throws {
+	let treeData = try await readObject(at: gitDir, sha: treeSha, cache: cache)
 	let entries = try parseTreeEntries(treeData)
 
 	for entry in entries {
 		let entryPath = prefix.isEmpty ? entry.path : "\(prefix)/\(entry.path)"
 
 		if entry.type == .blob {
-			let blobData = try await readObject(at: gitDir, sha: entry.sha)
+			let blobData = try await readObject(at: gitDir, sha: entry.sha, cache: cache)
 			let content = try extractContentFromBlob(blobData)
 			let fullPath = URL(fileURLWithPath: path).appendingPathComponent(entryPath)
 			try FileManager.default.createDirectory(at: fullPath.deletingLastPathComponent(), withIntermediateDirectories: true)
 			try content.write(to: fullPath, atomically: true, encoding: .utf8)
 		} else if entry.type == .tree {
-			try await restoreTree(at: path, gitDir: gitDir, treeSha: entry.sha, prefix: entryPath)
+			try await restoreTree(at: path, gitDir: gitDir, treeSha: entry.sha, prefix: entryPath, cache: cache)
 		}
 	}
 }
 
 func unstash(at path: String) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+	let cache = PackfileCache()
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
 		throw StashError.notAGitRepository
@@ -221,31 +223,31 @@ func unstash(at path: String) async throws {
 
 	let stashCommitSha = try String(contentsOf: stashRefPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
 
-	let stashCommitData = try await readObject(at: gitDir.path, sha: stashCommitSha)
+	let stashCommitData = try await readObject(at: gitDir.path, sha: stashCommitSha, cache: cache)
 	let stashTreeSha = try extractTreeFromCommit(stashCommitData)
 
 	guard let mergeBaseSha = extractParentFromCommit(stashCommitData) else {
-		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "")
+		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "", cache: cache)
 		return
 	}
 
 	guard let currentHeadSha = try await getCurrentCommit(at: gitDir.path) else {
-		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "")
+		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "", cache: cache)
 		return
 	}
 
-	let mergeBaseTreeData = try await readObject(at: gitDir.path, sha: mergeBaseSha)
+	let mergeBaseTreeData = try await readObject(at: gitDir.path, sha: mergeBaseSha, cache: cache)
 	let mergeBaseTreeSha = try extractTreeFromCommit(mergeBaseTreeData)
-	let mergeBaseEntries = try await flattenTree(gitDir: gitDir.path, treeSha: mergeBaseTreeSha)
+	let mergeBaseEntries = try await flattenTree(gitDir: gitDir.path, treeSha: mergeBaseTreeSha, cache: cache)
 
-	let currentHeadData = try await readObject(at: gitDir.path, sha: currentHeadSha)
+	let currentHeadData = try await readObject(at: gitDir.path, sha: currentHeadSha, cache: cache)
 	let currentHeadTreeSha = try extractTreeFromCommit(currentHeadData)
-	let currentHeadEntries = try await flattenTree(gitDir: gitDir.path, treeSha: currentHeadTreeSha)
+	let currentHeadEntries = try await flattenTree(gitDir: gitDir.path, treeSha: currentHeadTreeSha, cache: cache)
 
-	let stashEntries = try await flattenTree(gitDir: gitDir.path, treeSha: stashTreeSha)
+	let stashEntries = try await flattenTree(gitDir: gitDir.path, treeSha: stashTreeSha, cache: cache)
 
 	if currentHeadSha == mergeBaseSha {
-		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "")
+		try await restoreTree(at: path, gitDir: gitDir.path, treeSha: stashTreeSha, prefix: "", cache: cache)
 
 		// Delete files that exist in HEAD but not in stash
 		for (filePath, _) in currentHeadEntries {
@@ -272,9 +274,9 @@ func unstash(at path: String) async throws {
 			continue
 		}
 
-		let baseContent = try baseSha != nil ? (await readBlobContent(gitDir: gitDir.path, sha: baseSha!)) : ""
-		let stashContent = try await readBlobContent(gitDir: gitDir.path, sha: sha)
-		let currentContent = try await readBlobContent(gitDir: gitDir.path, sha: currentSha!)
+		let baseContent = try baseSha != nil ? (await readBlobContent(gitDir: gitDir.path, sha: baseSha!, cache: cache)) : ""
+		let stashContent = try await readBlobContent(gitDir: gitDir.path, sha: sha, cache: cache)
+		let currentContent = try await readBlobContent(gitDir: gitDir.path, sha: currentSha!, cache: cache)
 
 		let merged = threeWayMerge(base: baseContent, theirs: stashContent, ours: currentContent)
 		let mergedSha = try await hashObject(at: gitDir.path, content: merged, type: "blob")
@@ -290,7 +292,7 @@ func unstash(at path: String) async throws {
 	}
 
 	for (filePath, sha) in mergedEntries {
-		let content = try await readBlobContent(gitDir: gitDir.path, sha: sha)
+		let content = try await readBlobContent(gitDir: gitDir.path, sha: sha, cache: cache)
 		let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
 		try FileManager.default.createDirectory(at: fullPath.deletingLastPathComponent(), withIntermediateDirectories: true)
 		try content.write(to: fullPath, atomically: true, encoding: .utf8)
@@ -322,9 +324,9 @@ private func extractParentFromCommit(_ commitData: String) -> String? {
 	return nil
 }
 
-private func flattenTree(gitDir: String, treeSha: String, prefix: String = "") async throws -> [String: String] {
+private func flattenTree(gitDir: String, treeSha: String, prefix: String = "", cache: PackfileCache) async throws -> [String: String] {
 	var entries: [String: String] = [:]
-	let treeData = try await readObject(at: gitDir, sha: treeSha)
+	let treeData = try await readObject(at: gitDir, sha: treeSha, cache: cache)
 	let treeEntries = try parseTreeEntries(treeData)
 
 	for entry in treeEntries {
@@ -333,7 +335,7 @@ private func flattenTree(gitDir: String, treeSha: String, prefix: String = "") a
 		if entry.type == .blob {
 			entries[entryPath] = entry.sha
 		} else if entry.type == .tree {
-			let subEntries = try await flattenTree(gitDir: gitDir, treeSha: entry.sha, prefix: entryPath)
+			let subEntries = try await flattenTree(gitDir: gitDir, treeSha: entry.sha, prefix: entryPath, cache: cache)
 			for (subPath, subSha) in subEntries {
 				entries[subPath] = subSha
 			}
@@ -343,8 +345,8 @@ private func flattenTree(gitDir: String, treeSha: String, prefix: String = "") a
 	return entries
 }
 
-private func readBlobContent(gitDir: String, sha: String) async throws -> String {
-	let blobData = try await readObject(at: gitDir, sha: sha)
+private func readBlobContent(gitDir: String, sha: String, cache: PackfileCache) async throws -> String {
+	let blobData = try await readObject(at: gitDir, sha: sha, cache: cache)
 	return try extractContentFromBlob(blobData)
 }
 

@@ -18,6 +18,8 @@ public static class Pull
             throw new InvalidOperationException("Not a git repository");
         }
 
+        var cache = new Utils.PackfileCache();
+
         var remoteName = remote ?? "origin";
         var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
 
@@ -43,11 +45,11 @@ public static class Pull
         if (string.IsNullOrEmpty(currentCommitSha))
         {
             await Utils.UpdateBranch(gitDir, branchName, remoteCommitSha);
-            var commitData = await Utils.ReadObject(gitDir, remoteCommitSha);
+            var commitData = await Utils.ReadObject(gitDir, remoteCommitSha, cache);
             var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
-            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha, new Dictionary<string, string>());
-            await UpdateIndex(gitDir, path, treeSha);
+            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha, new Dictionary<string, string>(), cache);
+            await UpdateIndex(gitDir, path, treeSha, cache);
             return;
         }
 
@@ -56,26 +58,26 @@ public static class Pull
             return;
         }
 
-        var isAncestor = await IsAncestorOf(gitDir, currentCommitSha, remoteCommitSha);
+        var isAncestor = await IsAncestorOf(gitDir, currentCommitSha, remoteCommitSha, cache);
 
-        var currentTreeSha = await GetTree(gitDir, currentCommitSha);
+        var currentTreeSha = await GetTree(gitDir, currentCommitSha, cache);
         var currentBlobs = currentTreeSha != null
-            ? await GetTreeBlobs(gitDir, currentTreeSha)
+            ? await GetTreeBlobs(gitDir, currentTreeSha, "", cache)
             : new Dictionary<string, string>();
 
         if (isAncestor)
         {
             await Utils.UpdateBranch(gitDir, branchName, remoteCommitSha);
-            var commitData = await Utils.ReadObject(gitDir, remoteCommitSha);
+            var commitData = await Utils.ReadObject(gitDir, remoteCommitSha, cache);
             var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
-            await CheckForLocalChanges(gitDir, path, currentBlobs, treeSha);
-            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs);
-            await UpdateIndex(gitDir, path, treeSha);
+            await CheckForLocalChanges(gitDir, path, currentBlobs, treeSha, cache);
+            await ExtractTreeToWorkingDirectory(gitDir, path, treeSha, currentBlobs, cache);
+            await UpdateIndex(gitDir, path, treeSha, cache);
             return;
         }
 
-        var mergeBase = await FindMergeBase(gitDir, currentCommitSha, remoteCommitSha);
+        var mergeBase = await FindMergeBase(gitDir, currentCommitSha, remoteCommitSha, cache);
 
         if (mergeBase == remoteCommitSha)
         {
@@ -86,26 +88,28 @@ public static class Pull
             gitDir,
             currentCommitSha,
             remoteCommitSha,
-            $"Merge branch '{branchName}' of {remoteName}"
+            $"Merge branch '{branchName}' of {remoteName}",
+            cache
         );
 
         await Utils.UpdateBranch(gitDir, branchName, mergeCommitSha);
-        var mergeCommitData = await Utils.ReadObject(gitDir, mergeCommitSha);
+        var mergeCommitData = await Utils.ReadObject(gitDir, mergeCommitSha, cache);
         var mergeTreeSha = Utils.ExtractTreeFromCommit(mergeCommitData);
 
-        await CheckForLocalChanges(gitDir, path, currentBlobs, mergeTreeSha);
-        await ExtractTreeToWorkingDirectory(gitDir, path, mergeTreeSha, currentBlobs);
-        await UpdateIndex(gitDir, path, mergeTreeSha);
+        await CheckForLocalChanges(gitDir, path, currentBlobs, mergeTreeSha, cache);
+        await ExtractTreeToWorkingDirectory(gitDir, path, mergeTreeSha, currentBlobs, cache);
+        await UpdateIndex(gitDir, path, mergeTreeSha, cache);
     }
 
     private static async Task<Dictionary<string, string>> GetTreeBlobs(
         string gitDir,
         string treeSha,
-        string prefix = ""
+        string prefix,
+        Utils.PackfileCache cache
     )
     {
         var blobs = new Dictionary<string, string>();
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, cache);
         var entries = Utils.ParseTreeEntries(treeData);
 
         foreach (var entry in entries)
@@ -117,7 +121,7 @@ public static class Pull
             }
             else if (entry.Type == "tree")
             {
-                var childBlobs = await GetTreeBlobs(gitDir, entry.Sha, path);
+                var childBlobs = await GetTreeBlobs(gitDir, entry.Sha, path, cache);
                 foreach (var childBlob in childBlobs)
                 {
                     blobs[childBlob.Key] = childBlob.Value;
@@ -132,12 +136,13 @@ public static class Pull
         string gitDir,
         string workingPath,
         Dictionary<string, string> currentBlobs,
-        string newTreeSha
+        string newTreeSha,
+        Utils.PackfileCache cache
     )
     {
         var indexPath = Path.Combine(gitDir, "index");
         var index = await Utils.GetIndex(indexPath);
-        var newBlobs = await GetTreeBlobs(gitDir, newTreeSha);
+        var newBlobs = await GetTreeBlobs(gitDir, newTreeSha, "", cache);
 
         foreach (var (path, newSha) in newBlobs)
         {
@@ -170,10 +175,11 @@ public static class Pull
         string gitDir,
         string workingPath,
         string treeSha,
-        Dictionary<string, string> currentBlobs
+        Dictionary<string, string> currentBlobs,
+        Utils.PackfileCache cache
     )
     {
-        await ExtractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs);
+        await ExtractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs, cache);
     }
 
     private static async Task ExtractTreeRecursive(
@@ -181,10 +187,11 @@ public static class Pull
         string workingPath,
         string treeSha,
         string prefix,
-        Dictionary<string, string> currentBlobs
+        Dictionary<string, string> currentBlobs,
+        Utils.PackfileCache cache
     )
     {
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, cache);
         var entries = Utils.ParseTreeEntries(treeData);
 
         foreach (var entry in entries)
@@ -203,7 +210,7 @@ public static class Pull
                     continue;
                 }
 
-                var blobData = await Utils.ReadObject(gitDir, entry.Sha);
+                var blobData = await Utils.ReadObject(gitDir, entry.Sha, cache);
                 var content = Utils.ExtractContentFromBlob(blobData);
                 await File.WriteAllTextAsync(entryPath, content);
             }
@@ -223,7 +230,8 @@ public static class Pull
                     workingPath,
                     entry.Sha,
                     newPrefix,
-                    currentBlobs
+                    currentBlobs,
+                    cache
                 );
             }
         }
@@ -232,7 +240,8 @@ public static class Pull
     private static async Task UpdateIndex(
         string gitDir,
         string workingPath,
-        string treeSha
+        string treeSha,
+        Utils.PackfileCache cache
     )
     {
         var indexPath = Path.Combine(gitDir, "index");
@@ -242,7 +251,8 @@ public static class Pull
             gitDir,
             treeSha,
             "",
-            indexContent
+            indexContent,
+            cache
         );
 
         await File.WriteAllTextAsync(indexPath, indexContent + "\n");
@@ -252,10 +262,11 @@ public static class Pull
         string gitDir,
         string treeSha,
         string prefix,
-        string indexContent
+        string indexContent,
+        Utils.PackfileCache cache
     )
     {
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, cache);
         var entries = Utils.ParseTreeEntries(treeData);
         var content = indexContent;
 
@@ -263,7 +274,7 @@ public static class Pull
         {
             if (entry.Type == "blob")
             {
-                var blobData = await Utils.ReadObject(gitDir, entry.Sha);
+                var blobData = await Utils.ReadObject(gitDir, entry.Sha, cache);
                 var fileContent = Utils.ExtractContentFromBlob(blobData);
                 // Use git blob hash format (with "blob <size>\0" header)
                 var blobHeader = $"blob {fileContent.Length}\0{fileContent}";
@@ -285,7 +296,8 @@ public static class Pull
                     gitDir,
                     entry.Sha,
                     newPrefix,
-                    content
+                    content,
+                    cache
                 );
             }
         }
@@ -296,7 +308,8 @@ public static class Pull
     private static async Task<bool> IsAncestorOf(
         string gitDir,
         string ancestorSha,
-        string descendantSha
+        string descendantSha,
+        Utils.PackfileCache cache
     )
     {
         var visited = new HashSet<string>();
@@ -318,7 +331,7 @@ public static class Pull
             }
             visited.Add(current);
 
-            var parents = await GetParents(gitDir, current);
+            var parents = await GetParents(gitDir, current, cache);
             foreach (var parent in parents)
             {
                 queue.Enqueue(parent);
@@ -328,15 +341,15 @@ public static class Pull
         return false;
     }
 
-    private static async Task<string?> FindMergeBase(string gitDir, string sha1, string sha2)
+    private static async Task<string?> FindMergeBase(string gitDir, string sha1, string sha2, Utils.PackfileCache cache)
     {
         if (sha1 == sha2)
         {
             return sha1;
         }
 
-        var ancestors1 = await GetAllAncestors(gitDir, sha1);
-        var ancestors2 = await GetAllAncestors(gitDir, sha2);
+        var ancestors1 = await GetAllAncestors(gitDir, sha1, cache);
+        var ancestors2 = await GetAllAncestors(gitDir, sha2, cache);
 
         ancestors1.Add(sha1);
         ancestors2.Add(sha2);
@@ -352,7 +365,7 @@ public static class Pull
         return null;
     }
 
-    private static async Task<HashSet<string>> GetAllAncestors(string gitDir, string sha)
+    private static async Task<HashSet<string>> GetAllAncestors(string gitDir, string sha, Utils.PackfileCache cache)
     {
         var ancestors = new HashSet<string>();
         var queue = new Queue<string>();
@@ -367,7 +380,7 @@ public static class Pull
                 continue;
             }
 
-            var parents = await GetParents(gitDir, current);
+            var parents = await GetParents(gitDir, current, cache);
             foreach (var parent in parents)
             {
                 ancestors.Add(parent);
@@ -378,11 +391,11 @@ public static class Pull
         return ancestors;
     }
 
-    private static async Task<List<string>> GetParents(string gitDir, string sha)
+    private static async Task<List<string>> GetParents(string gitDir, string sha, Utils.PackfileCache cache)
     {
         try
         {
-            var commitData = await Utils.ReadObject(gitDir, sha);
+            var commitData = await Utils.ReadObject(gitDir, sha, cache);
             var parents = new List<string>();
             var lines = commitData.Split('\n');
 
@@ -402,11 +415,11 @@ public static class Pull
         }
     }
 
-    private static async Task<string?> GetTree(string gitDir, string sha)
+    private static async Task<string?> GetTree(string gitDir, string sha, Utils.PackfileCache cache)
     {
         try
         {
-            var commitData = await Utils.ReadObject(gitDir, sha);
+            var commitData = await Utils.ReadObject(gitDir, sha, cache);
             return Utils.ExtractTreeFromCommit(commitData);
         }
         catch
@@ -419,10 +432,11 @@ public static class Pull
         string gitDir,
         string parent1,
         string parent2,
-        string message
+        string message,
+        Utils.PackfileCache cache
     )
     {
-        var treeSha = await GetTree(gitDir, parent1);
+        var treeSha = await GetTree(gitDir, parent1, cache);
 
         if (string.IsNullOrEmpty(treeSha))
         {

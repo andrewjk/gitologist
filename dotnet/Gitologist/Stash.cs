@@ -13,6 +13,8 @@ public static class Stash
             throw new InvalidOperationException("Not a git repository");
         }
 
+        var cache = new Utils.PackfileCache();
+
         var currentStatus = await Status.GetStatus(path);
 
         var headCommitSha = await Utils.GetCurrentCommit(gitDir);
@@ -24,11 +26,11 @@ public static class Stash
         var indexPath = Path.Combine(gitDir, "index");
         var index = await Utils.GetIndex(indexPath);
 
-        var headCommitData = await Utils.ReadObject(gitDir, headCommitSha);
+        var headCommitData = await Utils.ReadObject(gitDir, headCommitSha, cache);
         var headTreeSha = Utils.ExtractTreeFromCommit(headCommitData);
         var headTreeEntries = new Dictionary<string, string>();
 
-        var headEntries = Utils.ParseTreeEntries(await Utils.ReadObject(gitDir, headTreeSha));
+        var headEntries = Utils.ParseTreeEntries(await Utils.ReadObject(gitDir, headTreeSha, cache));
         foreach (var entry in headEntries)
         {
             headTreeEntries[entry.Path] = entry.Sha;
@@ -78,7 +80,7 @@ public static class Stash
         Directory.CreateDirectory(Path.GetDirectoryName(stashRefPath)!);
         await File.WriteAllTextAsync(stashRefPath, stashCommitSha + "\n");
 
-        await ResetHard(path, gitDir, headCommitSha);
+        await ResetHard(path, gitDir, headCommitSha, cache);
 
         return stashCommitSha;
     }
@@ -112,29 +114,29 @@ public static class Stash
         };
     }
 
-    private static async Task ResetHard(string path, string gitDir, string commitSha)
+    private static async Task ResetHard(string path, string gitDir, string commitSha, Utils.PackfileCache cache)
     {
-        var commitData = await Utils.ReadObject(gitDir, commitSha);
+        var commitData = await Utils.ReadObject(gitDir, commitSha, cache);
         var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
         var gitignore = new IgnoreParser();
         await gitignore.LoadGitignore(path);
 
-        var targetEntries = await FlattenTree(gitDir, treeSha);
+        var targetEntries = await FlattenTree(gitDir, treeSha, cache: cache);
 
-        await ResetHardRecursive(path, path, gitDir, gitignore, targetEntries);
+        await ResetHardRecursive(path, path, gitDir, gitignore, targetEntries, cache);
 
         // Create any remaining target files
         foreach (var (filePath, sha) in targetEntries)
         {
-            var blobData = await Utils.ReadObject(gitDir, sha);
+            var blobData = await Utils.ReadObject(gitDir, sha, cache);
             var content = Utils.ExtractContentFromBlob(blobData);
             var fullPath = Path.Combine(path, filePath);
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             await File.WriteAllTextAsync(fullPath, content);
         }
 
-        await UpdateIndexFromTree(gitDir, path, treeSha);
+        await UpdateIndexFromTree(gitDir, path, treeSha, cache);
     }
 
     private static async Task ResetHardRecursive(
@@ -142,7 +144,8 @@ public static class Stash
         string currentDir,
         string gitDir,
         IgnoreParser gitignore,
-        Dictionary<string, string> targetEntries
+        Dictionary<string, string> targetEntries,
+        Utils.PackfileCache cache
     )
     {
         var entries = Directory.GetFileSystemEntries(currentDir);
@@ -188,7 +191,7 @@ public static class Stash
                     continue;
                 }
 
-                await ResetHardRecursive(repoPath, entry, gitDir, gitignore, targetEntries);
+                await ResetHardRecursive(repoPath, entry, gitDir, gitignore, targetEntries, cache);
             }
             else
             {
@@ -199,7 +202,7 @@ public static class Stash
 
                     if (currentHash != targetSha)
                     {
-                        var blobData = await Utils.ReadObject(gitDir, targetSha);
+                        var blobData = await Utils.ReadObject(gitDir, targetSha, cache);
                         var content = Utils.ExtractContentFromBlob(blobData);
                         await File.WriteAllTextAsync(entry, content);
                     }
@@ -221,9 +224,9 @@ public static class Stash
         }
     }
 
-    private static async Task RestoreTree(string path, string gitDir, string treeSha, string prefix)
+    private static async Task RestoreTree(string path, string gitDir, string treeSha, string prefix, Utils.PackfileCache cache)
     {
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, cache);
         var entries = Utils.ParseTreeEntries(treeData);
 
         foreach (var entry in entries)
@@ -234,7 +237,7 @@ public static class Stash
 
             if (entry.Type == "blob")
             {
-                var blobData = await Utils.ReadObject(gitDir, entry.Sha);
+                var blobData = await Utils.ReadObject(gitDir, entry.Sha, cache);
                 var content = Utils.ExtractContentFromBlob(blobData);
                 var fullPath = Path.Combine(path, entryPath);
                 Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
@@ -242,17 +245,17 @@ public static class Stash
             }
             else if (entry.Type == "tree")
             {
-                await RestoreTree(path, gitDir, entry.Sha, entryPath);
+                await RestoreTree(path, gitDir, entry.Sha, entryPath, cache);
             }
         }
     }
 
-    private static async Task UpdateIndexFromTree(string gitDir, string workingPath, string treeSha)
+    private static async Task UpdateIndexFromTree(string gitDir, string workingPath, string treeSha, Utils.PackfileCache cache)
     {
         var indexPath = Path.Combine(gitDir, "index");
         var index = new Dictionary<string, IndexEntry>();
 
-        index = await UpdateIndexRecursive(gitDir, treeSha, "", index, workingPath);
+        index = await UpdateIndexRecursive(gitDir, treeSha, "", index, workingPath, cache);
 
         await Utils.WriteIndex(indexPath, index);
     }
@@ -262,10 +265,11 @@ public static class Stash
         string treeSha,
         string prefix,
         Dictionary<string, IndexEntry> index,
-        string workingPath
+        string workingPath,
+        Utils.PackfileCache cache
     )
     {
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, cache);
         var entries = Utils.ParseTreeEntries(treeData);
         var newIndex = index;
 
@@ -273,7 +277,7 @@ public static class Stash
         {
             if (entry.Type == "blob")
             {
-                var blobData = await Utils.ReadObject(gitDir, entry.Sha);
+                var blobData = await Utils.ReadObject(gitDir, entry.Sha, cache);
                 var fileContent = Utils.ExtractContentFromBlob(blobData);
 
                 var path = string.IsNullOrEmpty(prefix)
@@ -314,7 +318,8 @@ public static class Stash
                     entry.Sha,
                     newPrefix,
                     newIndex,
-                    workingPath
+                    workingPath,
+                    cache
                 );
             }
         }
@@ -331,6 +336,8 @@ public static class Stash
             throw new InvalidOperationException("Not a git repository");
         }
 
+        var cache = new Utils.PackfileCache();
+
         var stashRefPath = Path.Combine(gitDir, "refs", "stash");
 
         if (!File.Exists(stashRefPath))
@@ -340,32 +347,32 @@ public static class Stash
 
         var stashCommitSha = (await File.ReadAllTextAsync(stashRefPath)).Trim();
 
-        var stashCommitData = await Utils.ReadObject(gitDir, stashCommitSha);
+        var stashCommitData = await Utils.ReadObject(gitDir, stashCommitSha, cache);
         var stashTreeSha = Utils.ExtractTreeFromCommit(stashCommitData);
 
         var mergeBaseSha = ExtractParentFromCommit(stashCommitData);
 
         if (mergeBaseSha == null)
         {
-            await RestoreTree(path, gitDir, stashTreeSha, "");
+            await RestoreTree(path, gitDir, stashTreeSha, "", cache);
             return;
         }
 
         var currentHeadSha = await Utils.GetCurrentCommit(gitDir);
 
-        var mergeBaseTreeData = await Utils.ReadObject(gitDir, mergeBaseSha);
+        var mergeBaseTreeData = await Utils.ReadObject(gitDir, mergeBaseSha, cache);
         var mergeBaseTreeSha = Utils.ExtractTreeFromCommit(mergeBaseTreeData);
-        var mergeBaseEntries = await FlattenTree(gitDir, mergeBaseTreeSha);
+        var mergeBaseEntries = await FlattenTree(gitDir, mergeBaseTreeSha, cache: cache);
 
-        var currentHeadData = currentHeadSha != null ? await Utils.ReadObject(gitDir, currentHeadSha) : null;
+        var currentHeadData = currentHeadSha != null ? await Utils.ReadObject(gitDir, currentHeadSha, cache) : null;
         var currentHeadTreeSha = currentHeadData != null ? Utils.ExtractTreeFromCommit(currentHeadData) : null;
-        var currentHeadEntries = currentHeadTreeSha != null ? await FlattenTree(gitDir, currentHeadTreeSha) : new Dictionary<string, string>();
+        var currentHeadEntries = currentHeadTreeSha != null ? await FlattenTree(gitDir, currentHeadTreeSha, cache: cache) : new Dictionary<string, string>();
 
-        var stashEntries = await FlattenTree(gitDir, stashTreeSha);
+        var stashEntries = await FlattenTree(gitDir, stashTreeSha, cache: cache);
 
         if (currentHeadSha == mergeBaseSha)
         {
-            await RestoreTree(path, gitDir, stashTreeSha, "");
+            await RestoreTree(path, gitDir, stashTreeSha, "", cache);
 
             // Delete files that exist in HEAD but not in stash
             foreach (var (filePath, _) in currentHeadEntries)
@@ -404,10 +411,10 @@ public static class Stash
             }
 
             var baseContent = baseSha != null
-                ? await ReadBlobContent(gitDir, baseSha)
+                ? await ReadBlobContent(gitDir, baseSha, cache)
                 : "";
-            var stashContent = await ReadBlobContent(gitDir, sha);
-            var currentContent = await ReadBlobContent(gitDir, currentSha);
+            var stashContent = await ReadBlobContent(gitDir, sha, cache);
+            var currentContent = await ReadBlobContent(gitDir, currentSha, cache);
 
             var merged = ThreeWayMerge(baseContent, stashContent, currentContent);
             var mergedSha = await Utils.HashObject(gitDir, merged, "blob");
@@ -426,7 +433,7 @@ public static class Stash
 
         foreach (var (filePath, sha) in mergedEntries)
         {
-            var content = await ReadBlobContent(gitDir, sha);
+            var content = await ReadBlobContent(gitDir, sha, cache);
             var fullPath = Path.Combine(path, filePath);
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             await File.WriteAllTextAsync(fullPath, content);
@@ -474,11 +481,12 @@ public static class Stash
     private static async Task<Dictionary<string, string>> FlattenTree(
         string gitDir,
         string treeSha,
-        string prefix = ""
+        string prefix = "",
+        Utils.PackfileCache? cache = null
     )
     {
         var entries = new Dictionary<string, string>();
-        var treeData = await Utils.ReadObject(gitDir, treeSha);
+        var treeData = await Utils.ReadObject(gitDir, treeSha, cache ?? new Utils.PackfileCache());
         var treeEntries = Utils.ParseTreeEntries(treeData);
 
         foreach (var entry in treeEntries)
@@ -491,7 +499,7 @@ public static class Stash
             }
             else if (entry.Type == "tree")
             {
-                var subEntries = await FlattenTree(gitDir, entry.Sha, entryPath);
+                var subEntries = await FlattenTree(gitDir, entry.Sha, entryPath, cache);
                 foreach (var (subPath, subSha) in subEntries)
                 {
                     entries[subPath] = subSha;
@@ -502,9 +510,9 @@ public static class Stash
         return entries;
     }
 
-    private static async Task<string> ReadBlobContent(string gitDir, string sha)
+    private static async Task<string> ReadBlobContent(string gitDir, string sha, Utils.PackfileCache cache)
     {
-        var blobData = await Utils.ReadObject(gitDir, sha);
+        var blobData = await Utils.ReadObject(gitDir, sha, cache);
         return Utils.ExtractContentFromBlob(blobData);
     }
 

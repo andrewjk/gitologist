@@ -8,6 +8,7 @@ import {
 	extractTreeFromCommit,
 	parseTreeEntries,
 	readObject,
+	type PackfileCache,
 } from "./utils.ts";
 
 export async function restore(path: string, files: string[]): Promise<void> {
@@ -28,16 +29,18 @@ export async function restore(path: string, files: string[]): Promise<void> {
 	const branchPath = join(gitDir, "refs", "heads", "main");
 	const commitSha = (await readFile(branchPath, "utf-8")).trim();
 
-	const commitData = await readObject(gitDir, commitSha);
+	let cache = new Map();
+
+	const commitData = await readObject(gitDir, commitSha, cache);
 	const treeSha = extractTreeFromCommit(commitData);
 
 	for (const file of files) {
-		const blobSha = await findBlobInTree(gitDir, treeSha, file);
+		const blobSha = await findBlobInTree(gitDir, treeSha, file, cache);
 		if (blobSha === null) {
 			throw new Error(`File not in commit: ${file}`);
 		}
 
-		const blobData = await readObject(gitDir, blobSha);
+		const blobData = await readObject(gitDir, blobSha, cache);
 		const content = extractContentFromBlob(blobData);
 		const filePath = join(path, file);
 		await writeFile(filePath, content, "utf-8");
@@ -65,11 +68,12 @@ async function findBlobInTree(
 	gitDir: string,
 	treeSha: string,
 	filePath: string,
+	cache: PackfileCache,
 ): Promise<string | null> {
 	const parts = filePath.split("/");
 	const [name, ...rest] = parts;
 
-	const treeData = await readObject(gitDir, treeSha);
+	const treeData = await readObject(gitDir, treeSha, cache);
 	const entries = parseTreeEntries(treeData);
 
 	for (const entry of entries) {
@@ -82,7 +86,7 @@ async function findBlobInTree(
 			}
 			if (entry.type === "tree") {
 				if (rest.length > 0) {
-					return findBlobInTree(gitDir, entry.sha, rest.join("/"));
+					return findBlobInTree(gitDir, entry.sha, rest.join("/"), cache);
 				}
 				return null;
 			}

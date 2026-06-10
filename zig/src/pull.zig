@@ -8,6 +8,9 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+
     const cwd = std.Io.Dir.cwd();
     const git_dir = cwd.openDir(io, git_dir_path, .{}) catch {
         return error.NotAGitRepository;
@@ -66,7 +69,7 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
 
         try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = commit_with_newline });
 
-        const commit_data = try utils.readObject(io, allocator, git_dir_path, remote_commit_sha);
+        const commit_data = try utils.readObject(io, allocator, git_dir_path, remote_commit_sha, &cache);
         defer allocator.free(commit_data);
 
         const tree_sha = try utils.extractTreeFromCommit(commit_data);
@@ -74,9 +77,9 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
         var current_blobs = std.StringHashMap([]const u8).init(allocator);
         defer current_blobs.deinit();
 
-        try extractTreeToWorkingDirectory(io, allocator, git_dir_path, path, tree_sha, &current_blobs);
+        try extractTreeToWorkingDirectory(io, allocator, git_dir_path, path, tree_sha, &current_blobs, &cache);
 
-        try updateIndex(io, allocator, git_dir_path, tree_sha);
+        try updateIndex(io, allocator, git_dir_path, tree_sha, &cache);
         return;
     }
 
@@ -87,9 +90,9 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
         return;
     }
 
-    const is_ancestor = try isAncestorOf(io, allocator, git_dir_path, current_commit_sha, remote_commit_sha);
+    const is_ancestor = try isAncestorOf(io, allocator, git_dir_path, current_commit_sha, remote_commit_sha, &cache);
 
-    const current_tree_sha_opt = try getTree(io, allocator, git_dir_path, current_commit_sha);
+    const current_tree_sha_opt = try getTree(io, allocator, git_dir_path, current_commit_sha, &cache);
     defer if (current_tree_sha_opt) |sha| allocator.free(sha);
 
     var current_blobs = std.StringHashMap([]const u8).init(allocator);
@@ -103,7 +106,7 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
     }
 
     if (current_tree_sha_opt) |tree_sha| {
-        try getTreeBlobs(io, allocator, git_dir_path, tree_sha, "", &current_blobs);
+        try getTreeBlobs(io, allocator, git_dir_path, tree_sha, "", &current_blobs, &cache);
     }
 
     if (is_ancestor) {
@@ -120,19 +123,19 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
 
         try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = commit_with_newline });
 
-        const commit_data = try utils.readObject(io, allocator, git_dir_path, remote_commit_sha);
+        const commit_data = try utils.readObject(io, allocator, git_dir_path, remote_commit_sha, &cache);
         defer allocator.free(commit_data);
 
         const tree_sha = try utils.extractTreeFromCommit(commit_data);
 
-        try checkForLocalChanges(io, allocator, git_dir_path, path, &current_blobs, tree_sha);
-        try extractTreeToWorkingDirectory(io, allocator, git_dir_path, path, tree_sha, &current_blobs);
+        try checkForLocalChanges(io, allocator, git_dir_path, path, &current_blobs, tree_sha, &cache);
+        try extractTreeToWorkingDirectory(io, allocator, git_dir_path, path, tree_sha, &current_blobs, &cache);
 
-        try updateIndex(io, allocator, git_dir_path, tree_sha);
+        try updateIndex(io, allocator, git_dir_path, tree_sha, &cache);
         return;
     }
 
-    const merge_base = try findMergeBase(io, allocator, git_dir_path, current_commit_sha, remote_commit_sha);
+    const merge_base = try findMergeBase(io, allocator, git_dir_path, current_commit_sha, remote_commit_sha, &cache);
 
     if (merge_base) |base| {
         if (std.mem.eql(u8, base, remote_commit_sha)) {
@@ -142,7 +145,7 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
         allocator.free(base);
     }
 
-    const merge_commit_sha = try createMergeCommit(io, allocator, git_dir_path, current_commit_sha, remote_commit_sha, branch_name, remote_name);
+    const merge_commit_sha = try createMergeCommit(io, allocator, git_dir_path, current_commit_sha, remote_commit_sha, branch_name, remote_name, &cache);
 
     const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "refs", "heads", branch_name });
     defer allocator.free(local_branch_path);
@@ -157,19 +160,19 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
 
     try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = commit_with_newline });
 
-    const commit_data = try utils.readObject(io, allocator, git_dir_path, merge_commit_sha);
+    const commit_data = try utils.readObject(io, allocator, git_dir_path, merge_commit_sha, &cache);
     defer allocator.free(commit_data);
 
     const tree_sha = try utils.extractTreeFromCommit(commit_data);
 
-    try checkForLocalChanges(io, allocator, git_dir_path, path, &current_blobs, tree_sha);
-    try extractTreeToWorkingDirectory(io, allocator, git_dir_path, path, tree_sha, &current_blobs);
+    try checkForLocalChanges(io, allocator, git_dir_path, path, &current_blobs, tree_sha, &cache);
+    try extractTreeToWorkingDirectory(io, allocator, git_dir_path, path, tree_sha, &current_blobs, &cache);
 
-    try updateIndex(io, allocator, git_dir_path, tree_sha);
+    try updateIndex(io, allocator, git_dir_path, tree_sha, &cache);
 }
 
-fn getTreeBlobs(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, tree_sha: []const u8, prefix: []const u8, blobs: *std.StringHashMap([]const u8)) !void {
-    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha);
+fn getTreeBlobs(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, tree_sha: []const u8, prefix: []const u8, blobs: *std.StringHashMap([]const u8), pack_cache: *utils.PackfileCache) !void {
+    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha, pack_cache);
     defer allocator.free(tree_data);
 
     var entries = try utils.parseTreeEntries(allocator, tree_data);
@@ -196,12 +199,12 @@ fn getTreeBlobs(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const 
             errdefer allocator.free(sha_copy);
             try blobs.put(path_copy, sha_copy);
         } else if (std.mem.eql(u8, entry.entry_type, "tree")) {
-            try getTreeBlobs(io, allocator, git_dir_path, entry.sha, path, blobs);
+            try getTreeBlobs(io, allocator, git_dir_path, entry.sha, path, blobs, pack_cache);
         }
     }
 }
 
-fn checkForLocalChanges(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, working_path: []const u8, current_blobs: *const std.StringHashMap([]const u8), new_tree_sha: []const u8) !void {
+fn checkForLocalChanges(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, working_path: []const u8, current_blobs: *const std.StringHashMap([]const u8), new_tree_sha: []const u8, pack_cache: *utils.PackfileCache) !void {
     const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
     defer allocator.free(index_path);
 
@@ -226,7 +229,7 @@ fn checkForLocalChanges(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
         new_blobs.deinit();
     }
 
-    try getTreeBlobs(io, allocator, git_dir_path, new_tree_sha, "", &new_blobs);
+    try getTreeBlobs(io, allocator, git_dir_path, new_tree_sha, "", &new_blobs, pack_cache);
 
     var new_iter = new_blobs.iterator();
     while (new_iter.next()) |new_entry| {
@@ -265,8 +268,9 @@ fn extractTreeToWorkingDirectory(
     working_path: []const u8,
     tree_sha: []const u8,
     current_blobs: *const std.StringHashMap([]const u8),
+    pack_cache: *utils.PackfileCache,
 ) !void {
-    try extractTreeRecursive(io, allocator, git_dir_path, working_path, tree_sha, "", current_blobs);
+    try extractTreeRecursive(io, allocator, git_dir_path, working_path, tree_sha, "", current_blobs, pack_cache);
 }
 
 fn extractTreeRecursive(
@@ -277,8 +281,9 @@ fn extractTreeRecursive(
     tree_sha: []const u8,
     prefix: []const u8,
     current_blobs: *const std.StringHashMap([]const u8),
+    pack_cache: *utils.PackfileCache,
 ) !void {
-    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha);
+    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha, pack_cache);
     defer allocator.free(tree_data);
 
     var entries = try utils.parseTreeEntries(allocator, tree_data);
@@ -312,7 +317,7 @@ fn extractTreeRecursive(
                 continue;
             }
 
-            const blob_data = try utils.readObject(io, allocator, git_dir_path, entry.sha);
+            const blob_data = try utils.readObject(io, allocator, git_dir_path, entry.sha, pack_cache);
             defer allocator.free(blob_data);
 
             const content = utils.extractContentFromBlob(blob_data);
@@ -330,7 +335,7 @@ fn extractTreeRecursive(
                 break :blk try std.fmt.bufPrint(&buf, "{s}/{s}", .{ prefix, entry.path });
             };
 
-            try extractTreeRecursive(io, allocator, git_dir_path, working_path, entry.sha, new_prefix, current_blobs);
+            try extractTreeRecursive(io, allocator, git_dir_path, working_path, entry.sha, new_prefix, current_blobs, pack_cache);
         }
     }
 }
@@ -340,6 +345,7 @@ fn updateIndex(
     allocator: std.mem.Allocator,
     git_dir_path: []const u8,
     tree_sha: []const u8,
+    pack_cache: *utils.PackfileCache,
 ) !void {
     const index_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "index" });
     defer allocator.free(index_path);
@@ -347,7 +353,7 @@ fn updateIndex(
     var index_content = std.ArrayList(u8).initCapacity(allocator, 100) catch unreachable;
     defer index_content.deinit(allocator);
 
-    try updateIndexRecursive(io, allocator, git_dir_path, tree_sha, "", &index_content);
+    try updateIndexRecursive(io, allocator, git_dir_path, tree_sha, "", &index_content, pack_cache);
 
     try index_content.appendSlice(allocator, "\n");
 
@@ -362,8 +368,9 @@ fn updateIndexRecursive(
     tree_sha: []const u8,
     prefix: []const u8,
     index_content: *std.ArrayList(u8),
+    pack_cache: *utils.PackfileCache,
 ) !void {
-    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha);
+    const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha, pack_cache);
     defer allocator.free(tree_data);
 
     var entries = try utils.parseTreeEntries(allocator, tree_data);
@@ -379,7 +386,7 @@ fn updateIndexRecursive(
 
     for (entries.items) |entry| {
         if (std.mem.eql(u8, entry.entry_type, "blob")) {
-            const blob_data = try utils.readObject(io, allocator, git_dir_path, entry.sha);
+            const blob_data = try utils.readObject(io, allocator, git_dir_path, entry.sha, pack_cache);
             defer allocator.free(blob_data);
 
             const file_content = utils.extractContentFromBlob(blob_data);
@@ -418,12 +425,12 @@ fn updateIndexRecursive(
                 break :blk try std.fmt.bufPrint(&buf, "{s}/{s}", .{ prefix, entry.path });
             };
 
-            try updateIndexRecursive(io, allocator, git_dir_path, entry.sha, new_prefix, index_content);
+            try updateIndexRecursive(io, allocator, git_dir_path, entry.sha, new_prefix, index_content, pack_cache);
         }
     }
 }
 
-fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, ancestor_sha: []const u8, descendant_sha: []const u8) !bool {
+fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, ancestor_sha: []const u8, descendant_sha: []const u8, pack_cache: *utils.PackfileCache) !bool {
     var visited = std.ArrayList([]const u8).initCapacity(allocator, 10) catch unreachable;
     defer {
         for (visited.items) |sha| allocator.free(sha);
@@ -461,7 +468,7 @@ fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const 
 
         try visited.append(allocator, current);
 
-        var parents = try getParents(io, allocator, git_dir_path, current);
+        var parents = try getParents(io, allocator, git_dir_path, current, pack_cache);
         defer {
             for (parents.items) |sha| allocator.free(sha);
             parents.deinit(allocator);
@@ -474,18 +481,18 @@ fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const 
     return false;
 }
 
-fn findMergeBase(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha1: []const u8, sha2: []const u8) !?[]const u8 {
+fn findMergeBase(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha1: []const u8, sha2: []const u8, pack_cache: *utils.PackfileCache) !?[]const u8 {
     if (std.mem.eql(u8, sha1, sha2)) {
         return try allocator.dupe(u8, sha1);
     }
 
-    var ancestors1 = try getAllAncestors(io, allocator, git_dir_path, sha1);
+    var ancestors1 = try getAllAncestors(io, allocator, git_dir_path, sha1, pack_cache);
     defer {
         for (ancestors1.items) |sha| allocator.free(sha);
         ancestors1.deinit(allocator);
     }
 
-    var ancestors2 = try getAllAncestors(io, allocator, git_dir_path, sha2);
+    var ancestors2 = try getAllAncestors(io, allocator, git_dir_path, sha2, pack_cache);
     defer {
         for (ancestors2.items) |sha| allocator.free(sha);
         ancestors2.deinit(allocator);
@@ -513,7 +520,7 @@ fn findMergeBase(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const
     return null;
 }
 
-fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) !std.ArrayList([]const u8) {
+fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *utils.PackfileCache) !std.ArrayList([]const u8) {
     var ancestors = std.ArrayList([]const u8).initCapacity(allocator, 10) catch unreachable;
     errdefer {
         for (ancestors.items) |s| allocator.free(s);
@@ -544,7 +551,7 @@ fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []con
             continue;
         }
 
-        var parents = try getParents(io, allocator, git_dir_path, current);
+        var parents = try getParents(io, allocator, git_dir_path, current, pack_cache);
         defer {
             for (parents.items) |p| allocator.free(p);
             parents.deinit(allocator);
@@ -559,14 +566,14 @@ fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []con
     return ancestors;
 }
 
-fn getParents(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) !std.ArrayList([]const u8) {
+fn getParents(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *utils.PackfileCache) !std.ArrayList([]const u8) {
     var parents = std.ArrayList([]const u8).initCapacity(allocator, 2) catch unreachable;
     errdefer {
         for (parents.items) |p| allocator.free(p);
         parents.deinit(allocator);
     }
 
-    const commit_data = utils.readObject(io, allocator, git_dir_path, sha) catch |err| {
+    const commit_data = utils.readObject(io, allocator, git_dir_path, sha, pack_cache) catch |err| {
         if (err == error.FileNotFound) {
             return parents;
         }
@@ -587,8 +594,8 @@ fn getParents(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8
     return parents;
 }
 
-fn getTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) !?[]const u8 {
-    const commit_data = utils.readObject(io, allocator, git_dir_path, sha) catch |err| {
+fn getTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *utils.PackfileCache) !?[]const u8 {
+    const commit_data = utils.readObject(io, allocator, git_dir_path, sha, pack_cache) catch |err| {
         if (err == error.FileNotFound) {
             return null;
         }
@@ -609,8 +616,8 @@ fn getTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, s
     return null;
 }
 
-fn createMergeCommit(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, parent1: []const u8, parent2: []const u8, branch_name: []const u8, remote_name: []const u8) ![]const u8 {
-    const tree_sha_opt = try getTree(io, allocator, git_dir_path, parent1);
+fn createMergeCommit(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, parent1: []const u8, parent2: []const u8, branch_name: []const u8, remote_name: []const u8, pack_cache: *utils.PackfileCache) ![]const u8 {
+    const tree_sha_opt = try getTree(io, allocator, git_dir_path, parent1, pack_cache);
 
     if (tree_sha_opt == null) {
         return error.CouldNotGetTreeForMergeCommit;

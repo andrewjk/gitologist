@@ -26,6 +26,7 @@ enum PullError: Error, LocalizedError, Equatable {
 
 func pull(at path: String, remote: String? = nil, branch: String? = nil, options: RemoteOptions? = nil) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+	let cache = PackfileCache()
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
 		throw PullError.notAGitRepository
@@ -58,10 +59,10 @@ func pull(at path: String, remote: String? = nil, branch: String? = nil, options
 
 	guard let currentCommitSha = currentCommitSha else {
 		try await updateBranch(at: gitDir.path, branchName: branchName, commitSha: remoteCommitSha)
-		let commitData = try await readObject(at: gitDir.path, sha: remoteCommitSha)
+		let commitData = try await readObject(at: gitDir.path, sha: remoteCommitSha, cache: cache)
 		let treeSha = try extractTreeFromCommit(commitData)
 
-		try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha, currentBlobs: [:])
+		try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha, currentBlobs: [:], cache: cache)
 		try await updateIndex(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
 		return
 	}
@@ -70,23 +71,23 @@ func pull(at path: String, remote: String? = nil, branch: String? = nil, options
 		return
 	}
 
-	let isAncestor = try await isAncestorOf(gitDir: gitDir.path, ancestorSha: currentCommitSha, descendantSha: remoteCommitSha)
+	let isAncestor = try await isAncestorOf(gitDir: gitDir.path, ancestorSha: currentCommitSha, descendantSha: remoteCommitSha, cache: cache)
 
-	let currentTreeSha = try await getTree(gitDir: gitDir.path, sha: currentCommitSha)
-	let currentBlobs = currentTreeSha != nil ? try await getTreeBlobs(gitDir: gitDir.path, treeSha: currentTreeSha!) : [:]
+	let currentTreeSha = try await getTree(gitDir: gitDir.path, sha: currentCommitSha, cache: cache)
+	let currentBlobs = currentTreeSha != nil ? try await getTreeBlobs(gitDir: gitDir.path, treeSha: currentTreeSha!, cache: cache) : [:]
 
 	if isAncestor {
 		try await updateBranch(at: gitDir.path, branchName: branchName, commitSha: remoteCommitSha)
-		let commitData = try await readObject(at: gitDir.path, sha: remoteCommitSha)
+		let commitData = try await readObject(at: gitDir.path, sha: remoteCommitSha, cache: cache)
 		let treeSha = try extractTreeFromCommit(commitData)
 
-		try await checkForLocalChanges(gitDir: gitDir.path, workingPath: path, currentBlobs: currentBlobs, newTreeSha: treeSha)
-		try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha, currentBlobs: currentBlobs)
+		try await checkForLocalChanges(gitDir: gitDir.path, workingPath: path, currentBlobs: currentBlobs, newTreeSha: treeSha, cache: cache)
+		try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha, currentBlobs: currentBlobs, cache: cache)
 		try await updateIndex(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
 		return
 	}
 
-	let mergeBase = try await findMergeBase(gitDir: gitDir.path, sha1: currentCommitSha, sha2: remoteCommitSha)
+	let mergeBase = try await findMergeBase(gitDir: gitDir.path, sha1: currentCommitSha, sha2: remoteCommitSha, cache: cache)
 
 	guard let mergeBase = mergeBase, mergeBase != remoteCommitSha else {
 		return
@@ -96,21 +97,22 @@ func pull(at path: String, remote: String? = nil, branch: String? = nil, options
 		gitDir: gitDir.path,
 		parent1: currentCommitSha,
 		parent2: remoteCommitSha,
-		message: "Merge branch '\(branchName)' of \(remoteName)"
+		message: "Merge branch '\(branchName)' of \(remoteName)",
+		cache: cache
 	)
 
 	try await updateBranch(at: gitDir.path, branchName: branchName, commitSha: mergeCommitSha)
-	let commitData = try await readObject(at: gitDir.path, sha: mergeCommitSha)
+	let commitData = try await readObject(at: gitDir.path, sha: mergeCommitSha, cache: cache)
 	let treeSha = try extractTreeFromCommit(commitData)
 
-	try await checkForLocalChanges(gitDir: gitDir.path, workingPath: path, currentBlobs: currentBlobs, newTreeSha: treeSha)
-	try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha, currentBlobs: currentBlobs)
+	try await checkForLocalChanges(gitDir: gitDir.path, workingPath: path, currentBlobs: currentBlobs, newTreeSha: treeSha, cache: cache)
+	try await extractTreeToWorkingDirectory(gitDir: gitDir.path, workingPath: path, treeSha: treeSha, currentBlobs: currentBlobs, cache: cache)
 	try await updateIndex(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
 }
 
-private func getTreeBlobs(gitDir: String, treeSha: String, prefix: String = "") async throws -> [String: String] {
+private func getTreeBlobs(gitDir: String, treeSha: String, prefix: String = "", cache: PackfileCache) async throws -> [String: String] {
 	var blobs: [String: String] = [:]
-	let treeData = try await readObject(at: gitDir, sha: treeSha)
+	let treeData = try await readObject(at: gitDir, sha: treeSha, cache: cache)
 	let entries = try parseTreeEntries(treeData)
 
 	for entry in entries {
@@ -119,7 +121,7 @@ private func getTreeBlobs(gitDir: String, treeSha: String, prefix: String = "") 
 		case .blob:
 			blobs[path] = entry.sha
 		case .tree:
-			let childBlobs = try await getTreeBlobs(gitDir: gitDir, treeSha: entry.sha, prefix: path)
+			let childBlobs = try await getTreeBlobs(gitDir: gitDir, treeSha: entry.sha, prefix: path, cache: cache)
 			for (childPath, childSha) in childBlobs {
 				blobs[childPath] = childSha
 			}
@@ -129,10 +131,10 @@ private func getTreeBlobs(gitDir: String, treeSha: String, prefix: String = "") 
 	return blobs
 }
 
-private func checkForLocalChanges(gitDir: String, workingPath: String, currentBlobs: [String: String], newTreeSha: String) async throws {
+private func checkForLocalChanges(gitDir: String, workingPath: String, currentBlobs: [String: String], newTreeSha: String, cache: PackfileCache) async throws {
 	let indexPath = URL(fileURLWithPath: gitDir).appendingPathComponent("index")
 	let index = try await getIndex(at: indexPath.path)
-	let newBlobs = try await getTreeBlobs(gitDir: gitDir, treeSha: newTreeSha)
+	let newBlobs = try await getTreeBlobs(gitDir: gitDir, treeSha: newTreeSha, cache: cache)
 
 	for (path, newSha) in newBlobs {
 		let currentSha = currentBlobs[path]
@@ -154,7 +156,7 @@ private func checkForLocalChanges(gitDir: String, workingPath: String, currentBl
 	}
 }
 
-private func isAncestorOf(gitDir: String, ancestorSha: String, descendantSha: String) async throws -> Bool {
+private func isAncestorOf(gitDir: String, ancestorSha: String, descendantSha: String, cache: PackfileCache) async throws -> Bool {
 	var visited = Set<String>()
 	var queue = [descendantSha]
 
@@ -170,20 +172,20 @@ private func isAncestorOf(gitDir: String, ancestorSha: String, descendantSha: St
 		}
 		visited.insert(current)
 
-		let parents = try await getParents(gitDir: gitDir, sha: current)
+		let parents = try await getParents(gitDir: gitDir, sha: current, cache: cache)
 		queue.append(contentsOf: parents)
 	}
 
 	return false
 }
 
-private func findMergeBase(gitDir: String, sha1: String, sha2: String) async throws -> String? {
+private func findMergeBase(gitDir: String, sha1: String, sha2: String, cache: PackfileCache) async throws -> String? {
 	if sha1 == sha2 {
 		return sha1
 	}
 
-	let ancestors1 = try await getAllAncestors(gitDir: gitDir, sha: sha1)
-	let ancestors2 = try await getAllAncestors(gitDir: gitDir, sha: sha2)
+	let ancestors1 = try await getAllAncestors(gitDir: gitDir, sha: sha1, cache: cache)
+	let ancestors2 = try await getAllAncestors(gitDir: gitDir, sha: sha2, cache: cache)
 
 	var allAncestors1 = ancestors1
 	allAncestors1.insert(sha1)
@@ -200,7 +202,7 @@ private func findMergeBase(gitDir: String, sha1: String, sha2: String) async thr
 	return nil
 }
 
-private func getAllAncestors(gitDir: String, sha: String) async throws -> Set<String> {
+private func getAllAncestors(gitDir: String, sha: String, cache: PackfileCache) async throws -> Set<String> {
 	var ancestors = Set<String>()
 	var queue = [sha]
 
@@ -211,7 +213,7 @@ private func getAllAncestors(gitDir: String, sha: String) async throws -> Set<St
 			continue
 		}
 
-		let parents = try await getParents(gitDir: gitDir, sha: current)
+		let parents = try await getParents(gitDir: gitDir, sha: current, cache: cache)
 		for parent in parents {
 			ancestors.insert(parent)
 			queue.append(parent)
@@ -221,9 +223,9 @@ private func getAllAncestors(gitDir: String, sha: String) async throws -> Set<St
 	return ancestors
 }
 
-private func getParents(gitDir: String, sha: String) async throws -> [String] {
+private func getParents(gitDir: String, sha: String, cache: PackfileCache) async throws -> [String] {
 	do {
-		let commitData = try await readObject(at: gitDir, sha: sha)
+		let commitData = try await readObject(at: gitDir, sha: sha, cache: cache)
 		var parents: [String] = []
 		let lines = commitData.components(separatedBy: .newlines)
 
@@ -239,9 +241,9 @@ private func getParents(gitDir: String, sha: String) async throws -> [String] {
 	}
 }
 
-private func getTree(gitDir: String, sha: String) async throws -> String? {
+private func getTree(gitDir: String, sha: String, cache: PackfileCache) async throws -> String? {
 	do {
-		let commitData = try await readObject(at: gitDir, sha: sha)
+		let commitData = try await readObject(at: gitDir, sha: sha, cache: cache)
 		guard let nullIndex = commitData.firstIndex(of: "\0") else {
 			return nil
 		}
@@ -263,8 +265,8 @@ private func getTree(gitDir: String, sha: String) async throws -> String? {
 	}
 }
 
-private func createMergeCommit(gitDir: String, parent1: String, parent2: String, message: String) async throws -> String {
-	guard let treeSha = try await getTree(gitDir: gitDir, sha: parent1) else {
+private func createMergeCommit(gitDir: String, parent1: String, parent2: String, message: String, cache: PackfileCache) async throws -> String {
+	guard let treeSha = try await getTree(gitDir: gitDir, sha: parent1, cache: cache) else {
 		throw PullError.invalidCommitObject
 	}
 
@@ -287,12 +289,12 @@ private func createMergeCommit(gitDir: String, parent1: String, parent2: String,
 	return try await hashObject(at: gitDir, content: commitContent, type: "commit")
 }
 
-private func extractTreeToWorkingDirectory(gitDir: String, workingPath: String, treeSha: String, currentBlobs: [String: String]) async throws {
-	try await extractTreeRecursive(gitDir: gitDir, workingPath: workingPath, treeSha: treeSha, prefix: "", currentBlobs: currentBlobs)
+private func extractTreeToWorkingDirectory(gitDir: String, workingPath: String, treeSha: String, currentBlobs: [String: String], cache: PackfileCache) async throws {
+	try await extractTreeRecursive(gitDir: gitDir, workingPath: workingPath, treeSha: treeSha, prefix: "", currentBlobs: currentBlobs, cache: cache)
 }
 
-private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: String, prefix: String, currentBlobs: [String: String]) async throws {
-	let treeData = try await readObject(at: gitDir, sha: treeSha)
+private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: String, prefix: String, currentBlobs: [String: String], cache: PackfileCache) async throws {
+	let treeData = try await readObject(at: gitDir, sha: treeSha, cache: cache)
 	let entries = try parseTreeEntries(treeData)
 
 	for entry in entries {
@@ -311,7 +313,7 @@ private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: 
 			if currentBlobs[path] == entry.sha {
 				continue
 			}
-			let blobData = try await readObject(at: gitDir, sha: entry.sha)
+			let blobData = try await readObject(at: gitDir, sha: entry.sha, cache: cache)
 			let content = try extractContentFromBlob(blobData)
 			try content.write(toFile: entryPath, atomically: true, encoding: .utf8)
 
@@ -328,7 +330,8 @@ private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: 
 				workingPath: workingPath,
 				treeSha: entry.sha,
 				prefix: newPrefix,
-				currentBlobs: currentBlobs
+				currentBlobs: currentBlobs,
+				cache: cache
 			)
 		}
 	}
@@ -336,12 +339,12 @@ private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: 
 
 func updateIndex(gitDir: String, workingPath _: String, treeSha: String) async throws {
 	let indexPath = URL(fileURLWithPath: gitDir).appendingPathComponent("index")
+	let cache = PackfileCache()
 	var index = try await getIndex(at: indexPath.path)
 
-	// Clear existing index and rebuild from tree
 	index.removeAll()
 
-	index = try await updateIndexRecursive(gitDir: gitDir, treeSha: treeSha, prefix: "", index: index)
+	index = try await updateIndexRecursive(gitDir: gitDir, treeSha: treeSha, prefix: "", index: index, cache: cache)
 
 	try await writeIndex(at: indexPath.path, index: index)
 }
@@ -350,16 +353,17 @@ private func updateIndexRecursive(
 	gitDir: String,
 	treeSha: String,
 	prefix: String,
-	index: [String: IndexEntry]
+	index: [String: IndexEntry],
+	cache: PackfileCache
 ) async throws -> [String: IndexEntry] {
-	let treeData = try await readObject(at: gitDir, sha: treeSha)
+	let treeData = try await readObject(at: gitDir, sha: treeSha, cache: cache)
 	let entries = try parseTreeEntries(treeData)
 	var newIndex = index
 
 	for entry in entries {
 		switch entry.type {
 		case .blob:
-			let blobData = try await readObject(at: gitDir, sha: entry.sha)
+			let blobData = try await readObject(at: gitDir, sha: entry.sha, cache: cache)
 			let fileContent = try extractContentFromBlob(blobData)
 			// Use git blob hash format (with "blob <size>\0" header)
 			let blobHeader = "blob \(fileContent.utf8.count)\0\(fileContent)"
@@ -388,7 +392,8 @@ private func updateIndexRecursive(
 				gitDir: gitDir,
 				treeSha: entry.sha,
 				prefix: newPrefix,
-				index: newIndex
+				index: newIndex,
+				cache: cache
 			)
 		}
 	}

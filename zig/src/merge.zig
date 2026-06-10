@@ -13,6 +13,9 @@ pub fn merge(io: std.Io, allocator: std.mem.Allocator, path: []const u8, branch_
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+
     const cwd = std.Io.Dir.cwd();
     _ = cwd.openDir(io, git_dir_path, .{}) catch {
         return error.NotAGitRepository;
@@ -51,7 +54,7 @@ pub fn merge(io: std.Io, allocator: std.mem.Allocator, path: []const u8, branch_
         };
     }
 
-    const is_ancestor = try isAncestorOf(io, allocator, git_dir_path, current_sha, branch_sha);
+    const is_ancestor = try isAncestorOf(io, allocator, git_dir_path, current_sha, branch_sha, &cache);
 
     const opts = options orelse MergeOptions{};
 
@@ -68,7 +71,7 @@ pub fn merge(io: std.Io, allocator: std.mem.Allocator, path: []const u8, branch_
         return result;
     }
 
-    const merge_base = try findMergeBase(io, allocator, git_dir_path, current_sha, branch_sha);
+    const merge_base = try findMergeBase(io, allocator, git_dir_path, current_sha, branch_sha, &cache);
 
     if (merge_base) |base| {
         if (std.mem.eql(u8, base, current_sha)) {
@@ -87,7 +90,7 @@ pub fn merge(io: std.Io, allocator: std.mem.Allocator, path: []const u8, branch_
 
     const merge_message = if (opts.message) |msg| try allocator.dupe(u8, msg) else try std.fmt.allocPrint(allocator, "Merge branch '{s}' into '{s}'", .{ branch_name, current_branch });
 
-    const merge_commit_sha = try createMergeCommit(io, allocator, git_dir_path, current_sha, branch_sha, merge_message);
+    const merge_commit_sha = try createMergeCommit(io, allocator, git_dir_path, current_sha, branch_sha, merge_message, &cache);
 
     try utils.updateBranch(io, allocator, git_dir_path, current_branch, merge_commit_sha);
 
@@ -121,7 +124,7 @@ fn getBranchCommit(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []con
     return result;
 }
 
-fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, ancestor_sha: []const u8, descendant_sha: []const u8) !bool {
+fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, ancestor_sha: []const u8, descendant_sha: []const u8, pack_cache: *utils.PackfileCache) !bool {
     var visited = std.ArrayList([]const u8).initCapacity(allocator, 10) catch unreachable;
     defer {
         for (visited.items) |sha| allocator.free(sha);
@@ -159,7 +162,7 @@ fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const 
 
         try visited.append(allocator, current);
 
-        var parents = try getParents(io, allocator, git_dir_path, current);
+        var parents = try getParents(io, allocator, git_dir_path, current, pack_cache);
         defer {
             for (parents.items) |sha| allocator.free(sha);
             parents.deinit(allocator);
@@ -172,18 +175,18 @@ fn isAncestorOf(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const 
     return false;
 }
 
-fn findMergeBase(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha1: []const u8, sha2: []const u8) !?[]const u8 {
+fn findMergeBase(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha1: []const u8, sha2: []const u8, pack_cache: *utils.PackfileCache) !?[]const u8 {
     if (std.mem.eql(u8, sha1, sha2)) {
         return try allocator.dupe(u8, sha1);
     }
 
-    var ancestors1 = try getAllAncestors(io, allocator, git_dir_path, sha1);
+    var ancestors1 = try getAllAncestors(io, allocator, git_dir_path, sha1, pack_cache);
     defer {
         for (ancestors1.items) |sha| allocator.free(sha);
         ancestors1.deinit(allocator);
     }
 
-    var ancestors2 = try getAllAncestors(io, allocator, git_dir_path, sha2);
+    var ancestors2 = try getAllAncestors(io, allocator, git_dir_path, sha2, pack_cache);
     defer {
         for (ancestors2.items) |sha| allocator.free(sha);
         ancestors2.deinit(allocator);
@@ -211,7 +214,7 @@ fn findMergeBase(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const
     return null;
 }
 
-fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) !std.ArrayList([]const u8) {
+fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *utils.PackfileCache) !std.ArrayList([]const u8) {
     var ancestors = std.ArrayList([]const u8).initCapacity(allocator, 10) catch unreachable;
     errdefer {
         for (ancestors.items) |s| allocator.free(s);
@@ -242,7 +245,7 @@ fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []con
             continue;
         }
 
-        var parents = try getParents(io, allocator, git_dir_path, current);
+        var parents = try getParents(io, allocator, git_dir_path, current, pack_cache);
         defer {
             for (parents.items) |p| allocator.free(p);
             parents.deinit(allocator);
@@ -257,14 +260,14 @@ fn getAllAncestors(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []con
     return ancestors;
 }
 
-fn getParents(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) !std.ArrayList([]const u8) {
+fn getParents(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *utils.PackfileCache) !std.ArrayList([]const u8) {
     var parents = std.ArrayList([]const u8).initCapacity(allocator, 2) catch unreachable;
     errdefer {
         for (parents.items) |p| allocator.free(p);
         parents.deinit(allocator);
     }
 
-    const commit_data = utils.readObject(io, allocator, git_dir_path, sha) catch |err| {
+    const commit_data = utils.readObject(io, allocator, git_dir_path, sha, pack_cache) catch |err| {
         if (err == error.FileNotFound) {
             return parents;
         }
@@ -285,8 +288,8 @@ fn getParents(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8
     return parents;
 }
 
-fn getTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8) !?[]const u8 {
-    const commit_data = utils.readObject(io, allocator, git_dir_path, sha) catch |err| {
+fn getTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, pack_cache: *utils.PackfileCache) !?[]const u8 {
+    const commit_data = utils.readObject(io, allocator, git_dir_path, sha, pack_cache) catch |err| {
         if (err == error.FileNotFound) {
             return null;
         }
@@ -307,8 +310,8 @@ fn getTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, s
     return null;
 }
 
-fn createMergeCommit(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, parent1: []const u8, parent2: []const u8, message: []const u8) ![]const u8 {
-    const tree_sha_opt = try getTree(io, allocator, git_dir_path, parent1);
+fn createMergeCommit(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, parent1: []const u8, parent2: []const u8, message: []const u8, pack_cache: *utils.PackfileCache) ![]const u8 {
+    const tree_sha_opt = try getTree(io, allocator, git_dir_path, parent1, pack_cache);
 
     if (tree_sha_opt == null) {
         return error.CouldNotGetTreeForMergeCommit;

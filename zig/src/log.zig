@@ -62,6 +62,9 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
 
     const limit = opts.limit orelse std.math.maxInt(usize);
 
+    var pack_cache = utils.PackfileCache.init(allocator);
+    defer pack_cache.deinit();
+
     if (opts.file) |file_path| {
         var cache = std.AutoHashMap([40]u8, ?[]const u8).init(allocator);
         defer {
@@ -76,20 +79,20 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
 
         while (true) {
             const sha_to_parse = if (current_sha) |s| s else commit_sha;
-            const entry = try parseCommitEntry(io, allocator, git_dir_path, sha_to_parse);
+            const entry = try parseCommitEntry(io, allocator, git_dir_path, sha_to_parse, &pack_cache);
 
             if (current_sha) |s| {
                 allocator.free(s);
             }
 
-        const current_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, entry.tree, file_path, &cache);
+        const current_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, entry.tree, file_path, &cache, &pack_cache);
 
         var should_include = false;
 
         if (entry.parent) |p| {
-            const parent_entry = try parseCommitEntry(io, allocator, git_dir_path, p);
+            const parent_entry = try parseCommitEntry(io, allocator, git_dir_path, p, &pack_cache);
             defer freeLogEntry(allocator, parent_entry);
-            const parent_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, parent_entry.tree, file_path, &cache);
+            const parent_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, parent_entry.tree, file_path, &cache, &pack_cache);
             should_include = !blobShaEqual(current_blob_sha, parent_blob_sha);
                 current_sha = try allocator.dupe(u8, p);
             } else {
@@ -117,7 +120,7 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
     while (entries.items.len < limit) {
         const sha_to_parse = if (current_sha) |s| s else commit_sha;
 
-        const entry = try parseCommitEntry(io, allocator, git_dir_path, sha_to_parse);
+        const entry = try parseCommitEntry(io, allocator, git_dir_path, sha_to_parse, &pack_cache);
 
         if (current_sha) |s| {
             allocator.free(s);
@@ -143,8 +146,8 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
     return entries.toOwnedSlice(allocator);
 }
 
-fn parseCommitEntry(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, commit_sha: []const u8) !LogEntry {
-    const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha);
+fn parseCommitEntry(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, commit_sha: []const u8, pack_cache: *utils.PackfileCache) !LogEntry {
+    const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha, pack_cache);
     defer allocator.free(commit_data);
 
     const content = utils.extractContentFromBlob(commit_data);
@@ -273,6 +276,7 @@ fn getFileBlobSha(
     tree_sha: []const u8,
     file_path: []const u8,
     cache: *std.AutoHashMap([40]u8, ?[]const u8),
+    pack_cache: *utils.PackfileCache,
 ) !?[]const u8 {
     var key: [40]u8 = undefined;
     @memcpy(&key, tree_sha[0..40]);
@@ -291,7 +295,7 @@ fn getFileBlobSha(
     var current_is_tree = false;
 
     {
-        const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha);
+        const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha, pack_cache);
         defer allocator.free(tree_data);
 
         var tree_entries = try utils.parseTreeEntries(allocator, tree_data);
@@ -325,7 +329,7 @@ fn getFileBlobSha(
             try cache.put(key, null);
             return null;
         }
-        const sub_tree_data = try utils.readObject(io, allocator, git_dir_path, current_sha.?);
+        const sub_tree_data = try utils.readObject(io, allocator, git_dir_path, current_sha.?, pack_cache);
         defer allocator.free(sub_tree_data);
         var sub_entries = try utils.parseTreeEntries(allocator, sub_tree_data);
         defer {

@@ -390,7 +390,9 @@ test "should read loose object" {
     const sha = try @import("gitologist").utils.hashObject(io, allocator, git_dir_path, content, "blob");
     defer allocator.free(sha);
 
-    const data = try @import("gitologist").utils.readObjectData(io, allocator, git_dir_path, sha);
+    var cache = @import("gitologist").utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+    const data = try @import("gitologist").utils.readObjectData(io, allocator, git_dir_path, sha, &cache);
     defer allocator.free(data);
 
     const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse return error.TestExpectedEqual;
@@ -453,7 +455,9 @@ test "should read object from packfile" {
     try pack_dir.writeFile(io, .{ .sub_path = "test.pack", .data = pack_data });
 
     const utils = @import("gitologist").utils;
-    const data = try utils.readObjectData(io, allocator, git_dir_path, &sha_hex);
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+    const data = try utils.readObjectData(io, allocator, git_dir_path, sha, &cache);
     defer allocator.free(data);
 
     const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse return error.TestExpectedEqual;
@@ -461,7 +465,7 @@ test "should read object from packfile" {
     const body = data[null_idx + 1 ..];
 
     try std.testing.expectEqualStrings("blob 16", header);
-    try std.testing.expectEqualStrings(blob_content, body);
+    try std.testing.expectEqualStrings(content, body);
 }
 
 test "should throw error when object not found" {
@@ -481,7 +485,9 @@ test "should throw error when object not found" {
     try init(io, allocator, tmp_path);
 
     const utils = @import("gitologist").utils;
-    const result = utils.readObjectData(io, allocator, git_dir_path, "0000000000000000000000000000000000000000");
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+    const result = utils.readObjectData(io, allocator, git_dir_path, "0000000000000000000000000000000000000000", &cache);
     try std.testing.expectError(error.ObjectNotFound, result);
 }
 

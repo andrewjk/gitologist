@@ -3,7 +3,7 @@ const std = @import("std");
 const utils = @import("utils.zig");
 const packfile = @import("packfile.zig");
 
-pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, visited: *std.StringHashMap(void)) !std.ArrayList(packfile.PackObject) {
+pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, sha: []const u8, visited: *std.StringHashMap(void), pack_cache: *utils.PackfileCache) !std.ArrayList(packfile.PackObject) {
     var objects = std.ArrayList(packfile.PackObject).initCapacity(allocator, 0) catch unreachable;
     errdefer {
         for (objects.items) |obj| {
@@ -20,7 +20,7 @@ pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
 
     try visited.put(sha, {});
 
-    const object_data = try utils.readObjectData(io, allocator, git_dir_path, sha);
+    const object_data = try utils.readObjectData(io, allocator, git_dir_path, sha, pack_cache);
     defer allocator.free(object_data);
 
     const null_idx = std.mem.indexOfScalar(u8, object_data, 0) orelse return objects;
@@ -45,7 +45,7 @@ pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "parent ")) {
                 const parent_sha = line["parent ".len..];
-                const parent_objects = try enumerateObjects(io, allocator, git_dir_path, parent_sha, visited);
+                const parent_objects = try enumerateObjects(io, allocator, git_dir_path, parent_sha, visited, pack_cache);
                 for (parent_objects.items) |obj| {
                     try objects.append(allocator, .{
                         .obj_type = try allocator.dupe(u8, obj.obj_type),
@@ -55,7 +55,7 @@ pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
                 }
             } else if (std.mem.startsWith(u8, line, "tree ")) {
                 const tree_sha = line["tree ".len..];
-                const tree_objects = try enumerateObjects(io, allocator, git_dir_path, tree_sha, visited);
+                const tree_objects = try enumerateObjects(io, allocator, git_dir_path, tree_sha, visited, pack_cache);
                 for (tree_objects.items) |obj| {
                     try objects.append(allocator, .{
                         .obj_type = try allocator.dupe(u8, obj.obj_type),
@@ -78,7 +78,7 @@ pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
         }
 
         for (entries.items) |entry| {
-            const entry_objects = try enumerateObjects(io, allocator, git_dir_path, entry.sha, visited);
+            const entry_objects = try enumerateObjects(io, allocator, git_dir_path, entry.sha, visited, pack_cache);
             for (entry_objects.items) |obj| {
                 try objects.append(allocator, .{
                     .obj_type = try allocator.dupe(u8, obj.obj_type),
@@ -93,6 +93,8 @@ pub fn enumerateObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: 
 }
 
 pub fn getAllObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8) !std.ArrayList(packfile.PackObject) {
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
     var objects = std.ArrayList(packfile.PackObject).initCapacity(allocator, 0) catch unreachable;
     errdefer {
         for (objects.items) |obj| {
@@ -127,7 +129,7 @@ pub fn getAllObjects(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []c
 
             const sha = try std.fmt.allocPrint(allocator, "{s}{s}", .{ entry.name, file.name });
 
-            const object_data = utils.readObject(io, allocator, git_dir_path, sha) catch {
+            const object_data = utils.readObject(io, allocator, git_dir_path, sha, &cache) catch {
                 allocator.free(sha);
                 continue;
             };

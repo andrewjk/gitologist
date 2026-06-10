@@ -5,16 +5,17 @@ namespace Gitologist;
 
 public static class Objects
 {
-    public static async Task<List<PackObject>> EnumerateObjects(string gitDir, string sha, HashSet<string>? visited = null)
+    public static async Task<List<PackObject>> EnumerateObjects(string gitDir, string sha, HashSet<string>? visited = null, Utils.PackfileCache? packCache = null)
     {
         var newVisited = visited ?? new HashSet<string>();
+        var cache = packCache ?? new Utils.PackfileCache();
         if (newVisited.Contains(sha))
         {
             return new List<PackObject>();
         }
         newVisited.Add(sha);
 
-        var objectData = await Utils.ReadObjectData(gitDir, sha);
+        var objectData = await Utils.ReadObjectData(gitDir, sha, cache);
         var nullIndex = Array.IndexOf(objectData, (byte)0);
         if (nullIndex == -1)
         {
@@ -53,13 +54,13 @@ public static class Objects
                 if (line.StartsWith("parent "))
                 {
                     var parentSha = line.Substring(7);
-                    var parentObjects = await EnumerateObjects(gitDir, parentSha, newVisited);
+                    var parentObjects = await EnumerateObjects(gitDir, parentSha, newVisited, cache);
                     objects.AddRange(parentObjects);
                 }
                 else if (line.StartsWith("tree "))
                 {
                     var treeSha = line.Substring(5);
-                    var treeObjects = await EnumerateObjects(gitDir, treeSha, newVisited);
+                    var treeObjects = await EnumerateObjects(gitDir, treeSha, newVisited, cache);
                     objects.AddRange(treeObjects);
                 }
             }
@@ -69,7 +70,7 @@ public static class Objects
             var entries = Utils.ParseTreeEntriesFromData(contentData);
             foreach (var entry in entries)
             {
-                var entryObjects = await EnumerateObjects(gitDir, entry.Sha, newVisited);
+                var entryObjects = await EnumerateObjects(gitDir, entry.Sha, newVisited, cache);
                 objects.AddRange(entryObjects);
             }
         }
@@ -79,6 +80,7 @@ public static class Objects
 
     public static async Task<List<PackObject>> GetAllObjects(string gitDir)
     {
+        var cache = new Utils.PackfileCache();
         var objectsDir = Path.Combine(gitDir, "objects");
         var objects = new List<PackObject>();
 
@@ -106,7 +108,7 @@ public static class Objects
 
                 try
                 {
-                    var objectData = await Utils.ReadObject(gitDir, sha);
+                    var objectData = await Utils.ReadObject(gitDir, sha, cache);
                     var headerEnd = objectData.IndexOf('\n');
                     if (headerEnd == -1)
                     {

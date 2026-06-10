@@ -2,6 +2,7 @@ import Foundation
 
 private class ObjectEnumerator {
 	var visited = Set<String>()
+	let cache = PackfileCache()
 	var objects: [PackObject] = []
 
 	func enumerate(at gitDir: String, sha: String) async throws {
@@ -10,7 +11,7 @@ private class ObjectEnumerator {
 		}
 		visited.insert(sha)
 
-		let objectData = try await readObjectData(at: gitDir, sha: sha)
+		let objectData = try await readObjectData(at: gitDir, sha: sha, cache: cache)
 		guard let nullIndex = objectData.firstIndex(of: 0) else {
 			return
 		}
@@ -61,6 +62,7 @@ func enumerateObjects(at gitDir: String, sha: String) async throws -> [PackObjec
 }
 
 func getAllObjects(at gitDir: String) async throws -> [PackObject] {
+	let cache = PackfileCache()
 	let objectsDir = URL(fileURLWithPath: gitDir).appendingPathComponent("objects")
 	var objects: [PackObject] = []
 
@@ -80,7 +82,7 @@ func getAllObjects(at gitDir: String) async throws -> [PackObject] {
 		for file in files {
 			let sha = dir.lastPathComponent + file.lastPathComponent
 			do {
-				let objectData = try await readObject(at: gitDir, sha: sha)
+				let objectData = try await readObject(at: gitDir, sha: sha, cache: cache)
 				guard let headerEnd = objectData.firstIndex(of: "\n") else {
 					continue
 				}

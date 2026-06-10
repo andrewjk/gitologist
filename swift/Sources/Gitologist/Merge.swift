@@ -55,7 +55,9 @@ func merge(at path: String, branchName: String, options: MergeOptions? = nil) as
 		)
 	}
 
-	let isAncestor = try await isAncestorOf(gitDir: gitDir.path, ancestorSha: currentSha, descendantSha: branchSha)
+	let cache = PackfileCache()
+
+	let isAncestor = try await isAncestorOf(gitDir: gitDir.path, ancestorSha: currentSha, descendantSha: branchSha, cache: cache)
 
 	if isAncestor && !(options?.noFastForward ?? false) {
 		try await updateBranch(at: gitDir.path, branchName: currentBranch, commitSha: branchSha)
@@ -67,7 +69,7 @@ func merge(at path: String, branchName: String, options: MergeOptions? = nil) as
 		)
 	}
 
-	let mergeBase = try await findMergeBase(gitDir: gitDir.path, sha1: currentSha, sha2: branchSha)
+	let mergeBase = try await findMergeBase(gitDir: gitDir.path, sha1: currentSha, sha2: branchSha, cache: cache)
 
 	if mergeBase == branchSha {
 		return MergeResult(
@@ -80,7 +82,7 @@ func merge(at path: String, branchName: String, options: MergeOptions? = nil) as
 
 	let mergeMessage = options?.message ?? "Merge branch '\(branchName)' into '\(currentBranch)'"
 
-	let mergeCommitSha = try await createMergeCommit(gitDir: gitDir.path, parent1: currentSha, parent2: branchSha, message: mergeMessage)
+	let mergeCommitSha = try await createMergeCommit(gitDir: gitDir.path, parent1: currentSha, parent2: branchSha, message: mergeMessage, cache: cache)
 
 	try await updateBranch(at: gitDir.path, branchName: currentBranch, commitSha: mergeCommitSha)
 
@@ -106,7 +108,7 @@ private func getBranchCommit(at gitDir: String, branchName: String) async throws
 		.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-private func isAncestorOf(gitDir: String, ancestorSha: String, descendantSha: String) async throws -> Bool {
+private func isAncestorOf(gitDir: String, ancestorSha: String, descendantSha: String, cache: PackfileCache) async throws -> Bool {
 	var visited = Set<String>()
 	var queue = [descendantSha]
 
@@ -122,20 +124,20 @@ private func isAncestorOf(gitDir: String, ancestorSha: String, descendantSha: St
 		}
 		visited.insert(current)
 
-		let parents = try await getParents(gitDir: gitDir, sha: current)
+		let parents = try await getParents(gitDir: gitDir, sha: current, cache: cache)
 		queue.append(contentsOf: parents)
 	}
 
 	return false
 }
 
-private func findMergeBase(gitDir: String, sha1: String, sha2: String) async throws -> String? {
+private func findMergeBase(gitDir: String, sha1: String, sha2: String, cache: PackfileCache) async throws -> String? {
 	if sha1 == sha2 {
 		return sha1
 	}
 
-	let ancestors1 = try await getAllAncestors(gitDir: gitDir, sha: sha1)
-	let ancestors2 = try await getAllAncestors(gitDir: gitDir, sha: sha2)
+	let ancestors1 = try await getAllAncestors(gitDir: gitDir, sha: sha1, cache: cache)
+	let ancestors2 = try await getAllAncestors(gitDir: gitDir, sha: sha2, cache: cache)
 
 	var allAncestors1 = ancestors1
 	allAncestors1.insert(sha1)
@@ -152,7 +154,7 @@ private func findMergeBase(gitDir: String, sha1: String, sha2: String) async thr
 	return nil
 }
 
-private func getAllAncestors(gitDir: String, sha: String) async throws -> Set<String> {
+private func getAllAncestors(gitDir: String, sha: String, cache: PackfileCache) async throws -> Set<String> {
 	var ancestors = Set<String>()
 	var queue = [sha]
 
@@ -163,7 +165,7 @@ private func getAllAncestors(gitDir: String, sha: String) async throws -> Set<St
 			continue
 		}
 
-		let parents = try await getParents(gitDir: gitDir, sha: current)
+		let parents = try await getParents(gitDir: gitDir, sha: current, cache: cache)
 		for parent in parents {
 			ancestors.insert(parent)
 			queue.append(parent)
@@ -173,9 +175,9 @@ private func getAllAncestors(gitDir: String, sha: String) async throws -> Set<St
 	return ancestors
 }
 
-private func getParents(gitDir: String, sha: String) async throws -> [String] {
+private func getParents(gitDir: String, sha: String, cache: PackfileCache) async throws -> [String] {
 	do {
-		let commitData = try await readObject(at: gitDir, sha: sha)
+		let commitData = try await readObject(at: gitDir, sha: sha, cache: cache)
 		var parents: [String] = []
 		let lines = commitData.components(separatedBy: .newlines)
 
@@ -191,9 +193,9 @@ private func getParents(gitDir: String, sha: String) async throws -> [String] {
 	}
 }
 
-private func getTree(gitDir: String, sha: String) async throws -> String? {
+private func getTree(gitDir: String, sha: String, cache: PackfileCache) async throws -> String? {
 	do {
-		let commitData = try await readObject(at: gitDir, sha: sha)
+		let commitData = try await readObject(at: gitDir, sha: sha, cache: cache)
 		// The commit data includes a header like "commit <size>\0", so we need to skip past the null byte
 		guard let nullIndex = commitData.firstIndex(of: "\0") else {
 			return nil
@@ -216,8 +218,8 @@ private func getTree(gitDir: String, sha: String) async throws -> String? {
 	}
 }
 
-private func createMergeCommit(gitDir: String, parent1: String, parent2: String, message: String) async throws -> String {
-	guard let treeSha = try await getTree(gitDir: gitDir, sha: parent1) else {
+private func createMergeCommit(gitDir: String, parent1: String, parent2: String, message: String, cache: PackfileCache) async throws -> String {
+	guard let treeSha = try await getTree(gitDir: gitDir, sha: parent1, cache: cache) else {
 		throw MergeError.couldNotGetTree
 	}
 
