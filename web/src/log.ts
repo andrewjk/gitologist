@@ -93,12 +93,15 @@ async function parseCommitEntry(
 	const message = extractMessage(commitData);
 	const timestamp = extractTimestamp(author || committer);
 
+	const authorEmail = extractEmail(author || committer);
+
 	return {
 		sha: commitSha,
 		abbreviatedSha: commitSha.slice(0, 7),
 		tree,
 		parent,
 		author: formatAuthor(author || committer),
+		authorEmail,
 		committer: formatAuthor(committer || author),
 		date: timestamp,
 		message,
@@ -181,4 +184,9 @@ async function getFileBlobSha(
 
 	treeCache.set(treeSha, current.sha);
 	return current.sha;
+}
+
+function extractEmail(author: string): string {
+	const match = author.match(/<([^>]+)>/);
+	return match ? match[1] : "";
 }

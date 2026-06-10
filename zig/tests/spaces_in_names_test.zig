@@ -815,6 +815,7 @@ test "should log commits for files with spaces" {
         for (result) |entry| {
             allocator.free(entry.message);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.abbreviated_sha);
             allocator.free(entry.sha);
             allocator.free(entry.tree);
@@ -867,6 +868,7 @@ test "should log multiple commits with files with spaces" {
         for (result) |entry| {
             allocator.free(entry.message);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.abbreviated_sha);
             allocator.free(entry.sha);
             allocator.free(entry.tree);
@@ -923,6 +925,7 @@ test "should limit commits for files with spaces" {
         for (result) |entry| {
             allocator.free(entry.message);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.abbreviated_sha);
             allocator.free(entry.sha);
             allocator.free(entry.tree);
@@ -1040,6 +1043,7 @@ test "should handle complete workflow with files and folders with spaces" {
         for (log_result) |entry| {
             allocator.free(entry.message);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.abbreviated_sha);
             allocator.free(entry.sha);
             allocator.free(entry.tree);
@@ -1095,6 +1099,7 @@ test "should handle files with various space patterns" {
         for (log_result) |entry| {
             allocator.free(entry.message);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.abbreviated_sha);
             allocator.free(entry.sha);
             allocator.free(entry.tree);
@@ -1158,6 +1163,7 @@ test "should handle nested folders with spaces" {
         for (log_result) |entry| {
             allocator.free(entry.message);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.abbreviated_sha);
             allocator.free(entry.sha);
             allocator.free(entry.tree);

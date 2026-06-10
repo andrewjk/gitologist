@@ -6,6 +6,7 @@ struct LogEntry: Codable {
 	let tree: String
 	let parent: String?
 	let author: String
+	let authorEmail: String
 	let committer: String
 	let date: Date
 	let message: String

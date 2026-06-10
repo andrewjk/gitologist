@@ -16,6 +16,7 @@ enum LogError: Error, LocalizedError {
 
 func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry] {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+	let cache = PackfileCache()
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
 		throw LogError.notAGitRepository
@@ -50,9 +51,9 @@ func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry]
 		var treeCache: [String: String?] = [:]
 
 		while let sha = currentSha {
-			let entry = try await parseCommitEntry(gitDir: gitDir.path, commitSha: sha)
+			let entry = try await parseCommitEntry(gitDir: gitDir.path, commitSha: sha, cache: cache)
 			let currentBlobSha = try await getFileBlobSha(
-				gitDir: gitDir.path, treeSha: entry.tree, filePath: fileFilter, cache: &treeCache
+				gitDir: gitDir.path, treeSha: entry.tree, filePath: fileFilter, treeCache: &treeCache, cache: cache
 			)
 
 			if entry.parent == nil {
@@ -61,11 +62,11 @@ func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry]
 				}
 			} else {
 				let parentEntry = try await parseCommitEntry(
-					gitDir: gitDir.path, commitSha: entry.parent!
+					gitDir: gitDir.path, commitSha: entry.parent!, cache: cache
 				)
 				let parentBlobSha = try await getFileBlobSha(
 					gitDir: gitDir.path, treeSha: parentEntry.tree, filePath: fileFilter,
-					cache: &treeCache
+					treeCache: &treeCache, cache: cache
 				)
 				if currentBlobSha != parentBlobSha {
 					entries.append(entry)
@@ -80,7 +81,7 @@ func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry]
 	}
 
 	while let sha = currentSha, entries.count < limit {
-		let entry = try await parseCommitEntry(gitDir: gitDir.path, commitSha: sha)
+		let entry = try await parseCommitEntry(gitDir: gitDir.path, commitSha: sha, cache: cache)
 		entries.append(entry)
 		currentSha = entry.parent
 	}
@@ -88,8 +89,8 @@ func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry]
 	return entries
 }
 
-private func parseCommitEntry(gitDir: String, commitSha: String) async throws -> LogEntry {
-	let commitData = try await readObject(at: gitDir, sha: commitSha)
+private func parseCommitEntry(gitDir: String, commitSha: String, cache: PackfileCache) async throws -> LogEntry {
+	let commitData = try await readObject(at: gitDir, sha: commitSha, cache: cache)
 
 	let tree = extractField(from: commitData, fieldName: "tree") ?? ""
 	let parent = extractField(from: commitData, fieldName: "parent")
@@ -104,46 +105,47 @@ private func parseCommitEntry(gitDir: String, commitSha: String) async throws ->
 		tree: tree,
 		parent: parent,
 		author: formatAuthor(author.isEmpty ? committer : author),
+		authorEmail: extractEmail(from: author.isEmpty ? committer : author),
 		committer: formatAuthor(committer.isEmpty ? author : committer),
-		date: timestamp,
+		date: Date(timeIntervalSince1970: TimeInterval(Int(timestamp) ?? 0)),
 		message: message
 	)
 }
 
 private func getFileBlobSha(
 	gitDir: String, treeSha: String, filePath: String,
-	cache: inout [String: String?]
+	treeCache: inout [String: String?], cache: PackfileCache
 ) async throws -> String? {
-	if let cached = cache[treeSha] {
+	if let cached = treeCache[treeSha] {
 		return cached
 	}
 
-	let treeData = try await readObject(at: gitDir, sha: treeSha)
+	let treeData = try await readObject(at: gitDir, sha: treeSha, cache: cache)
 	let entries = try parseTreeEntries(treeData)
 
 	let parts = filePath.split(separator: "/").map(String.init)
 	guard var current = entries.first(where: { $0.path == parts[0] }) else {
-		cache[treeSha] = nil
+		treeCache[treeSha] = nil
 		return nil
 	}
 
 	for i in 1 ..< parts.count {
 		guard current.type == .tree else {
-			cache[treeSha] = nil
+			treeCache[treeSha] = nil
 			return nil
 		}
 
-		let subTreeData = try await readObject(at: gitDir, sha: current.sha)
+		let subTreeData = try await readObject(at: gitDir, sha: current.sha, cache: cache)
 		let subEntries = try parseTreeEntries(subTreeData)
 
 		guard let next = subEntries.first(where: { $0.path == parts[i] }) else {
-			cache[treeSha] = nil
+			treeCache[treeSha] = nil
 			return nil
 		}
 		current = next
 	}
 
-	cache[treeSha] = current.sha
+	treeCache[treeSha] = current.sha
 	return current.sha
 }
 
@@ -171,26 +173,17 @@ private func extractMessage(from commitData: String) -> String {
 	return String(commitData[messageStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-private func extractTimestamp(from author: String) -> Date {
-	// Match pattern: digits followed by timezone offset (e.g., "1234567890 +0000")
-	let pattern = /(\d+)\s+([+-]\d{4})$/
-	guard let match = author.wholeMatch(of: pattern) else {
-		return Date()
-	}
-
-	guard let timestamp = Int(match.1) else {
-		return Date()
-	}
-
-	return Date(timeIntervalSince1970: TimeInterval(timestamp))
+private func extractTimestamp(from author: String) -> String {
+	let pattern = /(\d+)\s+[+-]\d{4}$/
+	return author.firstMatch(of: pattern).map { String($0.1) } ?? ""
 }
 
 private func formatAuthor(_ author: String) -> String {
-	// Match pattern: Name <email> timestamp timezone
-	let pattern = /^(.+?)\s+(<[^>]+>)\s+\d+/
-	guard let match = author.wholeMatch(of: pattern) else {
-		return author.trimmingCharacters(in: .whitespacesAndNewlines)
-	}
+	let pattern = /^(.+?)\s+<[^>]+>/
+	return author.firstMatch(of: pattern).map { String($0.1) } ?? author
+}
 
-	return String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
+private func extractEmail(from author: String) -> String {
+	let pattern = /<([^>]+)>/
+	return author.firstMatch(of: pattern).map { String($0.1) } ?? ""
 }

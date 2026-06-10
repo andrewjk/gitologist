@@ -142,6 +142,7 @@ public static class Log
             Tree = tree,
             Parent = parent,
             Author = FormatAuthor(string.IsNullOrEmpty(author) ? committer : author),
+            AuthorEmail = ExtractEmail(string.IsNullOrEmpty(author) ? committer : author),
             Committer = FormatAuthor(string.IsNullOrEmpty(committer) ? author : committer),
             Date = timestamp,
             Message = message,
@@ -201,5 +202,11 @@ public static class Log
         }
 
         return author.Trim();
+    }
+
+    private static string ExtractEmail(string author)
+    {
+        var match = Regex.Match(author, @"<([^>]+)>");
+        return match.Success ? match.Groups[1].Value : "";
     }
 }

@@ -138,6 +138,7 @@ test "should create valid commit structure" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -274,6 +275,7 @@ test "should produce same commit structure as git" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -343,6 +345,7 @@ test "should show commits in reverse chronological order" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }

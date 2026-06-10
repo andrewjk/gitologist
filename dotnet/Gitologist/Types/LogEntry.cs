@@ -7,6 +7,7 @@ public record class LogEntry
     public required string Tree { get; init; }
     public string? Parent { get; init; }
     public required string Author { get; init; }
+    public required string AuthorEmail { get; init; }
     public required string Committer { get; init; }
     public required DateTime Date { get; init; }
     public required string Message { get; init; }

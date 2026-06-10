@@ -6,6 +6,7 @@ pub const LogEntry = struct {
     tree: []const u8,
     parent: ?[]const u8,
     author: []const u8,
+    author_email: []const u8,
     committer: []const u8,
     date: i64,
     message: []const u8,

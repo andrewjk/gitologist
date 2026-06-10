@@ -61,6 +61,7 @@ test "should log single commit" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -129,6 +130,7 @@ test "should log multiple commits in reverse order" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -200,6 +202,7 @@ test "should limit number of commits" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -247,6 +250,7 @@ test "should include commit SHA" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -296,6 +300,7 @@ test "should include abbreviated SHA" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -380,6 +385,7 @@ test "should include author" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -426,6 +432,7 @@ test "should include commit date" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -472,6 +479,7 @@ test "should handle multi-line commit messages" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -529,6 +537,7 @@ test "should include parent commit reference" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -582,6 +591,7 @@ test "file filter should return empty when file never existed" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -655,6 +665,7 @@ test "file filter should return only commits that touched the file" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -674,6 +685,7 @@ test "file filter should return only commits that touched the file" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -751,6 +763,7 @@ test "file filter should work with nested file paths" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -821,6 +834,7 @@ test "file filter should respect limit with file filter" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -883,6 +897,7 @@ test "file filter should include initial commit when file was added" {
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }

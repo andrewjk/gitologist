@@ -54,6 +54,7 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
             allocator.free(entry.tree);
             if (entry.parent) |p| allocator.free(p);
             allocator.free(entry.author);
+            allocator.free(entry.author_email);
             allocator.free(entry.committer);
             allocator.free(entry.message);
         }
@@ -177,6 +178,7 @@ fn parseCommitEntry(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []co
 
     const author = try formatAuthor(allocator, if (author_str.len > 0) author_str else committer_str);
     const committer = try formatAuthor(allocator, if (committer_str.len > 0) committer_str else author_str);
+    const author_email = try extractEmail(allocator, if (author_str.len > 0) author_str else committer_str);
 
     return LogEntry{
         .sha = sha_copy,
@@ -184,6 +186,7 @@ fn parseCommitEntry(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []co
         .tree = tree,
         .parent = parent_opt,
         .author = author,
+        .author_email = author_email,
         .committer = committer,
         .date = timestamp,
         .message = message,
@@ -253,12 +256,23 @@ fn formatAuthor(allocator: std.mem.Allocator, author: []const u8) ![]const u8 {
     return try allocator.dupe(u8, std.mem.trim(u8, name, &std.ascii.whitespace));
 }
 
+fn extractEmail(allocator: std.mem.Allocator, author: []const u8) ![]const u8 {
+    const open_idx = std.mem.indexOfScalar(u8, author, '<') orelse {
+        return try allocator.dupe(u8, "");
+    };
+    const close_idx = std.mem.indexOfScalar(u8, author[open_idx + 1 ..], '>') orelse {
+        return try allocator.dupe(u8, "");
+    };
+    return try allocator.dupe(u8, author[open_idx + 1 .. open_idx + 1 + close_idx]);
+}
+
 fn freeLogEntry(allocator: std.mem.Allocator, entry: LogEntry) void {
     allocator.free(entry.sha);
     allocator.free(entry.abbreviated_sha);
     allocator.free(entry.tree);
     if (entry.parent) |p| allocator.free(p);
     allocator.free(entry.author);
+    allocator.free(entry.author_email);
     allocator.free(entry.committer);
     allocator.free(entry.message);
 }

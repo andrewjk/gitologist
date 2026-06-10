@@ -4,6 +4,7 @@ export interface LogEntry {
 	tree: string;
 	parent: string | null;
 	author: string;
+	authorEmail: string;
 	committer: string;
 	date: Date;
 	message: string;
