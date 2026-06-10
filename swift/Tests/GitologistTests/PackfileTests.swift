@@ -281,6 +281,201 @@ struct PackfileTests {
 		}
 	}
 
+	func encodeOfsDeltaOffset(_ n: Int) -> Data {
+		var bytes: [UInt8] = []
+		bytes.append(UInt8(n & 0x7F))
+		var remaining = n >> 7
+		while remaining > 0 {
+			remaining -= 1
+			bytes.insert(UInt8((remaining & 0x7F) | 0x80), at: 0)
+			remaining >>= 7
+		}
+		return Data(bytes)
+	}
+
+	func hexToData(_ hex: String) -> Data {
+		var data = Data()
+		var i = hex.startIndex
+		while i < hex.endIndex {
+			let j = hex.index(i, offsetBy: 2)
+			if let byte = UInt8(String(hex[i ..< j]), radix: 16) {
+				data.append(byte)
+			}
+			i = j
+		}
+		return data
+	}
+
+	func buildTestPackfile(
+		objectSpecs: [(typeNum: Int, payload: Data, extraData: Data)]
+	) throws -> Data {
+		var pack = Data()
+		pack.append("PACK".data(using: .utf8)!)
+		var version = Data(count: 4)
+		version.withUnsafeMutableBytes {
+			$0.storeBytes(of: UInt32(2).bigEndian, toByteOffset: 0, as: UInt32.self)
+		}
+		pack.append(version)
+		var numObj = Data(count: 4)
+		numObj.withUnsafeMutableBytes {
+			$0.storeBytes(of: UInt32(objectSpecs.count).bigEndian, toByteOffset: 0, as: UInt32.self)
+		}
+		pack.append(numObj)
+		for spec in objectSpecs {
+			pack.append(encodeObjectHeader(spec.typeNum, spec.payload.count))
+			pack.append(spec.extraData)
+			try pack.append(compressData(spec.payload))
+		}
+		let checksum = Insecure.SHA1.hash(data: pack)
+		pack.append(Data(checksum))
+		return pack
+	}
+
+	@Test func shouldResolveOfsDeltaCopyingEntireBase() throws {
+		let baseContent = Data("hello world".utf8)
+
+		var delta = Data()
+		delta.append(0x0B) // source size: 11
+		delta.append(0x0B) // target size: 11
+		delta.append(0x91) // copy cmd: offset byte 0 + size byte 0
+		delta.append(0x00) // offset: 0
+		delta.append(0x0B) // size: 11
+
+		let baseHeaderSize = encodeObjectHeader(3, baseContent.count).count
+		let baseCompressedSize = try compressData(baseContent).count
+		let baseObjSize = baseHeaderSize + baseCompressedSize
+		let ofsBytes = encodeOfsDeltaOffset(baseObjSize)
+
+		let packfile = try buildTestPackfile(objectSpecs: [
+			(typeNum: 3, payload: baseContent, extraData: Data()),
+			(typeNum: 6, payload: delta, extraData: ofsBytes),
+		])
+
+		let objects = try parsePackfile(packfile)
+
+		#expect(objects.count == 2)
+		#expect(objects[0].type == .blob)
+		#expect(objects[0].content == baseContent)
+		#expect(objects[1].type == .blob)
+		#expect(objects[1].content == baseContent)
+
+		let expectedSha = computeSha(type: "blob", content: baseContent)
+		#expect(objects[0].sha == expectedSha)
+		#expect(objects[1].sha == expectedSha)
+	}
+
+	@Test func shouldResolveOfsDeltaWithModifiedContent() throws {
+		let baseContent = Data("hello world".utf8)
+		let expectedContent = Data("hello gitologist".utf8)
+
+		var delta = Data()
+		delta.append(0x0B) // source size: 11
+		delta.append(0x10) // target size: 16
+		delta.append(0x91) // copy cmd
+		delta.append(0x00) // offset: 0
+		delta.append(0x06) // size: 6 ("hello ")
+		delta.append(0x0A) // insert 10 bytes
+		delta.append(Data("gitologist".utf8))
+
+		let baseHeaderSize = encodeObjectHeader(3, baseContent.count).count
+		let baseCompressedSize = try compressData(baseContent).count
+		let baseObjSize = baseHeaderSize + baseCompressedSize
+		let ofsBytes = encodeOfsDeltaOffset(baseObjSize)
+
+		let packfile = try buildTestPackfile(objectSpecs: [
+			(typeNum: 3, payload: baseContent, extraData: Data()),
+			(typeNum: 6, payload: delta, extraData: ofsBytes),
+		])
+
+		let objects = try parsePackfile(packfile)
+
+		#expect(objects.count == 2)
+		#expect(objects[0].type == .blob)
+		#expect(objects[0].content == baseContent)
+		#expect(objects[1].type == .blob)
+		#expect(objects[1].content == expectedContent)
+	}
+
+	@Test func shouldResolveRefDeltaCopyingEntireBase() throws {
+		let baseContent = Data("hello world".utf8)
+		let baseSha = computeSha(type: "blob", content: baseContent)
+
+		var delta = Data()
+		delta.append(0x0B) // source size: 11
+		delta.append(0x0B) // target size: 11
+		delta.append(0x91) // copy cmd
+		delta.append(0x00) // offset: 0
+		delta.append(0x0B) // size: 11
+
+		let shaData = hexToData(baseSha)
+
+		let packfile = try buildTestPackfile(objectSpecs: [
+			(typeNum: 3, payload: baseContent, extraData: Data()),
+			(typeNum: 7, payload: delta, extraData: shaData),
+		])
+
+		let objects = try parsePackfile(packfile)
+
+		#expect(objects.count == 2)
+		#expect(objects[0].type == .blob)
+		#expect(objects[0].content == baseContent)
+		#expect(objects[1].type == .blob)
+		#expect(objects[1].content == baseContent)
+		#expect(objects[1].sha == baseSha)
+	}
+
+	@Test func shouldResolveChainedOfsDelta() throws {
+		let baseContent = Data("hello world".utf8)
+		let intermediateContent = Data("hello gitologist".utf8)
+		let finalContent = Data("hello beautiful gitologist".utf8)
+
+		var delta1 = Data()
+		delta1.append(0x0B) // source size: 11
+		delta1.append(0x10) // target size: 16
+		delta1.append(0x91) // copy "hello "
+		delta1.append(0x00)
+		delta1.append(0x06)
+		delta1.append(0x0A) // insert "gitologist"
+		delta1.append(Data("gitologist".utf8))
+
+		var delta2 = Data()
+		delta2.append(0x10) // source size: 16
+		delta2.append(0x1A) // target size: 26
+		delta2.append(0x91) // copy "hello " from offset 0
+		delta2.append(0x00)
+		delta2.append(0x06)
+		delta2.append(0x0A) // insert "beautiful "
+		delta2.append(Data("beautiful ".utf8))
+		delta2.append(0x91) // copy "gitologist" from offset 6
+		delta2.append(0x06)
+		delta2.append(0x0A)
+
+		let obj1Size = try encodeObjectHeader(3, baseContent.count).count
+			+ compressData(baseContent).count
+		let ofsBytes1 = encodeOfsDeltaOffset(obj1Size)
+		let delta1Compressed = try compressData(delta1)
+		let obj2Size = encodeObjectHeader(6, delta1.count).count
+			+ ofsBytes1.count
+			+ delta1Compressed.count
+		let ofsBytes2 = encodeOfsDeltaOffset(obj2Size)
+
+		let packfile = try buildTestPackfile(objectSpecs: [
+			(typeNum: 3, payload: baseContent, extraData: Data()),
+			(typeNum: 6, payload: delta1, extraData: ofsBytes1),
+			(typeNum: 6, payload: delta2, extraData: ofsBytes2),
+		])
+
+		let objects = try parsePackfile(packfile)
+
+		#expect(objects.count == 3)
+		#expect(objects[0].type == .blob)
+		#expect(objects[0].content == baseContent)
+		#expect(objects[1].type == .blob)
+		#expect(objects[1].content == intermediateContent)
+		#expect(objects[2].type == .blob)
+		#expect(objects[2].content == finalContent)
+	}
+
 	@Test func shouldReadObjectViaPackfile() async throws {
 		let testDir = FileManager.default.temporaryDirectory
 			.appendingPathComponent("gitologist-test-\(UUID().uuidString.prefix(8))")

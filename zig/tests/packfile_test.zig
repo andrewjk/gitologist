@@ -484,3 +484,291 @@ test "should throw error when object not found" {
     const result = utils.readObjectData(io, allocator, git_dir_path, "0000000000000000000000000000000000000000");
     try std.testing.expectError(error.ObjectNotFound, result);
 }
+
+fn encodeOfsDeltaOffset(allocator: std.mem.Allocator, n: usize) ![]const u8 {
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+
+    buf[len] = @as(u8, @intCast(n & 0x7f));
+    len += 1;
+    var remaining = n >> 7;
+    while (remaining > 0) {
+        remaining -= 1;
+        var i: usize = len;
+        while (i > 0) : (i -= 1) {
+            buf[i] = buf[i - 1];
+        }
+        buf[0] = @as(u8, @intCast((remaining & 0x7f) | 0x80));
+        len += 1;
+        remaining >>= 7;
+    }
+
+    return try allocator.dupe(u8, buf[0..len]);
+}
+
+fn hexToBuffer(allocator: std.mem.Allocator, hex: *const [40]u8) ![]const u8 {
+    var buf = try allocator.alloc(u8, 20);
+    for (0..20) |i| {
+        const hi_nibble = std.fmt.charToDigit(hex[2 * i], 16) catch unreachable;
+        const lo_nibble = std.fmt.charToDigit(hex[2 * i + 1], 16) catch unreachable;
+        buf[i] = (hi_nibble << 4) | lo_nibble;
+    }
+    return buf;
+}
+
+const TestPackSpec = struct {
+    type_num: usize,
+    payload: []const u8,
+    extra_data: []const u8,
+};
+
+fn buildTestPackfile(allocator: std.mem.Allocator, specs: []const TestPackSpec) ![]const u8 {
+    var pack = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    errdefer pack.deinit(allocator);
+
+    try pack.appendSlice(allocator, "PACK");
+
+    const version_bytes = std.mem.nativeToBig(u32, 2);
+    try pack.appendSlice(allocator, &@as([4]u8, @bitCast(version_bytes)));
+
+    const num_bytes = std.mem.nativeToBig(u32, @intCast(specs.len));
+    try pack.appendSlice(allocator, &@as([4]u8, @bitCast(num_bytes)));
+
+    for (specs) |spec| {
+        const header = try packfile.encodeObjectHeader(allocator, spec.type_num, spec.payload.len);
+        defer allocator.free(header);
+        try pack.appendSlice(allocator, header);
+        try pack.appendSlice(allocator, spec.extra_data);
+
+        const flate = std.compress.flate;
+        var compressed = std.ArrayList(u8).initCapacity(allocator, 128) catch unreachable;
+        var compressed_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &compressed);
+        defer compressed_writer.deinit();
+        var flate_buffer: [flate.max_window_len]u8 = undefined;
+        var compress = try flate.Compress.init(&compressed_writer.writer, &flate_buffer, .zlib, .default);
+        try compress.writer.writeAll(spec.payload);
+        try compress.writer.flush();
+        try compress.finish();
+        try compressed_writer.writer.flush();
+        var final_compressed = compressed_writer.toArrayList();
+        defer final_compressed.deinit(allocator);
+        try pack.appendSlice(allocator, final_compressed.items);
+    }
+
+    var hasher = std.crypto.hash.Sha1.init(.{});
+    hasher.update(pack.items);
+    var checksum: [20]u8 = undefined;
+    hasher.final(&checksum);
+    try pack.appendSlice(allocator, &checksum);
+
+    return pack.toOwnedSlice(allocator);
+}
+
+test "should resolve OFS_DELTA copying entire base" {
+    const allocator = std.testing.allocator;
+
+    const base_content = "hello world";
+
+    var delta = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer delta.deinit(allocator);
+    try delta.appendSlice(allocator, &[_]u8{ 0x0b, 0x0b, 0x91, 0x00, 0x0b });
+
+    const base_header = try packfile.encodeObjectHeader(allocator, 3, base_content.len);
+    defer allocator.free(base_header);
+    const base_compressed_list = try compressTestBytes(allocator, base_content);
+    defer allocator.free(base_compressed_list);
+    const base_obj_size = base_header.len + base_compressed_list.len;
+    const ofs_bytes = try encodeOfsDeltaOffset(allocator, base_obj_size);
+    defer allocator.free(ofs_bytes);
+
+    const specs = [_]TestPackSpec{
+        .{ .type_num = 3, .payload = base_content, .extra_data = "" },
+        .{ .type_num = 6, .payload = delta.items, .extra_data = ofs_bytes },
+    };
+
+    const pack_data = try buildTestPackfile(allocator, &specs);
+    defer allocator.free(pack_data);
+
+    var objects = try packfile.parsePackfile(allocator, pack_data);
+    defer {
+        for (objects.items) |obj| {
+            allocator.free(obj.obj_type);
+            allocator.free(obj.sha);
+            allocator.free(obj.content);
+        }
+        objects.deinit(allocator);
+    }
+
+    try std.testing.expect(objects.items.len == 2);
+    try std.testing.expectEqualStrings("blob", objects.items[0].obj_type);
+    try std.testing.expectEqualStrings(base_content, objects.items[0].content);
+    try std.testing.expectEqualStrings("blob", objects.items[1].obj_type);
+    try std.testing.expectEqualStrings(base_content, objects.items[1].content);
+
+    const expected_sha = computeSha("blob", base_content);
+    try std.testing.expectEqualStrings(&expected_sha, objects.items[0].sha);
+    try std.testing.expectEqualStrings(&expected_sha, objects.items[1].sha);
+}
+
+test "should resolve OFS_DELTA with modified content" {
+    const allocator = std.testing.allocator;
+
+    const base_content = "hello world";
+    const expected_content = "hello gitologist";
+
+    var delta = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer delta.deinit(allocator);
+    try delta.appendSlice(allocator, &[_]u8{ 0x0b, 0x10, 0x91, 0x00, 0x06, 0x0a });
+    try delta.appendSlice(allocator, "gitologist");
+
+    const base_header = try packfile.encodeObjectHeader(allocator, 3, base_content.len);
+    defer allocator.free(base_header);
+    const base_compressed_list = try compressTestBytes(allocator, base_content);
+    defer allocator.free(base_compressed_list);
+    const base_obj_size = base_header.len + base_compressed_list.len;
+    const ofs_bytes = try encodeOfsDeltaOffset(allocator, base_obj_size);
+    defer allocator.free(ofs_bytes);
+
+    const specs = [_]TestPackSpec{
+        .{ .type_num = 3, .payload = base_content, .extra_data = "" },
+        .{ .type_num = 6, .payload = delta.items, .extra_data = ofs_bytes },
+    };
+
+    const pack_data = try buildTestPackfile(allocator, &specs);
+    defer allocator.free(pack_data);
+
+    var objects = try packfile.parsePackfile(allocator, pack_data);
+    defer {
+        for (objects.items) |obj| {
+            allocator.free(obj.obj_type);
+            allocator.free(obj.sha);
+            allocator.free(obj.content);
+        }
+        objects.deinit(allocator);
+    }
+
+    try std.testing.expect(objects.items.len == 2);
+    try std.testing.expectEqualStrings("blob", objects.items[0].obj_type);
+    try std.testing.expectEqualStrings(base_content, objects.items[0].content);
+    try std.testing.expectEqualStrings("blob", objects.items[1].obj_type);
+    try std.testing.expectEqualStrings(expected_content, objects.items[1].content);
+}
+
+test "should resolve REF_DELTA copying entire base" {
+    const allocator = std.testing.allocator;
+
+    const base_content = "hello world";
+    const base_sha = computeSha("blob", base_content);
+
+    var delta = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer delta.deinit(allocator);
+    try delta.appendSlice(allocator, &[_]u8{ 0x0b, 0x0b, 0x91, 0x00, 0x0b });
+
+    const sha_data = try hexToBuffer(allocator, &base_sha);
+    defer allocator.free(sha_data);
+
+    const specs = [_]TestPackSpec{
+        .{ .type_num = 3, .payload = base_content, .extra_data = "" },
+        .{ .type_num = 7, .payload = delta.items, .extra_data = sha_data },
+    };
+
+    const pack_data = try buildTestPackfile(allocator, &specs);
+    defer allocator.free(pack_data);
+
+    var objects = try packfile.parsePackfile(allocator, pack_data);
+    defer {
+        for (objects.items) |obj| {
+            allocator.free(obj.obj_type);
+            allocator.free(obj.sha);
+            allocator.free(obj.content);
+        }
+        objects.deinit(allocator);
+    }
+
+    try std.testing.expect(objects.items.len == 2);
+    try std.testing.expectEqualStrings("blob", objects.items[0].obj_type);
+    try std.testing.expectEqualStrings(base_content, objects.items[0].content);
+    try std.testing.expectEqualStrings("blob", objects.items[1].obj_type);
+    try std.testing.expectEqualStrings(base_content, objects.items[1].content);
+    try std.testing.expectEqualStrings(&base_sha, objects.items[1].sha);
+}
+
+test "should resolve chained OFS_DELTA" {
+    const allocator = std.testing.allocator;
+
+    const base_content = "hello world";
+    const intermediate_content = "hello gitologist";
+    const final_content = "hello beautiful gitologist";
+
+    var delta1 = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer delta1.deinit(allocator);
+    try delta1.appendSlice(allocator, &[_]u8{ 0x0b, 0x10, 0x91, 0x00, 0x06, 0x0a });
+    try delta1.appendSlice(allocator, "gitologist");
+
+    var delta2 = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer delta2.deinit(allocator);
+    try delta2.appendSlice(allocator, &[_]u8{ 0x10, 0x1a, 0x91, 0x00, 0x06, 0x0a });
+    try delta2.appendSlice(allocator, "beautiful ");
+    try delta2.appendSlice(allocator, &[_]u8{ 0x91, 0x06, 0x0a });
+
+    const base_header = try packfile.encodeObjectHeader(allocator, 3, base_content.len);
+    defer allocator.free(base_header);
+    const base_compressed_list = try compressTestBytes(allocator, base_content);
+    defer allocator.free(base_compressed_list);
+    const obj1_size = base_header.len + base_compressed_list.len;
+
+    const ofs_bytes1 = try encodeOfsDeltaOffset(allocator, obj1_size);
+    defer allocator.free(ofs_bytes1);
+
+    const delta1_header = try packfile.encodeObjectHeader(allocator, 6, delta1.items.len);
+    defer allocator.free(delta1_header);
+    const delta1_compressed = try compressTestBytes(allocator, delta1.items);
+    defer allocator.free(delta1_compressed);
+    const obj2_size = delta1_header.len + ofs_bytes1.len + delta1_compressed.len;
+
+    const ofs_bytes2 = try encodeOfsDeltaOffset(allocator, obj2_size);
+    defer allocator.free(ofs_bytes2);
+
+    const specs = [_]TestPackSpec{
+        .{ .type_num = 3, .payload = base_content, .extra_data = "" },
+        .{ .type_num = 6, .payload = delta1.items, .extra_data = ofs_bytes1 },
+        .{ .type_num = 6, .payload = delta2.items, .extra_data = ofs_bytes2 },
+    };
+
+    const pack_data = try buildTestPackfile(allocator, &specs);
+    defer allocator.free(pack_data);
+
+    var objects = try packfile.parsePackfile(allocator, pack_data);
+    defer {
+        for (objects.items) |obj| {
+            allocator.free(obj.obj_type);
+            allocator.free(obj.sha);
+            allocator.free(obj.content);
+        }
+        objects.deinit(allocator);
+    }
+
+    try std.testing.expect(objects.items.len == 3);
+    try std.testing.expectEqualStrings("blob", objects.items[0].obj_type);
+    try std.testing.expectEqualStrings(base_content, objects.items[0].content);
+    try std.testing.expectEqualStrings("blob", objects.items[1].obj_type);
+    try std.testing.expectEqualStrings(intermediate_content, objects.items[1].content);
+    try std.testing.expectEqualStrings("blob", objects.items[2].obj_type);
+    try std.testing.expectEqualStrings(final_content, objects.items[2].content);
+}
+
+fn compressTestBytes(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
+    const flate = std.compress.flate;
+    var compressed = std.ArrayList(u8).initCapacity(allocator, 128) catch unreachable;
+    var compressed_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &compressed);
+    defer compressed_writer.deinit();
+    var flate_buffer: [flate.max_window_len]u8 = undefined;
+    var compress = try flate.Compress.init(&compressed_writer.writer, &flate_buffer, .zlib, .default);
+    try compress.writer.writeAll(data);
+    try compress.writer.flush();
+    try compress.finish();
+    try compressed_writer.writer.flush();
+    var final_compressed = compressed_writer.toArrayList();
+    defer final_compressed.deinit(allocator);
+    return try allocator.dupe(u8, final_compressed.items);
+}

@@ -353,6 +353,177 @@ public class PackfileTests
         Assert.ThrowsException<InvalidOperationException>(() => Packfile.ParsePackfile(packfile.ToArray()));
     }
 
+    private static byte[] EncodeOfsDeltaOffset(int n)
+    {
+        var bytes = new List<byte> { (byte)(n & 0x7f) };
+        var remaining = n >> 7;
+        while (remaining > 0)
+        {
+            remaining -= 1;
+            bytes.Insert(0, (byte)((remaining & 0x7f) | 0x80));
+            remaining >>= 7;
+        }
+        return bytes.ToArray();
+    }
+
+    private static byte[] HexToBytes(string hex)
+    {
+        var bytes = new byte[hex.Length / 2];
+        for (var i = 0; i < hex.Length; i += 2)
+        {
+            bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
+        }
+        return bytes;
+    }
+
+    private static byte[] BuildTestPackfile(List<(int TypeNum, byte[] Payload, byte[] ExtraData)> objectSpecs)
+    {
+        var parts = new List<byte>();
+        parts.AddRange(Encoding.ASCII.GetBytes("PACK"));
+        parts.AddRange(BitConverter.GetBytes((uint)2).Reverse().ToArray());
+        parts.AddRange(BitConverter.GetBytes((uint)objectSpecs.Count).Reverse().ToArray());
+
+        foreach (var (typeNum, payload, extraData) in objectSpecs)
+        {
+            parts.AddRange(Packfile.EncodeObjectHeader(typeNum, payload.Length));
+            parts.AddRange(extraData);
+            parts.AddRange(Utils.CompressBytes(payload));
+        }
+
+        using var sha1 = SHA1.Create();
+        var checksum = sha1.ComputeHash(parts.ToArray());
+        parts.AddRange(checksum);
+
+        return parts.ToArray();
+    }
+
+    [TestMethod]
+    public void ShouldResolveOfsDeltaCopyingEntireBase()
+    {
+        var baseContent = Encoding.UTF8.GetBytes("hello world");
+
+        var delta = new byte[] { 0x0b, 0x0b, 0x91, 0x00, 0x0b };
+
+        var baseHeaderSize = Packfile.EncodeObjectHeader(3, baseContent.Length).Length;
+        var baseCompressedSize = Utils.CompressBytes(baseContent).Length;
+        var baseObjSize = baseHeaderSize + baseCompressedSize;
+        var ofsBytes = EncodeOfsDeltaOffset(baseObjSize);
+
+        var packfile = BuildTestPackfile(new List<(int, byte[], byte[])>
+        {
+            (3, baseContent, Array.Empty<byte>()),
+            (6, delta, ofsBytes),
+        });
+
+        var objects = Packfile.ParsePackfile(packfile);
+
+        Assert.AreEqual(2, objects.Count);
+        Assert.AreEqual("blob", objects[0].Type);
+        CollectionAssert.AreEqual(baseContent, objects[0].Content);
+        Assert.AreEqual("blob", objects[1].Type);
+        CollectionAssert.AreEqual(baseContent, objects[1].Content);
+
+        var expectedSha = ComputeSha("blob", baseContent);
+        Assert.AreEqual(expectedSha, objects[0].Sha);
+        Assert.AreEqual(expectedSha, objects[1].Sha);
+    }
+
+    [TestMethod]
+    public void ShouldResolveOfsDeltaWithModifiedContent()
+    {
+        var baseContent = Encoding.UTF8.GetBytes("hello world");
+        var expectedContent = Encoding.UTF8.GetBytes("hello gitologist");
+
+        var deltaList = new List<byte> { 0x0b, 0x10, 0x91, 0x00, 0x06, 0x0a };
+        deltaList.AddRange(Encoding.UTF8.GetBytes("gitologist"));
+        var delta = deltaList.ToArray();
+
+        var baseHeaderSize = Packfile.EncodeObjectHeader(3, baseContent.Length).Length;
+        var baseCompressedSize = Utils.CompressBytes(baseContent).Length;
+        var baseObjSize = baseHeaderSize + baseCompressedSize;
+        var ofsBytes = EncodeOfsDeltaOffset(baseObjSize);
+
+        var packfile = BuildTestPackfile(new List<(int, byte[], byte[])>
+        {
+            (3, baseContent, Array.Empty<byte>()),
+            (6, delta, ofsBytes),
+        });
+
+        var objects = Packfile.ParsePackfile(packfile);
+
+        Assert.AreEqual(2, objects.Count);
+        Assert.AreEqual("blob", objects[0].Type);
+        CollectionAssert.AreEqual(baseContent, objects[0].Content);
+        Assert.AreEqual("blob", objects[1].Type);
+        CollectionAssert.AreEqual(expectedContent, objects[1].Content);
+    }
+
+    [TestMethod]
+    public void ShouldResolveRefDeltaCopyingEntireBase()
+    {
+        var baseContent = Encoding.UTF8.GetBytes("hello world");
+        var baseSha = ComputeSha("blob", baseContent);
+
+        var delta = new byte[] { 0x0b, 0x0b, 0x91, 0x00, 0x0b };
+
+        var shaData = HexToBytes(baseSha);
+
+        var packfile = BuildTestPackfile(new List<(int, byte[], byte[])>
+        {
+            (3, baseContent, Array.Empty<byte>()),
+            (7, delta, shaData),
+        });
+
+        var objects = Packfile.ParsePackfile(packfile);
+
+        Assert.AreEqual(2, objects.Count);
+        Assert.AreEqual("blob", objects[0].Type);
+        CollectionAssert.AreEqual(baseContent, objects[0].Content);
+        Assert.AreEqual("blob", objects[1].Type);
+        CollectionAssert.AreEqual(baseContent, objects[1].Content);
+        Assert.AreEqual(baseSha, objects[1].Sha);
+    }
+
+    [TestMethod]
+    public void ShouldResolveChainedOfsDelta()
+    {
+        var baseContent = Encoding.UTF8.GetBytes("hello world");
+        var intermediateContent = Encoding.UTF8.GetBytes("hello gitologist");
+        var finalContent = Encoding.UTF8.GetBytes("hello beautiful gitologist");
+
+        var delta1List = new List<byte> { 0x0b, 0x10, 0x91, 0x00, 0x06, 0x0a };
+        delta1List.AddRange(Encoding.UTF8.GetBytes("gitologist"));
+        var delta1 = delta1List.ToArray();
+
+        var delta2List = new List<byte> { 0x10, 0x1a, 0x91, 0x00, 0x06, 0x0a };
+        delta2List.AddRange(Encoding.UTF8.GetBytes("beautiful "));
+        delta2List.AddRange(new byte[] { 0x91, 0x06, 0x0a });
+        var delta2 = delta2List.ToArray();
+
+        var obj1Size = Packfile.EncodeObjectHeader(3, baseContent.Length).Length + Utils.CompressBytes(baseContent).Length;
+        var ofsBytes1 = EncodeOfsDeltaOffset(obj1Size);
+        var delta1Compressed = Utils.CompressBytes(delta1);
+        var obj2Size = Packfile.EncodeObjectHeader(6, delta1.Length).Length + ofsBytes1.Length + delta1Compressed.Length;
+        var ofsBytes2 = EncodeOfsDeltaOffset(obj2Size);
+
+        var packfile = BuildTestPackfile(new List<(int, byte[], byte[])>
+        {
+            (3, baseContent, Array.Empty<byte>()),
+            (6, delta1, ofsBytes1),
+            (6, delta2, ofsBytes2),
+        });
+
+        var objects = Packfile.ParsePackfile(packfile);
+
+        Assert.AreEqual(3, objects.Count);
+        Assert.AreEqual("blob", objects[0].Type);
+        CollectionAssert.AreEqual(baseContent, objects[0].Content);
+        Assert.AreEqual("blob", objects[1].Type);
+        CollectionAssert.AreEqual(intermediateContent, objects[1].Content);
+        Assert.AreEqual("blob", objects[2].Type);
+        CollectionAssert.AreEqual(finalContent, objects[2].Content);
+    }
+
     private string _testDir = null!;
     private string _gitDir = null!;
 

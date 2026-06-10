@@ -7,6 +7,11 @@ export interface PackObject {
 	content: Buffer;
 }
 
+type PackEntryType =
+	| { kind: "object"; type: PackObject["type"] }
+	| { kind: "ofsDelta"; offset: number }
+	| { kind: "refDelta"; baseSha: string };
+
 export function encodePktLine(line: string | null): Buffer {
 	if (line === null) {
 		return Buffer.from("0000", "utf-8");
@@ -45,9 +50,6 @@ export function decodePktLines(data: Buffer): string[] {
 }
 
 export function parsePackfile(data: Buffer): PackObject[] {
-	const objects: PackObject[] = [];
-
-	// Check packfile signature
 	const signature = data.slice(0, 4).toString("utf-8");
 	if (signature !== "PACK") {
 		throw new Error("Invalid packfile signature");
@@ -59,34 +61,107 @@ export function parsePackfile(data: Buffer): PackObject[] {
 	}
 
 	const numObjects = data.readUInt32BE(8);
-	let offset = 12;
 
-	// Exclude checksum (last 20 bytes) from parsing
 	const dataWithoutChecksum = data.slice(0, -20);
+
+	interface RawPackEntry {
+		entryType: PackEntryType;
+		content: Buffer;
+		packOffset: number;
+	}
+
+	const rawEntries: RawPackEntry[] = [];
+	const offsetToIndex = new Map<number, number>();
+	let offset = 12;
 
 	for (let i = 0; i < numObjects; i++) {
 		if (offset >= dataWithoutChecksum.length) {
 			throw new Error("Invalid packfile: offset out of bounds");
 		}
 
-		const { type, newOffset } = parseObjectHeader(dataWithoutChecksum, offset);
-		offset = newOffset;
+		const { type, newOffset: headerEndOffset } = parseObjectHeader(dataWithoutChecksum, offset);
 
-		const { inflated, bytesConsumed } = decompressStreamData(dataWithoutChecksum, offset);
+		const entryTypeResult = parsePackEntryType(type, dataWithoutChecksum, headerEndOffset);
+		if (!entryTypeResult) {
+			throw new Error("Invalid packfile: unknown entry type");
+		}
+		const { entryType, dataOffset } = entryTypeResult;
 
-		const objectType = getObjectType(type);
+		const { inflated, bytesConsumed } = decompressStreamData(dataWithoutChecksum, dataOffset);
+
+		rawEntries.push({ entryType, content: inflated, packOffset: offset });
+		offsetToIndex.set(offset, rawEntries.length - 1);
+		offset = dataOffset + bytesConsumed;
+	}
+
+	type ResolvedEntry = { content: Buffer; type: PackObject["type"] };
+	const resolved = new Map<number, ResolvedEntry>();
+
+	function resolveEntry(index: number): ResolvedEntry {
+		if (resolved.has(index)) return resolved.get(index)!;
+		const entry = rawEntries[index];
+		let content: Buffer;
+		let objType: PackObject["type"];
+
+		switch (entry.entryType.kind) {
+			case "object":
+				content = entry.content;
+				objType = entry.entryType.type;
+				break;
+			case "ofsDelta": {
+				const basePackOffset = entry.packOffset - entry.entryType.offset;
+				const baseIndex = offsetToIndex.get(basePackOffset)!;
+				const base = resolveEntry(baseIndex);
+				content = applyDelta(base.content, entry.content);
+				objType = base.type;
+				break;
+			}
+			case "refDelta": {
+				let baseIndex: number | undefined;
+				for (let j = 0; j < rawEntries.length; j++) {
+					const raw = rawEntries[j];
+					if (raw.entryType.kind !== "object") continue;
+					const header = `${raw.entryType.type} ${raw.content.length}\0`;
+					const sha = createHash("sha1").update(header).update(raw.content).digest("hex");
+					if (sha === entry.entryType.baseSha) {
+						baseIndex = j;
+						break;
+					}
+				}
+				const base = resolveEntry(baseIndex!);
+				content = applyDelta(base.content, entry.content);
+				objType = base.type;
+				break;
+			}
+		}
+
+		const result = { content, type: objType };
+		resolved.set(index, result);
+		return result;
+	}
+
+	const objects: PackObject[] = [];
+
+	for (let i = 0; i < rawEntries.length; i++) {
+		const entry = rawEntries[i];
+		let content: Buffer;
+		let objectType: PackObject["type"];
+
+		if (entry.entryType.kind === "object") {
+			objectType = entry.entryType.type;
+			content = entry.content;
+		} else {
+			const resolvedResult = resolveEntry(i);
+			content = resolvedResult.content;
+			objectType = resolvedResult.type;
+		}
+
 		const sha = createHash("sha1")
-			.update(`${objectType} ${inflated.length}\0`)
-			.update(inflated)
+			.update(`${objectType} ${content.length}\0`)
+			.update(content)
 			.digest("hex");
 
-		objects.push({
-			type: objectType,
-			sha,
-			content: inflated,
-		});
-
-		offset += bytesConsumed;
+		objects.push({ type: objectType, sha, content });
 	}
 
 	return objects;
@@ -110,6 +185,42 @@ function parseObjectHeader(
 	}
 
 	return { type, size, newOffset: currentOffset };
+}
+
+function parsePackEntryType(
+	typeNum: number,
+	data: Buffer,
+	offset: number,
+): { entryType: PackEntryType; dataOffset: number } | null {
+	switch (typeNum) {
+		case 1:
+			return { entryType: { kind: "object", type: "commit" }, dataOffset: offset };
+		case 2:
+			return { entryType: { kind: "object", type: "tree" }, dataOffset: offset };
+		case 3:
+			return { entryType: { kind: "object", type: "blob" }, dataOffset: offset };
+		case 4:
+			return { entryType: { kind: "object", type: "tag" }, dataOffset: offset };
+		case 6: {
+			let off = offset;
+			let byte = data[off];
+			off++;
+			let negOffset = byte & 0x7f;
+			while (byte & 0x80) {
+				byte = data[off];
+				off++;
+				negOffset = ((negOffset + 1) << 7) | (byte & 0x7f);
+			}
+			return { entryType: { kind: "ofsDelta", offset: negOffset }, dataOffset: off };
+		}
+		case 7: {
+			if (offset + 20 > data.length) return null;
+			const sha = data.slice(offset, offset + 20).toString("hex");
+			return { entryType: { kind: "refDelta", baseSha: sha }, dataOffset: offset + 20 };
+		}
+		default:
+			return null;
+	}
 }
 
 function decompressStreamData(
@@ -137,6 +248,77 @@ function decompressStreamData(
 	}
 
 	return { inflated, bytesConsumed: lo };
+}
+
+function applyDelta(base: Buffer, delta: Buffer): Buffer {
+	let deltaOffset = 0;
+
+	function readSize(): number {
+		let size = 0;
+		let shift = 0;
+		while (deltaOffset < delta.length) {
+			const byte = delta[deltaOffset];
+			deltaOffset++;
+			size |= (byte & 0x7f) << shift;
+			shift += 7;
+			if ((byte & 0x80) === 0) break;
+		}
+		return size;
+	}
+
+	readSize();
+	readSize();
+
+	const parts: Buffer[] = [];
+
+	while (deltaOffset < delta.length) {
+		const cmd = delta[deltaOffset];
+		deltaOffset++;
+
+		if (cmd & 0x80) {
+			let copyOffset = 0;
+			let copySize = 0;
+
+			if (cmd & 0x01) {
+				copyOffset = delta[deltaOffset];
+				deltaOffset++;
+			}
+			if (cmd & 0x02) {
+				copyOffset |= delta[deltaOffset] << 8;
+				deltaOffset++;
+			}
+			if (cmd & 0x04) {
+				copyOffset |= delta[deltaOffset] << 16;
+				deltaOffset++;
+			}
+			if (cmd & 0x08) {
+				copyOffset |= delta[deltaOffset] << 24;
+				deltaOffset++;
+			}
+
+			if (cmd & 0x10) {
+				copySize = delta[deltaOffset];
+				deltaOffset++;
+			}
+			if (cmd & 0x20) {
+				copySize |= delta[deltaOffset] << 8;
+				deltaOffset++;
+			}
+			if (cmd & 0x40) {
+				copySize |= delta[deltaOffset] << 16;
+				deltaOffset++;
+			}
+
+			if (copySize === 0) copySize = 0x10000;
+
+			parts.push(base.slice(copyOffset, copyOffset + copySize));
+		} else if (cmd > 0) {
+			parts.push(delta.slice(deltaOffset, deltaOffset + cmd));
+			deltaOffset += cmd;
+		}
+	}
+
+	return Buffer.concat(parts);
 }
 
 const OBJECT_TYPES: Record<number, PackObject["type"]> = {
@@ -193,7 +375,7 @@ function getTypeNumber(type: PackObject["type"]): number {
 	return types[type];
 }
 
-function encodeObjectHeader(type: number, size: number): Buffer {
+export function encodeObjectHeader(type: number, size: number): Buffer {
 	const bytes: number[] = [];
 	let byte = (type << 4) | (size & 0x0f);
 	size >>= 4;

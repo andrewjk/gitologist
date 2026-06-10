@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { deflateSync } from "node:zlib";
 
 import { describe, it, expect } from "vite-plus/test";
 
@@ -8,6 +9,7 @@ import {
 	encodePktLine,
 	decodePktLines,
 	getObjectType,
+	encodeObjectHeader,
 } from "../src/packfile";
 import type { PackObject } from "../src/packfile";
 
@@ -257,6 +259,184 @@ describe("packfile", () => {
 
 		it("should throw error for unknown type", () => {
 			expect(() => getObjectType(99)).toThrow("Unknown object type");
+		});
+	});
+
+	describe("delta support", () => {
+		function encodeOfsDeltaOffset(n: number): Buffer {
+			const bytes: number[] = [];
+			bytes.push(n & 0x7f);
+			let remaining = n >> 7;
+			while (remaining > 0) {
+				remaining -= 1;
+				bytes.unshift((remaining & 0x7f) | 0x80);
+				remaining >>= 7;
+			}
+			return Buffer.from(bytes);
+		}
+
+		function hexToBuffer(hex: string): Buffer {
+			const bytes: number[] = [];
+			for (let i = 0; i < hex.length; i += 2) {
+				bytes.push(parseInt(hex.slice(i, i + 2), 16));
+			}
+			return Buffer.from(bytes);
+		}
+
+		function buildTestPackfile(
+			objectSpecs: Array<{ typeNum: number; payload: Buffer; extraData: Buffer }>,
+		): Buffer {
+			const parts: Buffer[] = [];
+			parts.push(Buffer.from("PACK", "utf-8"));
+			const version = Buffer.alloc(4);
+			version.writeUInt32BE(2, 0);
+			parts.push(version);
+			const numObj = Buffer.alloc(4);
+			numObj.writeUInt32BE(objectSpecs.length, 0);
+			parts.push(numObj);
+			for (const spec of objectSpecs) {
+				parts.push(encodeObjectHeader(spec.typeNum, spec.payload.length));
+				parts.push(spec.extraData);
+				parts.push(deflateSync(spec.payload));
+			}
+			const packfile = Buffer.concat(parts);
+			const checksum = createHash("sha1").update(packfile).digest();
+			return Buffer.concat([packfile, checksum]);
+		}
+
+		it("should resolve OFS_DELTA copying entire base", () => {
+			const baseContent = Buffer.from("hello world");
+
+			const delta = Buffer.from([0x0b, 0x0b, 0x91, 0x00, 0x0b]);
+
+			const baseHeaderSize = encodeObjectHeader(3, baseContent.length).length;
+			const baseCompressedSize = deflateSync(baseContent).length;
+			const baseObjSize = baseHeaderSize + baseCompressedSize;
+			const ofsBytes = encodeOfsDeltaOffset(baseObjSize);
+
+			const packfile = buildTestPackfile([
+				{ typeNum: 3, payload: baseContent, extraData: Buffer.alloc(0) },
+				{ typeNum: 6, payload: delta, extraData: ofsBytes },
+			]);
+
+			const objects = parsePackfile(packfile);
+
+			expect(objects).toHaveLength(2);
+			expect(objects[0].type).toBe("blob");
+			expect(objects[0].content).toEqual(baseContent);
+			expect(objects[1].type).toBe("blob");
+			expect(objects[1].content).toEqual(baseContent);
+
+			const expectedSha = createHash("sha1")
+				.update(`blob ${baseContent.length}\0`)
+				.update(baseContent)
+				.digest("hex");
+			expect(objects[0].sha).toBe(expectedSha);
+			expect(objects[1].sha).toBe(expectedSha);
+		});
+
+		it("should resolve OFS_DELTA with modified content", () => {
+			const baseContent = Buffer.from("hello world");
+			const expectedContent = Buffer.from("hello gitologist");
+
+			const delta = Buffer.from([0x0b, 0x10, 0x91, 0x00, 0x06, 0x0a, ...Buffer.from("gitologist")]);
+
+			const baseHeaderSize = encodeObjectHeader(3, baseContent.length).length;
+			const baseCompressedSize = deflateSync(baseContent).length;
+			const baseObjSize = baseHeaderSize + baseCompressedSize;
+			const ofsBytes = encodeOfsDeltaOffset(baseObjSize);
+
+			const packfile = buildTestPackfile([
+				{ typeNum: 3, payload: baseContent, extraData: Buffer.alloc(0) },
+				{ typeNum: 6, payload: delta, extraData: ofsBytes },
+			]);
+
+			const objects = parsePackfile(packfile);
+
+			expect(objects).toHaveLength(2);
+			expect(objects[0].type).toBe("blob");
+			expect(objects[0].content).toEqual(baseContent);
+			expect(objects[1].type).toBe("blob");
+			expect(objects[1].content).toEqual(expectedContent);
+		});
+
+		it("should resolve REF_DELTA copying entire base", () => {
+			const baseContent = Buffer.from("hello world");
+			const baseSha = createHash("sha1")
+				.update(`blob ${baseContent.length}\0`)
+				.update(baseContent)
+				.digest("hex");
+
+			const delta = Buffer.from([0x0b, 0x0b, 0x91, 0x00, 0x0b]);
+
+			const shaData = hexToBuffer(baseSha);
+
+			const packfile = buildTestPackfile([
+				{ typeNum: 3, payload: baseContent, extraData: Buffer.alloc(0) },
+				{ typeNum: 7, payload: delta, extraData: shaData },
+			]);
+
+			const objects = parsePackfile(packfile);
+
+			expect(objects).toHaveLength(2);
+			expect(objects[0].type).toBe("blob");
+			expect(objects[0].content).toEqual(baseContent);
+			expect(objects[1].type).toBe("blob");
+			expect(objects[1].content).toEqual(baseContent);
+			expect(objects[1].sha).toBe(baseSha);
+		});
+
+		it("should resolve chained OFS_DELTA", () => {
+			const baseContent = Buffer.from("hello world");
+			const intermediateContent = Buffer.from("hello gitologist");
+			const finalContent = Buffer.from("hello beautiful gitologist");
+
+			const delta1 = Buffer.from([
+				0x0b,
+				0x10,
+				0x91,
+				0x00,
+				0x06,
+				0x0a,
+				...Buffer.from("gitologist"),
+			]);
+
+			const delta2 = Buffer.from([
+				0x10,
+				0x1a,
+				0x91,
+				0x00,
+				0x06,
+				0x0a,
+				...Buffer.from("beautiful "),
+				0x91,
+				0x06,
+				0x0a,
+			]);
+
+			const obj1Size =
+				encodeObjectHeader(3, baseContent.length).length + deflateSync(baseContent).length;
+			const ofsBytes1 = encodeOfsDeltaOffset(obj1Size);
+			const delta1Compressed = deflateSync(delta1);
+			const obj2Size =
+				encodeObjectHeader(6, delta1.length).length + ofsBytes1.length + delta1Compressed.length;
+			const ofsBytes2 = encodeOfsDeltaOffset(obj2Size);
+
+			const packfile = buildTestPackfile([
+				{ typeNum: 3, payload: baseContent, extraData: Buffer.alloc(0) },
+				{ typeNum: 6, payload: delta1, extraData: ofsBytes1 },
+				{ typeNum: 6, payload: delta2, extraData: ofsBytes2 },
+			]);
+
+			const objects = parsePackfile(packfile);
+
+			expect(objects).toHaveLength(3);
+			expect(objects[0].type).toBe("blob");
+			expect(objects[0].content).toEqual(baseContent);
+			expect(objects[1].type).toBe("blob");
+			expect(objects[1].content).toEqual(intermediateContent);
+			expect(objects[2].type).toBe("blob");
+			expect(objects[2].content).toEqual(finalContent);
 		});
 	});
 });

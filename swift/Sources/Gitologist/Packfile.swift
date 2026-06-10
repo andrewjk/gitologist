@@ -82,6 +82,13 @@ func decodePktLines(_ data: Data) -> [String] {
 	return lines
 }
 
+private struct RawPackEntry {
+	let entryType: PackEntryType
+	let content: Data
+	let packOffset: Int
+	let bytesConsumed: Int
+}
+
 func parsePackfile(_ data: Data) throws -> [PackObject] {
 	let signature = String(data: data[0 ..< 4], encoding: .utf8)
 	guard signature == "PACK" else {
@@ -102,7 +109,8 @@ func parsePackfile(_ data: Data) throws -> [PackObject] {
 	// Exclude checksum (last 20 bytes) from parsing
 	let dataWithoutChecksum = data.prefix(data.count - 20)
 
-	var objects: [PackObject] = []
+	var rawEntries: [RawPackEntry] = []
+	var offsetToIndex: [Int: Int] = [:]
 	var offset = 12
 
 	for _ in 0 ..< numObjects {
@@ -110,26 +118,85 @@ func parsePackfile(_ data: Data) throws -> [PackObject] {
 			throw PackfileError.invalidPackfileSignature
 		}
 
-		let (type, _, newOffset) = try parseObjectHeader(dataWithoutChecksum, offset)
-		offset = newOffset
+		let (typeNum, _, headerEndOffset) = try parseObjectHeader(dataWithoutChecksum, offset)
 
-		let (inflated, bytesConsumed) = try decompressStreamData(dataWithoutChecksum, from: offset)
-
-		guard let objectType = getObjectType(type) else {
-			throw PackfileError.unknownObjectType(type)
+		guard let (entryType, dataOffset) = parsePackEntryType(typeNum, data: dataWithoutChecksum, offset: headerEndOffset) else {
+			throw PackfileError.unknownObjectType(typeNum)
 		}
 
-		let objectHeader = "\(objectType.rawValue) \(inflated.count)\0"
+		let (inflated, bytesConsumed) = try decompressStreamData(dataWithoutChecksum, from: dataOffset)
+
+		rawEntries.append(RawPackEntry(entryType: entryType, content: inflated, packOffset: offset, bytesConsumed: bytesConsumed + (dataOffset - offset)))
+		offsetToIndex[offset] = rawEntries.count - 1
+		offset = dataOffset + bytesConsumed
+	}
+
+	func resolveEntry(at index: Int, resolved: inout [Int: (content: Data, type: ObjectType)]) -> (content: Data, type: ObjectType) {
+		if let cached = resolved[index] { return cached }
+		let entry = rawEntries[index]
+		let content: Data
+		let objType: ObjectType
+		switch entry.entryType {
+		case let .object(type):
+			content = entry.content
+			objType = type
+		case let .ofsDelta(offset: negOffset):
+			let basePackOffset = entry.packOffset - negOffset
+			let baseIndex = offsetToIndex[basePackOffset]!
+			let base = resolveEntry(at: baseIndex, resolved: &resolved)
+			content = applyDelta(base: base.content, delta: entry.content)
+			objType = base.type
+		case let .refDelta(baseSha: baseSha):
+			var baseIndex: Int?
+			for j in rawEntries.indices {
+				let raw = rawEntries[j]
+				guard case let .object(objType) = raw.entryType else { continue }
+				let header = "\(objType.rawValue) \(raw.content.count)\0"
+				let fullData = header.data(using: .utf8)! + raw.content
+				let sha = Insecure.SHA1.hash(data: fullData)
+					.map { String(format: "%02x", $0) }.joined()
+				if sha == baseSha {
+					baseIndex = j
+					break
+				}
+			}
+			let base = resolveEntry(at: baseIndex!, resolved: &resolved)
+			content = applyDelta(base: base.content, delta: entry.content)
+			objType = base.type
+		}
+		let result = (content: content, type: objType)
+		resolved[index] = result
+		return result
+	}
+
+	var resolved: [Int: (content: Data, type: ObjectType)] = [:]
+	var objects: [PackObject] = []
+
+	for i in rawEntries.indices {
+		let entry = rawEntries[i]
+		let content: Data
+		let objectType: ObjectType
+
+		switch entry.entryType {
+		case let .object(type):
+			objectType = type
+			content = entry.content
+		case .ofsDelta, .refDelta:
+			let resolvedResult = resolveEntry(at: i, resolved: &resolved)
+			content = resolvedResult.content
+			objectType = resolvedResult.type
+		}
+
+		let objectHeader = "\(objectType.rawValue) \(content.count)\0"
 		guard let headerData = objectHeader.data(using: .utf8) else {
 			continue
 		}
-		let fullData = headerData + inflated
+		let fullData = headerData + content
 		let sha = Insecure.SHA1.hash(data: fullData)
 			.map { String(format: "%02x", $0) }
 			.joined()
 
-		objects.append(PackObject(type: objectType, sha: sha, content: inflated))
-		offset += bytesConsumed
+		objects.append(PackObject(type: objectType, sha: sha, content: content))
 	}
 
 	return objects
@@ -222,6 +289,90 @@ func getObjectType(_ typeNum: Int) -> ObjectType? {
 	default:
 		return nil
 	}
+}
+
+private enum PackEntryType {
+	case object(ObjectType)
+	case ofsDelta(offset: Int)
+	case refDelta(baseSha: String)
+}
+
+private func parsePackEntryType(_ typeNum: Int, data: Data, offset: Int) -> (PackEntryType, Int)? {
+	switch typeNum {
+	case 1: return (.object(.commit), offset)
+	case 2: return (.object(.tree), offset)
+	case 3: return (.object(.blob), offset)
+	case 4: return (.object(.tag), offset)
+	case 6:
+		var off = offset
+		var byte = data[off]
+		off += 1
+		var negOffset = Int(byte & 0x7F)
+		while (byte & 0x80) != 0 {
+			byte = data[off]
+			off += 1
+			negOffset = ((negOffset + 1) << 7) | Int(byte & 0x7F)
+		}
+		return (.ofsDelta(offset: negOffset), off)
+	case 7:
+		guard offset + 20 <= data.count else { return nil }
+		let shaBytes = data[offset ..< (offset + 20)]
+		let sha = shaBytes.map { String(format: "%02x", $0) }.joined()
+		return (.refDelta(baseSha: sha), offset + 20)
+	default:
+		return nil
+	}
+}
+
+private func applyDelta(base: Data, delta: Data) -> Data {
+	var deltaOffset = 0
+
+	func readSize() -> Int {
+		var size = 0
+		var shift = 0
+		while deltaOffset < delta.count {
+			let byte = Int(delta[deltaOffset])
+			deltaOffset += 1
+			size |= (byte & 0x7F) << shift
+			shift += 7
+			if (byte & 0x80) == 0 { break }
+		}
+		return size
+	}
+
+	let _ = readSize()
+	let _ = readSize()
+
+	var result = Data()
+
+	while deltaOffset < delta.count {
+		let cmd = Int(delta[deltaOffset])
+		deltaOffset += 1
+
+		if (cmd & 0x80) != 0 {
+			var copyOffset = 0
+			var copySize = 0
+
+			if (cmd & 0x01) != 0 { copyOffset = Int(delta[deltaOffset]); deltaOffset += 1 }
+			if (cmd & 0x02) != 0 { copyOffset |= Int(delta[deltaOffset]) << 8; deltaOffset += 1 }
+			if (cmd & 0x04) != 0 { copyOffset |= Int(delta[deltaOffset]) << 16; deltaOffset += 1 }
+			if (cmd & 0x08) != 0 { copyOffset |= Int(delta[deltaOffset]) << 24; deltaOffset += 1 }
+
+			if (cmd & 0x10) != 0 { copySize = Int(delta[deltaOffset]); deltaOffset += 1 }
+			if (cmd & 0x20) != 0 { copySize |= Int(delta[deltaOffset]) << 8; deltaOffset += 1 }
+			if (cmd & 0x40) != 0 { copySize |= Int(delta[deltaOffset]) << 16; deltaOffset += 1 }
+
+			if copySize == 0 { copySize = 0x10000 }
+
+			result.append(base[copyOffset ..< (copyOffset + copySize)])
+		} else if cmd > 0 {
+			let insertData = delta[deltaOffset ..< (deltaOffset + cmd)]
+			deltaOffset += cmd
+			result.append(insertData)
+		}
+	}
+
+	return result
 }
 
 func getTypeNumber(_ type: ObjectType) -> Int {
