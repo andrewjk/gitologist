@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 
 import { init } from "../src/init";
-import { remoteAdd, hasRemote } from "../src/remote";
+import { remoteAdd, hasRemote, setRemoteUrl } from "../src/remote";
 
 describe("remote", () => {
 	let testDir: string;
@@ -119,5 +119,49 @@ describe("remote", () => {
 	it("should return false for different remote name", async () => {
 		await remoteAdd(testDir, "origin", "https://github.com/user/repo.git");
 		expect(hasRemote(testDir, "upstream")).toBe(false);
+	});
+
+	it("should update the remote url", async () => {
+		await remoteAdd(testDir, "origin", "https://github.com/user/repo.git");
+		await setRemoteUrl(testDir, "origin", "https://github.com/other/repo.git");
+
+		const configPath = join(testDir, ".git", "config");
+		const configContent = await readFile(configPath, "utf-8");
+
+		expect(configContent).toContain("url = https://github.com/other/repo.git");
+		expect(configContent).not.toContain("url = https://github.com/user/repo.git");
+	});
+
+	it("should preserve other remote properties when updating url", async () => {
+		await remoteAdd(testDir, "origin", "https://github.com/user/repo.git");
+		await setRemoteUrl(testDir, "origin", "https://github.com/other/repo.git");
+
+		const configPath = join(testDir, ".git", "config");
+		const configContent = await readFile(configPath, "utf-8");
+
+		expect(configContent).toContain('[remote "origin"]');
+		expect(configContent).toContain("fetch = +refs/heads/*:refs/remotes/origin/*");
+	});
+
+	it("should throw error when setting url if not a git repository", async () => {
+		const nonGitDir = join(tmpdir(), `not-a-repo-${Date.now()}`);
+		await mkdir(nonGitDir, { recursive: true });
+
+		await expect(
+			setRemoteUrl(nonGitDir, "origin", "https://github.com/other/repo.git"),
+		).rejects.toThrow("Not a git repository");
+
+		await rm(nonGitDir, { recursive: true, force: true });
+	});
+
+	it("should update url for custom named remote", async () => {
+		await remoteAdd(testDir, "upstream", "https://github.com/original/repo.git");
+		await setRemoteUrl(testDir, "upstream", "https://github.com/fork/repo.git");
+
+		const configPath = join(testDir, ".git", "config");
+		const configContent = await readFile(configPath, "utf-8");
+
+		expect(configContent).toContain("url = https://github.com/fork/repo.git");
+		expect(configContent).not.toContain("url = https://github.com/original/repo.git");
 	});
 });

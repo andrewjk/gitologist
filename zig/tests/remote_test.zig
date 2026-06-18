@@ -3,6 +3,7 @@ const std = @import("std");
 const init = @import("gitologist").init;
 const remoteAdd = @import("gitologist").remoteAdd;
 const hasRemote = @import("gitologist").hasRemote;
+const setRemoteUrl = @import("gitologist").setRemoteUrl;
 
 fn trimRight(comptime T: type, slice: []const T) []const T {
     var end = slice.len;
@@ -277,4 +278,107 @@ test "should return false for different remote name" {
     try remoteAdd(io, allocator, tmp_path, "origin", "https://github.com/user/repo.git");
 
     try std.testing.expect(!hasRemote(io, allocator, tmp_path, "upstream"));
+}
+
+test "should update remote url" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-update-url" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try remoteAdd(io, allocator, tmp_path, "origin", "https://github.com/user/repo.git");
+    try setRemoteUrl(io, allocator, tmp_path, "origin", "https://github.com/other/repo.git");
+
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
+    defer allocator.free(git_dir_path);
+    const git_dir = try cwd.openDir(io, git_dir_path, .{});
+    defer git_dir.close(io);
+
+    const config = try git_dir.readFileAlloc(io, "config", allocator, .unlimited);
+    defer allocator.free(config);
+
+    try std.testing.expect(std.mem.indexOf(u8, config, "url = https://github.com/other/repo.git") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config, "url = https://github.com/user/repo.git") == null);
+}
+
+test "should preserve other remote properties when updating url" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-preserve-url" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try remoteAdd(io, allocator, tmp_path, "origin", "https://github.com/user/repo.git");
+    try setRemoteUrl(io, allocator, tmp_path, "origin", "https://github.com/other/repo.git");
+
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
+    defer allocator.free(git_dir_path);
+    const git_dir = try cwd.openDir(io, git_dir_path, .{});
+    defer git_dir.close(io);
+
+    const config = try git_dir.readFileAlloc(io, "config", allocator, .unlimited);
+    defer allocator.free(config);
+
+    try std.testing.expect(std.mem.indexOf(u8, config, "[remote \"origin\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config, "fetch = +refs/heads/*:refs/remotes/origin/*") != null);
+}
+
+test "should throw error when setting url if not a git repository" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-not-repo-url" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    const result = setRemoteUrl(io, allocator, tmp_path, "origin", "https://github.com/other/repo.git");
+    try std.testing.expectError(error.NotAGitRepository, result);
+}
+
+test "should update url for custom named remote" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-remote-test-update-custom" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    try remoteAdd(io, allocator, tmp_path, "upstream", "https://github.com/original/repo.git");
+    try setRemoteUrl(io, allocator, tmp_path, "upstream", "https://github.com/fork/repo.git");
+
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
+    defer allocator.free(git_dir_path);
+    const git_dir = try cwd.openDir(io, git_dir_path, .{});
+    defer git_dir.close(io);
+
+    const config = try git_dir.readFileAlloc(io, "config", allocator, .unlimited);
+    defer allocator.free(config);
+
+    try std.testing.expect(std.mem.indexOf(u8, config, "url = https://github.com/fork/repo.git") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config, "url = https://github.com/original/repo.git") == null);
 }

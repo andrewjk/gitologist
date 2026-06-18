@@ -13,6 +13,7 @@ pub const unstash = @import("stash.zig").unstash;
 pub const remoteAdd = @import("remote.zig").remoteAdd;
 pub const hasRemote = @import("remote.zig").hasRemote;
 pub const getRemoteUrl = @import("remote.zig").getRemoteUrl;
+pub const setRemoteUrl = @import("remote.zig").setRemoteUrl;
 pub const clone = @import("clone.zig").clone;
 pub const push = @import("push.zig").push;
 pub const setUpstreamBranch = @import("push.zig").setUpstreamBranch;

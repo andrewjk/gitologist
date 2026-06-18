@@ -123,3 +123,51 @@ func getRemoteUrl(at gitDir: String, remoteName: String) async -> String? {
 
 	return nil
 }
+
+func setRemoteUrl(at path: String, name: String, url: String) throws {
+	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+	let configPath = gitDir.appendingPathComponent("config")
+
+	guard FileManager.default.fileExists(atPath: configPath.path) else {
+		throw RemoteError.notAGitRepository
+	}
+
+	var configContent = try String(contentsOf: configPath, encoding: .utf8)
+	let lines = configContent.split(separator: "\n", omittingEmptySubsequences: false)
+
+	var inRemoteSection = false
+	var currentRemote = ""
+	var updatedLines: [String] = []
+
+	for line in lines {
+		let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+		let remotePattern = "^\\[remote \"([^\"]+)\"\\]$"
+		if let regex = try? NSRegularExpression(pattern: remotePattern),
+		   let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed))
+		{
+			inRemoteSection = true
+			if let nameRange = Range(match.range(at: 1), in: trimmed) {
+				currentRemote = String(trimmed[nameRange])
+			}
+			updatedLines.append(String(line))
+			continue
+		}
+
+		if inRemoteSection, currentRemote == name {
+			if trimmed.hasPrefix("url") {
+				updatedLines.append("\turl = \(url)")
+				continue
+			}
+		}
+
+		if trimmed.hasPrefix("["), !trimmed.hasPrefix("[remote") {
+			inRemoteSection = false
+		}
+
+		updatedLines.append(String(line))
+	}
+
+	configContent = updatedLines.joined(separator: "\n")
+	try configContent.write(to: configPath, atomically: true, encoding: .utf8)
+}

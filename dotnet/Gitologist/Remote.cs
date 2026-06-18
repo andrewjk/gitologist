@@ -114,4 +114,54 @@ public static class Remote
 
         return null;
     }
+
+    public static async Task SetRemoteUrl(string path, string name, string url)
+    {
+        var gitDir = Path.Combine(path, ".git");
+        var configPath = Path.Combine(gitDir, "config");
+
+        if (!File.Exists(configPath))
+        {
+            throw new InvalidOperationException("Not a git repository");
+        }
+
+        var configContent = await File.ReadAllTextAsync(configPath);
+        var lines = configContent.Split('\n');
+
+        var inRemoteSection = false;
+        var currentRemote = "";
+        var updatedLines = new List<string>();
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            var sectionMatch = Regex.Match(trimmed, @"^\[remote\s+""([^""]+)""\]");
+            if (sectionMatch.Success)
+            {
+                inRemoteSection = true;
+                currentRemote = sectionMatch.Groups[1].Value;
+                updatedLines.Add(line);
+                continue;
+            }
+
+            if (inRemoteSection && currentRemote == name)
+            {
+                if (trimmed.StartsWith("url"))
+                {
+                    updatedLines.Add($"\turl = {url}");
+                    continue;
+                }
+            }
+
+            if (trimmed.StartsWith("[") && !trimmed.StartsWith("[remote"))
+            {
+                inRemoteSection = false;
+            }
+
+            updatedLines.Add(line);
+        }
+
+        await File.WriteAllTextAsync(configPath, string.Join("\n", updatedLines));
+    }
 }

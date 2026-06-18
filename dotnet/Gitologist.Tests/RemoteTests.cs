@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Gitologist.Tests;
@@ -229,5 +231,103 @@ public class RemoteTests
             "https://github.com/user/repo.git"
         );
         Assert.IsFalse(Remote.HasRemote(_testDir, "upstream"));
+    }
+
+    [TestMethod]
+    public async Task ShouldUpdateRemoteUrl()
+    {
+        await Init.InitRepo(_testDir);
+        await Remote.AddRemote(
+            _testDir,
+            "origin",
+            "https://github.com/user/repo.git"
+        );
+        await Remote.SetRemoteUrl(
+            _testDir,
+            "origin",
+            "https://github.com/other/repo.git"
+        );
+
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        var configContent = await File.ReadAllTextAsync(configPath);
+
+        StringAssert.Contains(configContent, "url = https://github.com/other/repo.git");
+        StringAssert.DoesNotMatch(configContent, new Regex(@"url\s*=\s*https://github\.com/user/repo\.git"));
+    }
+
+    [TestMethod]
+    public async Task ShouldPreserveOtherRemotePropertiesWhenUpdatingUrl()
+    {
+        await Init.InitRepo(_testDir);
+        await Remote.AddRemote(
+            _testDir,
+            "origin",
+            "https://github.com/user/repo.git"
+        );
+        await Remote.SetRemoteUrl(
+            _testDir,
+            "origin",
+            "https://github.com/other/repo.git"
+        );
+
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        var configContent = await File.ReadAllTextAsync(configPath);
+
+        StringAssert.Contains(configContent, "[remote \"origin\"]");
+        StringAssert.Contains(configContent, "fetch = +refs/heads/*:refs/remotes/origin/*");
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowErrorWhenSettingUrlIfNotAGitRepository()
+    {
+        var nonGitDir = Path.Combine(
+            Path.GetTempPath(),
+            $"not-a-repo-{DateTime.UtcNow.Ticks}"
+        );
+        Directory.CreateDirectory(nonGitDir);
+
+        try
+        {
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+                () =>
+                    Remote.SetRemoteUrl(
+                        nonGitDir,
+                        "origin",
+                        "https://github.com/other/repo.git"
+                    )
+            );
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(nonGitDir, true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ShouldUpdateUrlForCustomNamedRemote()
+    {
+        await Init.InitRepo(_testDir);
+        await Remote.AddRemote(
+            _testDir,
+            "upstream",
+            "https://github.com/original/repo.git"
+        );
+        await Remote.SetRemoteUrl(
+            _testDir,
+            "upstream",
+            "https://github.com/fork/repo.git"
+        );
+
+        var configPath = Path.Combine(_testDir, ".git", "config");
+        var configContent = await File.ReadAllTextAsync(configPath);
+
+        StringAssert.Contains(configContent, "url = https://github.com/fork/repo.git");
+        StringAssert.DoesNotMatch(configContent, new Regex(@"url\s*=\s*https://github\.com/original/repo\.git"));
     }
 }

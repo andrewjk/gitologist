@@ -141,3 +141,66 @@ pub fn getRemoteUrl(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []co
 
     return null;
 }
+
+pub fn setRemoteUrl(io: std.Io, allocator: std.mem.Allocator, path: []const u8, name: []const u8, url: []const u8) !void {
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
+    defer allocator.free(git_dir_path);
+
+    const config_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "config" });
+    defer allocator.free(config_path);
+
+    const cwd = std.Io.Dir.cwd();
+    const config_content = cwd.readFileAlloc(io, config_path, allocator, .unlimited) catch |err| {
+        if (err == error.FileNotFound) {
+            return error.NotAGitRepository;
+        }
+        return err;
+    };
+    defer allocator.free(config_content);
+
+    var lines = std.mem.splitScalar(u8, config_content, '\n');
+
+    var in_remote_section = false;
+    var current_remote: []const u8 = "";
+
+    var result = std.ArrayList(u8).initCapacity(allocator, config_content.len + 10) catch unreachable;
+    defer result.deinit(allocator);
+
+    var first_line = true;
+
+    while (lines.next()) |line| {
+        if (!first_line) {
+            try result.append(allocator, '\n');
+        }
+        first_line = false;
+
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+
+        var section_pattern_buf: [256]u8 = undefined;
+        const section_pattern = std.fmt.bufPrint(&section_pattern_buf, "[remote \"{s}\"]", .{name}) catch continue;
+
+        if (std.mem.indexOf(u8, trimmed, section_pattern)) |_| {
+            in_remote_section = true;
+            current_remote = name;
+            try result.appendSlice(allocator, line);
+            continue;
+        }
+
+        if (in_remote_section and std.mem.eql(u8, current_remote, name)) {
+            if (std.mem.startsWith(u8, trimmed, "url")) {
+                const new_line = try std.fmt.allocPrint(allocator, "\turl = {s}", .{url});
+                defer allocator.free(new_line);
+                try result.appendSlice(allocator, new_line);
+                continue;
+            }
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "[") and !std.mem.startsWith(u8, trimmed, "[remote")) {
+            in_remote_section = false;
+        }
+
+        try result.appendSlice(allocator, line);
+    }
+
+    try cwd.writeFile(io, .{ .sub_path = config_path, .data = result.items });
+}

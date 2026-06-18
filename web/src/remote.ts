@@ -52,3 +52,46 @@ export function hasRemote(path: string, name: string = "origin"): boolean {
 		return false;
 	}
 }
+
+export async function setRemoteUrl(path: string, name: string, url: string): Promise<void> {
+	const gitDir = join(path, ".git");
+	const configPath = join(gitDir, "config");
+
+	if (!existsSync(configPath)) {
+		throw new Error("Not a git repository");
+	}
+
+	const configContent = await readFile(configPath, "utf-8");
+	const lines = configContent.split("\n");
+
+	let inRemoteSection = false;
+	let currentRemote = "";
+	const updatedLines: string[] = [];
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+
+		const sectionMatch = trimmed.match(/^\[remote\s+"([^"]+)"\]$/);
+		if (sectionMatch) {
+			inRemoteSection = true;
+			currentRemote = sectionMatch[1] as string;
+			updatedLines.push(line);
+			continue;
+		}
+
+		if (inRemoteSection && currentRemote === name) {
+			if (trimmed.startsWith("url")) {
+				updatedLines.push(`\turl = ${url}`);
+				continue;
+			}
+		}
+
+		if (trimmed.startsWith("[") && !trimmed.startsWith("[remote")) {
+			inRemoteSection = false;
+		}
+
+		updatedLines.push(line);
+	}
+
+	await writeFile(configPath, updatedLines.join("\n"), "utf-8");
+}
