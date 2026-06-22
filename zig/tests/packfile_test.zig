@@ -491,6 +491,67 @@ test "should throw error when object not found" {
     try std.testing.expectError(error.ObjectNotFound, result);
 }
 
+test "should read object via packfile" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-test-read-object-via-packfile");
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git" });
+    defer allocator.free(git_dir_path);
+
+    const init = @import("gitologist").init;
+    try init(io, allocator, tmp_path);
+
+    const commit_content = "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\nauthor Test <test@example.com> 1234567890 +0000\ncommitter Test <test@example.com> 1234567890 +0000\n\nInitial commit\n";
+    const sha_hex = computeSha("commit", commit_content);
+
+    var objects = std.ArrayList(packfile.PackObject).initCapacity(allocator, 0) catch unreachable;
+    defer {
+        for (objects.items) |obj| {
+            allocator.free(obj.obj_type);
+            allocator.free(obj.sha);
+            allocator.free(obj.content);
+        }
+        objects.deinit(allocator);
+    }
+
+    const obj_type = try allocator.dupe(u8, "commit");
+    const sha = try allocator.dupe(u8, &sha_hex);
+    const content = try allocator.dupe(u8, commit_content);
+
+    try objects.append(allocator, .{
+        .obj_type = obj_type,
+        .sha = sha,
+        .content = content,
+    });
+
+    const pack_data = try packfile.createPackfile(allocator, objects);
+    defer allocator.free(pack_data);
+
+    const pack_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "objects", "pack" });
+    defer allocator.free(pack_dir_path);
+
+    cwd.createDirPath(io, pack_dir_path) catch {};
+    var pack_dir = try cwd.openDir(io, pack_dir_path, .{});
+    defer pack_dir.close(io);
+
+    try pack_dir.writeFile(io, .{ .sub_path = "commits.pack", .data = pack_data });
+
+    const utils = @import("gitologist").utils;
+    var cache = utils.PackfileCache.init(allocator);
+    defer cache.deinit();
+    const data = try utils.readObject(io, allocator, git_dir_path, sha, &cache);
+    defer allocator.free(data);
+
+    try std.testing.expect(std.mem.indexOf(u8, data, "commit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "Initial commit") != null);
+}
+
 fn encodeOfsDeltaOffset(allocator: std.mem.Allocator, n: usize) ![]const u8 {
     var buf: [16]u8 = undefined;
     var len: usize = 0;

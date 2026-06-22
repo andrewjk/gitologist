@@ -11,6 +11,7 @@ import { hasRemote, remoteAdd, setRemoteUrl } from "./remote.ts";
 import { restore } from "./restore.ts";
 import { stash, unstash } from "./stash.ts";
 import { status } from "./status.ts";
+import { switchBranch } from "./switch.ts";
 export type { FetchResult } from "./types/FetchResult.ts";
 export type { RemoteOptions } from "./types/RemoteOptions.ts";
 
@@ -30,5 +31,6 @@ export {
 	restore,
 	stash,
 	status,
+	switchBranch,
 	unstash,
 };
