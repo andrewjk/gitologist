@@ -14,7 +14,7 @@ public enum SwitchError: Error, LocalizedError {
 	}
 }
 
-func switchBranch(at path: String, to branchName: String) async throws {
+public func switchBranch(at path: String, to branchName: String) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
