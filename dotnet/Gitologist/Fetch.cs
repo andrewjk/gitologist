@@ -24,7 +24,7 @@ public class DiscoveredRef
 
 public static class Fetch
 {
-    public static async Task<FetchResult> FetchFromRemote(string path, string? remote = null, RemoteOptions? options = null)
+    public static async Task<FetchResult> FetchOrigin(string path, string? remote = null, RemoteOptions? options = null)
     {
         var gitDir = Path.Combine(path, ".git");
 

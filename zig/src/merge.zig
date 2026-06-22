@@ -3,6 +3,8 @@ const std = @import("std");
 const MergeResult = @import("types/MergeResult.zig").MergeResult;
 
 const utils = @import("utils.zig");
+const getCurrentBranch = @import("branch.zig").getCurrentBranch;
+const getCurrentCommit = @import("branch.zig").getCurrentCommit;
 
 pub const MergeOptions = struct {
     message: ?[]const u8 = null,
@@ -21,14 +23,14 @@ pub fn merge(io: std.Io, allocator: std.mem.Allocator, path: []const u8, branch_
         return error.NotAGitRepository;
     };
 
-    const current_branch = try utils.getCurrentBranch(io, allocator, git_dir_path);
+    const current_branch = try getCurrentBranch(io, allocator, git_dir_path);
     defer allocator.free(current_branch);
 
     if (std.mem.eql(u8, current_branch, branch_name)) {
         return error.CannotMergeIntoSelf;
     }
 
-    const current_sha_opt = try utils.getCurrentCommit(io, allocator, git_dir_path);
+    const current_sha_opt = try getCurrentCommit(io, allocator, git_dir_path);
     const branch_sha_opt = try getBranchCommit(io, allocator, git_dir_path, branch_name);
 
     if (branch_sha_opt == null) {

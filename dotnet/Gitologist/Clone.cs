@@ -23,7 +23,7 @@ public static class Clone
 
         try
         {
-            await Fetch.FetchFromRemote(path, "origin", options);
+            await Fetch.FetchOrigin(path, "origin", options);
         }
         catch
         {

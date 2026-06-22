@@ -19,13 +19,13 @@ public static class Merge
 
         var cache = new Utils.PackfileCache();
 
-        var currentBranch = await Utils.GetCurrentBranch(gitDir);
+        var currentBranch = await Branch.GetCurrentBranch(gitDir);
         if (currentBranch == branchName)
         {
             throw new InvalidOperationException("Cannot merge a branch into itself");
         }
 
-        var currentSha = await Utils.GetCurrentCommit(gitDir);
+        var currentSha = await Branch.GetCurrentCommit(gitDir);
         var branchSha = await GetBranchCommit(gitDir, branchName);
 
         if (string.IsNullOrEmpty(branchSha))

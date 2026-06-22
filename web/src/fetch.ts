@@ -3,13 +3,14 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
 import { encodePktLine, decodePktLines, parsePackfile, type PackObject } from "./packfile.ts";
+import { getRemoteUrl } from "./remote.ts";
 import type { FetchResult } from "./types/FetchResult.ts";
 import type { RemoteOptions } from "./types/RemoteOptions.ts";
 import { hashObjectBuffer } from "./utils.ts";
 
 type FetchHeaders = Record<string, string>;
 
-export async function fetchFromRemote(
+export async function fetchOrigin(
 	path: string,
 	remote?: string,
 	options?: RemoteOptions,
@@ -76,44 +77,6 @@ async function storeObjects(gitDir: string, objects: PackObject[]): Promise<void
 		const type = obj.type;
 		await hashObjectBuffer(gitDir, obj.content, type);
 	}
-}
-
-async function getRemoteUrl(gitDir: string, remoteName: string): Promise<string | null> {
-	const configPath = join(gitDir, "config");
-
-	if (!existsSync(configPath)) {
-		return null;
-	}
-
-	const configContent = await readFile(configPath, "utf-8");
-	const lines = configContent.split("\n");
-
-	let inRemoteSection = false;
-	let currentRemote = "";
-
-	for (const line of lines) {
-		const trimmed = line.trim();
-
-		const sectionMatch = trimmed.match(/^\[remote\s+"([^"]+)"\]$/);
-		if (sectionMatch) {
-			inRemoteSection = true;
-			currentRemote = sectionMatch[1];
-			continue;
-		}
-
-		if (inRemoteSection && currentRemote === remoteName) {
-			const urlMatch = trimmed.match(/^url\s*=\s*(.+)$/);
-			if (urlMatch) {
-				return urlMatch[1].trim();
-			}
-		}
-
-		if (trimmed.startsWith("[") && !trimmed.startsWith("[remote")) {
-			inRemoteSection = false;
-		}
-	}
-
-	return null;
 }
 
 interface DiscoveredRef {

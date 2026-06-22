@@ -21,6 +21,8 @@ pub const setUpstreamBranch = @import("push.zig").setUpstreamBranch;
 pub const pull = @import("pull.zig").pull;
 pub const log = @import("log.zig").log;
 pub const merge = @import("merge.zig").merge;
+pub const getCurrentBranch = @import("branch.zig").getCurrentBranch;
+pub const getCurrentCommit = @import("branch.zig").getCurrentCommit;
 pub const _utils = @import("utils.zig");
 
 pub const IgnoreParser = @import("ignore_parser.zig").IgnoreParser;

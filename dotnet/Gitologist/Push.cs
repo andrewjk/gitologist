@@ -21,7 +21,7 @@ public static class Push
         }
 
         var remoteName = remote ?? "origin";
-        var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
+        var branchName = branch ?? await Branch.GetCurrentBranch(gitDir);
 
         var localBranchPath = Path.Combine(gitDir, "refs", "heads", branchName);
         if (!File.Exists(localBranchPath))

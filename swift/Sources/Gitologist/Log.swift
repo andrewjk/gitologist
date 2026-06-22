@@ -1,10 +1,10 @@
 import Foundation
 
-enum LogError: Error, LocalizedError {
+public enum LogError: Error, LocalizedError {
 	case notAGitRepository
 	case branchNotFound(String)
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"

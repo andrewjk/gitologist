@@ -35,10 +35,10 @@ public static class Commit
         }
 
         var treeSha = await CreateTree(gitDir, index);
-        var parentSha = await Utils.GetCurrentCommit(gitDir);
+        var parentSha = await Branch.GetCurrentCommit(gitDir);
         var commitSha = await CreateCommitObject(gitDir, treeSha, message, parentSha);
 
-        var branchName = await Utils.GetCurrentBranch(gitDir);
+        var branchName = await Branch.GetCurrentBranch(gitDir);
         await Utils.UpdateBranch(gitDir, branchName, commitSha);
 
         return commitSha;

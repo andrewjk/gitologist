@@ -2,9 +2,10 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { getCurrentBranch } from "./branch.ts";
 import type { LogEntry } from "./types/LogEntry.ts";
 import type { LogOptions } from "./types/LogOptions.ts";
-import { getCurrentBranch, parseTreeEntries, readObject, type PackfileCache } from "./utils.ts";
+import { parseTreeEntries, readObject, type PackfileCache } from "./utils.ts";
 
 export async function log(path: string, options?: LogOptions): Promise<LogEntry[]> {
 	const gitDir = join(path, ".git");

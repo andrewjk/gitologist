@@ -1,11 +1,11 @@
 import Foundation
 
-enum RestoreError: Error, LocalizedError {
+public enum RestoreError: Error, LocalizedError {
 	case notAGitRepository
 	case fileNotFound(String)
 	case fileNotInCommit(String)
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"

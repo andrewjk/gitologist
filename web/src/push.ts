@@ -2,11 +2,12 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
+import { getCurrentBranch } from "./branch.ts";
 import { enumerateObjects } from "./objects.ts";
 import { encodePktLine, decodePktLines, createPackfile } from "./packfile.ts";
+import { getRemoteUrl } from "./remote.ts";
 import { status } from "./status.ts";
 import type { RemoteOptions } from "./types/RemoteOptions.ts";
-import { getCurrentBranch } from "./utils.ts";
 
 type FetchHeaders = Record<string, string>;
 
@@ -266,42 +267,4 @@ export async function setUpstreamBranch(
 	}
 
 	await writeFile(configPath, lines.join("\n"), "utf-8");
-}
-
-async function getRemoteUrl(gitDir: string, remoteName: string): Promise<string | null> {
-	const configPath = join(gitDir, "config");
-
-	if (!existsSync(configPath)) {
-		return null;
-	}
-
-	const configContent = await readFile(configPath, "utf-8");
-	const lines = configContent.split("\n");
-
-	let inRemoteSection = false;
-	let currentRemote = "";
-
-	for (const line of lines) {
-		const trimmed = line.trim();
-
-		const sectionMatch = trimmed.match(/^\[remote\s+"([^"]+)"\]$/);
-		if (sectionMatch) {
-			inRemoteSection = true;
-			currentRemote = sectionMatch[1];
-			continue;
-		}
-
-		if (inRemoteSection && currentRemote === remoteName) {
-			const urlMatch = trimmed.match(/^url\s*=\s*(.+)$/);
-			if (urlMatch) {
-				return urlMatch[1].trim();
-			}
-		}
-
-		if (trimmed.startsWith("[") && !trimmed.startsWith("[remote")) {
-			inRemoteSection = false;
-		}
-	}
-
-	return null;
 }

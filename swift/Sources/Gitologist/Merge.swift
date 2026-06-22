@@ -1,13 +1,13 @@
 import Foundation
 
-enum MergeError: Error, LocalizedError {
+public enum MergeError: Error, LocalizedError {
 	case notAGitRepository
 	case cannotMergeIntoSelf
 	case branchNotFound(String)
 	case cannotMergeIntoEmptyBranch
 	case couldNotGetTree
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"

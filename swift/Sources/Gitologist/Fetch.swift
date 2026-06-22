@@ -1,22 +1,32 @@
 import Foundation
 
-struct FetchResult {
-	let remote: String
-	var refs: [RefInfo]
+public struct FetchResult {
+	public let remote: String
+	public var refs: [RefInfo]
+
+	public init(remote: String, refs: [RefInfo]) {
+		self.remote = remote
+		self.refs = refs
+	}
 }
 
-struct RefInfo {
-	let name: String
-	let sha: String
+public struct RefInfo {
+	public let name: String
+	public let sha: String
+
+	public init(name: String, sha: String) {
+		self.name = name
+		self.sha = sha
+	}
 }
 
-enum FetchError: Error, LocalizedError {
+public enum FetchError: Error, LocalizedError {
 	case notAGitRepository
 	case failedToDiscoverRefs(Int, String)
 	case failedToFetchPackfile(Int, String)
 	case invalidURL
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
@@ -30,7 +40,7 @@ enum FetchError: Error, LocalizedError {
 	}
 }
 
-func fetchFromRemote(at path: String, remote: String? = nil, options: RemoteOptions? = nil) async throws -> FetchResult {
+public func fetchOrigin(at path: String, remote: String? = nil, options: RemoteOptions? = nil) async throws -> FetchResult {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {

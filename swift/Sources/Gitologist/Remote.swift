@@ -1,10 +1,10 @@
 import Foundation
 
-enum RemoteError: Error, LocalizedError {
+public enum RemoteError: Error, LocalizedError {
 	case notAGitRepository
 	case remoteAlreadyExists(String)
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
@@ -71,7 +71,7 @@ public func hasRemote(at path: String, name: String = "origin") -> Bool {
 	return regex.firstMatch(in: configContent, options: [], range: range) != nil
 }
 
-func getRemoteUrl(at gitDir: String, remoteName: String) async -> String? {
+public func getRemoteUrl(at gitDir: String, remoteName: String) async -> String? {
 	let configPath = URL(fileURLWithPath: gitDir).appendingPathComponent("config")
 
 	guard FileManager.default.fileExists(atPath: configPath.path) else {

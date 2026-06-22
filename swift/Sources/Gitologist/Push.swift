@@ -1,13 +1,13 @@
 import Foundation
 
-enum PushError: Error, LocalizedError {
+public enum PushError: Error, LocalizedError {
 	case notAGitRepository
 	case localBranchDoesNotExist(String)
 	case uncommittedChanges
 	case pushFailed(Int, String)
 	case pushRejected(String)
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"

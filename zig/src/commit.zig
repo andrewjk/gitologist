@@ -1,6 +1,8 @@
 const std = @import("std");
 
 const utils = @import("utils.zig");
+const getCurrentBranch = @import("branch.zig").getCurrentBranch;
+const getCurrentCommit = @import("branch.zig").getCurrentCommit;
 
 const status_module = @import("status.zig");
 
@@ -66,7 +68,7 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
     const tree_sha = try createTree(io, allocator, git_dir_path, &index);
     defer allocator.free(tree_sha);
 
-    const parent_sha_opt = try utils.getCurrentCommit(io, allocator, git_dir_path);
+    const parent_sha_opt = try getCurrentCommit(io, allocator, git_dir_path);
 
     const commit_sha = try createCommit(io, allocator, git_dir_path, tree_sha, message, parent_sha_opt);
 
@@ -74,7 +76,7 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
         allocator.free(parent_sha);
     }
 
-    const branch_name = try utils.getCurrentBranch(io, allocator, git_dir_path);
+    const branch_name = try getCurrentBranch(io, allocator, git_dir_path);
     defer allocator.free(branch_name);
 
     try utils.updateBranch(io, allocator, git_dir_path, branch_name, commit_sha);

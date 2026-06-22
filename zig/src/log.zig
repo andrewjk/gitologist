@@ -4,6 +4,7 @@ const LogEntry = @import("types/LogEntry.zig").LogEntry;
 const LogOptions = @import("types/LogOptions.zig").LogOptions;
 
 const utils = @import("utils.zig");
+const getCurrentBranch = @import("branch.zig").getCurrentBranch;
 
 pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: ?LogOptions) ![]LogEntry {
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
@@ -23,7 +24,7 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
     if (opts.branch) |b| {
         branch_name = b;
     } else {
-        branch_name = try utils.getCurrentBranch(io, allocator, git_dir_path);
+        branch_name = try getCurrentBranch(io, allocator, git_dir_path);
         free_branch_name = true;
     }
     defer if (free_branch_name) allocator.free(branch_name);

@@ -16,7 +16,7 @@ public static class Log
 
         var cache = new Utils.PackfileCache();
 
-        var branchName = options?.Branch ?? await Utils.GetCurrentBranch(gitDir);
+        var branchName = options?.Branch ?? await Branch.GetCurrentBranch(gitDir);
         var branchPath = Path.Combine(gitDir, "refs", "heads", branchName);
 
         if (!File.Exists(branchPath))

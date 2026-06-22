@@ -21,7 +21,7 @@ const DiscoveredRef = struct {
     ref: []const u8,
 };
 
-pub fn fetchFromRemote(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name_param: ?[]const u8, options: ?*const RemoteOptions) !FetchResult {
+pub fn fetchOrigin(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_name_param: ?[]const u8, options: ?*const RemoteOptions) !FetchResult {
     const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
     defer allocator.free(git_dir_path);
 

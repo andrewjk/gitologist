@@ -2,13 +2,12 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { fetchFromRemote } from "./fetch.ts";
+import { getCurrentBranch, getCurrentCommit } from "./branch.ts";
+import { fetchOrigin } from "./fetch.ts";
 import type { RemoteOptions } from "./types/RemoteOptions.ts";
 import {
 	extractContentFromBlob,
 	extractTreeFromCommit,
-	getCurrentBranch,
-	getCurrentCommit,
 	getIndex,
 	hashFileAsBlob,
 	hashObject,
@@ -30,7 +29,7 @@ export async function pull(
 		throw new Error("Not a git repository");
 	}
 
-	await fetchFromRemote(path, remote, options);
+	await fetchOrigin(path, remote, options);
 
 	const remoteName = remote || "origin";
 	const branchName = branch || (await getCurrentBranch(gitDir));

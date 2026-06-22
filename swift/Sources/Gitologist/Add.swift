@@ -1,10 +1,10 @@
 import Foundation
 
-enum AddError: Error, LocalizedError {
+public enum AddError: Error, LocalizedError {
 	case fileNotFound(String)
 	case notAGitRepository
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case let .fileNotFound(file):
 			return "File not found: \(file)"

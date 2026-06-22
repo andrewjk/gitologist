@@ -1,11 +1,11 @@
 import Foundation
 
-enum CommitError: Error, LocalizedError {
+public enum CommitError: Error, LocalizedError {
 	case nothingToCommit
 	case noFilesStaged
 	case notAGitRepository
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .nothingToCommit:
 			return "Nothing to commit"

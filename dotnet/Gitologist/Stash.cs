@@ -17,7 +17,7 @@ public static class Stash
 
         var currentStatus = await Status.GetStatus(path);
 
-        var headCommitSha = await Utils.GetCurrentCommit(gitDir);
+        var headCommitSha = await Branch.GetCurrentCommit(gitDir);
         if (headCommitSha == null)
         {
             throw new InvalidOperationException("HEAD not found");
@@ -358,7 +358,7 @@ public static class Stash
             return;
         }
 
-        var currentHeadSha = await Utils.GetCurrentCommit(gitDir);
+        var currentHeadSha = await Branch.GetCurrentCommit(gitDir);
 
         var mergeBaseTreeData = await Utils.ReadObject(gitDir, mergeBaseSha, cache);
         var mergeBaseTreeSha = Utils.ExtractTreeFromCommit(mergeBaseTreeData);

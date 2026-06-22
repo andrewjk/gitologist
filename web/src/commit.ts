@@ -1,17 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { getCurrentBranch, getCurrentCommit } from "./branch.ts";
 import { status } from "./status.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
 import type { TreeEntry } from "./types/TreeEntry.ts";
-import {
-	getCurrentBranch,
-	getCurrentCommit,
-	getIndex,
-	hashObject,
-	hashObjectBuffer,
-	updateBranch,
-} from "./utils.ts";
+import { getIndex, hashObject, hashObjectBuffer, updateBranch } from "./utils.ts";
 
 export async function commit(path: string, message: string): Promise<string> {
 	const gitDir = join(path, ".git");

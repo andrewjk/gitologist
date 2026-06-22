@@ -25,7 +25,7 @@ func clone(url: String, targetPath: String? = nil, options: RemoteOptions? = nil
 	try await remoteAdd(at: path, name: "origin", url: url)
 
 	do {
-		_ = try await fetchFromRemote(at: path, remote: "origin", options: options)
+		_ = try await fetchOrigin(at: path, remote: "origin", options: options)
 	} catch {
 		// Fetch may fail for fake URLs or unreachable remotes, but clone should still succeed
 	}

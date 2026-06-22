@@ -1,14 +1,14 @@
 import CryptoKit
 import Foundation
 
-enum PullError: Error, LocalizedError, Equatable {
+public enum PullError: Error, LocalizedError, Equatable {
 	case notAGitRepository
 	case remoteBranchDoesNotExist(String)
 	case invalidCommitObject
 	case invalidBlobObject
 	case localChangesWouldBeOverwritten(String)
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
@@ -41,7 +41,7 @@ public func pull(at path: String, remote: String? = nil, branch: String? = nil, 
 		branchName = try await getCurrentBranch(at: gitDir.path)
 	}
 
-	_ = try await fetchFromRemote(at: path, remote: remoteName, options: options)
+	_ = try await fetchOrigin(at: path, remote: remoteName, options: options)
 
 	let remoteBranchPath = gitDir
 		.appendingPathComponent("refs")

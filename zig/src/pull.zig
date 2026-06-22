@@ -2,6 +2,8 @@ const std = @import("std");
 
 const utils = @import("utils.zig");
 const fetch = @import("fetch.zig");
+const getCurrentBranch = @import("branch.zig").getCurrentBranch;
+const getCurrentCommit = @import("branch.zig").getCurrentCommit;
 const RemoteOptions = @import("types/RemoteOptions.zig").RemoteOptions;
 
 pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: ?[]const u8, branch: ?[]const u8, options: ?*const RemoteOptions) !void {
@@ -19,7 +21,7 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
 
     const remote_name = if (remote) |r| r else "origin";
 
-    var fetch_result = try fetch.fetchFromRemote(io, allocator, path, remote_name, options);
+    var fetch_result = try fetch.fetchOrigin(io, allocator, path, remote_name, options);
     defer {
         allocator.free(fetch_result.remote);
         for (fetch_result.refs.items) |ref| {
@@ -35,7 +37,7 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
     if (branch) |b| {
         branch_name = b;
     } else {
-        branch_name = try utils.getCurrentBranch(io, allocator, git_dir_path);
+        branch_name = try getCurrentBranch(io, allocator, git_dir_path);
         free_branch_name = true;
     }
     defer if (free_branch_name) allocator.free(branch_name);
@@ -53,7 +55,7 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
 
     const remote_commit_sha = std.mem.trim(u8, remote_commit_sha_with_newline, &std.ascii.whitespace);
 
-    const current_commit_sha_opt = try utils.getCurrentCommit(io, allocator, git_dir_path);
+    const current_commit_sha_opt = try getCurrentCommit(io, allocator, git_dir_path);
 
     if (current_commit_sha_opt == null) {
         const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ git_dir_path, "refs", "heads", branch_name });

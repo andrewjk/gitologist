@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
+import { getCurrentCommit } from "./branch.ts";
 import { IgnoreParser } from "./IgnoreParser.ts";
 import { status } from "./status.ts";
 import type { IndexEntry } from "./types/IndexEntry.ts";
@@ -9,7 +10,6 @@ import type { TreeEntry } from "./types/TreeEntry.ts";
 import {
 	extractContentFromBlob,
 	extractTreeFromCommit,
-	getCurrentCommit,
 	getIndex,
 	hashObject,
 	hashObjectBuffer,

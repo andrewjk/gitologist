@@ -2,15 +2,9 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { getCurrentBranch, getCurrentCommit } from "./branch.ts";
 import type { MergeResult } from "./types/MergeResult.ts";
-import {
-	getCurrentBranch,
-	getCurrentCommit,
-	hashObject,
-	readObject,
-	updateBranch,
-	type PackfileCache,
-} from "./utils.ts";
+import { hashObject, readObject, updateBranch, type PackfileCache } from "./utils.ts";
 
 export async function merge(
 	path: string,

@@ -17,4 +17,5 @@ comptime {
     _ = @import("spaces_in_names_test.zig");
     _ = @import("packfile_test.zig");
     _ = @import("switch_test.zig");
+    _ = @import("branch_test.zig");
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const utils = @import("utils.zig");
+const getCurrentBranch = @import("branch.zig").getCurrentBranch;
 const packfile = @import("packfile.zig");
 const remote = @import("remote.zig");
 const objects = @import("objects.zig");
@@ -28,7 +29,7 @@ pub fn push(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote_n
     if (branch) |b| {
         branch_name = b;
     } else {
-        branch_name = try utils.getCurrentBranch(io, allocator, git_dir_path);
+        branch_name = try getCurrentBranch(io, allocator, git_dir_path);
         free_branch_name = true;
     }
     defer if (free_branch_name) allocator.free(branch_name);

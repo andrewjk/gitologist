@@ -1,12 +1,12 @@
 import Foundation
 
-enum StashError: Error, LocalizedError {
+public enum StashError: Error, LocalizedError {
 	case nothingToStash
 	case headNotFound
 	case notAGitRepository
 	case noStashFound
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .nothingToStash:
 			return "Nothing to stash"

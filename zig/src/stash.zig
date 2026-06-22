@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const utils = @import("utils.zig");
+const getCurrentCommit = @import("branch.zig").getCurrentCommit;
 const status_module = @import("status.zig");
 const commit_module = @import("commit.zig");
 const add_module = @import("add.zig");
@@ -24,7 +25,7 @@ pub fn stash(io: std.Io, allocator: std.mem.Allocator, path: []const u8, message
 
     const current_status = try status_module.status(io, allocator, path);
 
-    const head_commit_sha_opt = try utils.getCurrentCommit(io, allocator, git_dir_path);
+    const head_commit_sha_opt = try getCurrentCommit(io, allocator, git_dir_path);
     const head_commit_sha = head_commit_sha_opt orelse {
         allocator.free(current_status.branch);
         allocator.free(current_status.up_to_date);
@@ -612,7 +613,7 @@ pub fn unstash(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void
         return;
     };
 
-    const current_head_sha_opt = try utils.getCurrentCommit(io, allocator, git_dir_path);
+    const current_head_sha_opt = try getCurrentCommit(io, allocator, git_dir_path);
     const current_head_sha = current_head_sha_opt orelse {
         try restoreTree(io, allocator, path, git_dir_path, stash_tree_sha, "", &cache);
         return;

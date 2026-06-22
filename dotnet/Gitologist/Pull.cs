@@ -21,9 +21,9 @@ public static class Pull
         var cache = new Utils.PackfileCache();
 
         var remoteName = remote ?? "origin";
-        var branchName = branch ?? await Utils.GetCurrentBranch(gitDir);
+        var branchName = branch ?? await Branch.GetCurrentBranch(gitDir);
 
-        await Fetch.FetchFromRemote(path, remoteName, options);
+        await Fetch.FetchOrigin(path, remoteName, options);
 
         var remoteBranchPath = Path.Combine(
             gitDir,
@@ -40,7 +40,7 @@ public static class Pull
         }
 
         var remoteCommitSha = (await File.ReadAllTextAsync(remoteBranchPath)).Trim();
-        var currentCommitSha = await Utils.GetCurrentCommit(gitDir);
+        var currentCommitSha = await Branch.GetCurrentCommit(gitDir);
 
         if (string.IsNullOrEmpty(currentCommitSha))
         {
