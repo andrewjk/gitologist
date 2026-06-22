@@ -1,4 +1,4 @@
-// Version: 1.0.0
+// Version: 1.0.5
 // swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 

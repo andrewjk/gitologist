@@ -1,6 +1,6 @@
 # Gitologist
 
-A Git client in (TS | Swift | C# | Zig) code.
+A Git client in (TypeScript | Swift | C# | Zig).
 
 > This is a basic Git client, built to provide rudimentary sync features on top of Git storage.
 > It is missing many Git features, and will likely never have them.
@@ -17,6 +17,7 @@ A Git client in (TS | Swift | C# | Zig) code.
 - [x] status
 - [x] commit
 - [x] merge
+- [x] fetch
 - [x] pull
 - [x] push
 - [x] stash
@@ -35,4 +36,3 @@ A Git client in (TS | Swift | C# | Zig) code.
 - reset
 - switch
 - tag
-- fetch

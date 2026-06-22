@@ -1,6 +1,6 @@
 # Gitologist
 
-A Git client in TypeScript.
+A Git client in Zig.
 
 > This is a basic Git client, built to provide rudimentary sync features on top of Git storage.
 > It is missing many Git features, and will likely never have them.
@@ -8,9 +8,7 @@ A Git client in TypeScript.
 
 ## Getting Started
 
-```bash
-npm install gitologist
-```
+TODO
 
 ## Features
 

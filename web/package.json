@@ -1,7 +1,7 @@
 {
 	"name": "gitologist",
-	"version": "1.0.0",
-	"description": "Git in TS code",
+	"version": "1.0.5",
+	"description": "Git in TypeScript",
 	"homepage": "https://github.com/andrewjk/gitologist#readme",
 	"bugs": {
 		"url": "https://github.com/andrewjk/gitologist/issues"
@@ -32,11 +32,12 @@
 		"package": "vp check && vp pack && tsx ./scripts/package.ts"
 	},
 	"devDependencies": {
-		"@types/node": "^25.5.0",
-		"@typescript/native-preview": "7.0.0-dev.20260328.1",
-		"bumpp": "^11.0.1",
-		"typescript": "^6.0.2",
-		"vite-plus": "^0.1.14"
+		"@types/node": "^26.0.0",
+		"@typescript/native-preview": "7.0.0-dev.20260621.1",
+		"bumpp": "^11.1.0",
+		"tsx": "^4.22.4",
+		"typescript": "^6.0.3",
+		"vite-plus": "catalog:"
 	},
 	"packageManager": "pnpm@10.33.0"
 }
