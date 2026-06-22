@@ -1,10 +1,10 @@
 import Foundation
 
-struct MergeOptions: Codable {
-	let message: String?
-	let noFastForward: Bool?
+public struct MergeOptions: Codable, Sendable {
+	public let message: String?
+	public let noFastForward: Bool?
 
-	init(message: String? = nil, noFastForward: Bool? = nil) {
+	public init(message: String? = nil, noFastForward: Bool? = nil) {
 		self.message = message
 		self.noFastForward = noFastForward
 	}

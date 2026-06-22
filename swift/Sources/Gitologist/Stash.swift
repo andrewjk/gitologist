@@ -20,7 +20,7 @@ enum StashError: Error, LocalizedError {
 	}
 }
 
-func stash(at path: String, message: String = "WIP") async throws -> String {
+public func stash(at path: String, message: String = "WIP") async throws -> String {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 	let cache = PackfileCache()
 
@@ -207,7 +207,7 @@ private func restoreTree(at path: String, gitDir: String, treeSha: String, prefi
 	}
 }
 
-func unstash(at path: String) async throws {
+public func unstash(at path: String) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 	let cache = PackfileCache()
 

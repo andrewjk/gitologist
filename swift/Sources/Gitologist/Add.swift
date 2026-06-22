@@ -14,7 +14,7 @@ enum AddError: Error, LocalizedError {
 	}
 }
 
-func add(at path: String, files: [String]) async throws {
+public func add(at path: String, files: [String]) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -76,7 +76,7 @@ func add(at path: String, files: [String]) async throws {
 	try await writeIndex(at: indexPath.path, index: index)
 }
 
-func addAll(at path: String) async throws {
+public func addAll(at path: String) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {

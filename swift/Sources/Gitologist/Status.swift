@@ -1,12 +1,12 @@
 import Foundation
 
-enum GitError: Error, LocalizedError {
+public enum GitError: Error, LocalizedError {
 	case notAGitRepository
 	case invalidIndexFile(String)
 	case fileReadError(String)
 	case notOnABranch
 
-	var errorDescription: String? {
+	public var errorDescription: String? {
 		switch self {
 		case .notAGitRepository:
 			return "Not a git repository"
@@ -20,7 +20,7 @@ enum GitError: Error, LocalizedError {
 	}
 }
 
-func status(at path: String) async throws -> StatusInfo {
+public func status(at path: String) async throws -> StatusInfo {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {

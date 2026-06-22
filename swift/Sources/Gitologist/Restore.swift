@@ -17,7 +17,7 @@ enum RestoreError: Error, LocalizedError {
 	}
 }
 
-func restore(at path: String, files: [String]) async throws {
+public func restore(at path: String, files: [String]) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -52,7 +52,7 @@ func restore(at path: String, files: [String]) async throws {
 	}
 }
 
-func restoreAll(at path: String) async throws {
+public func restoreAll(at path: String) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {

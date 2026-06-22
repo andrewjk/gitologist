@@ -7,10 +7,10 @@ struct IgnorePattern {
 	let pathPrefix: String
 }
 
-actor IgnoreParser {
+public actor IgnoreParser {
 	var patterns: [String: [IgnorePattern]] = [:]
 
-	func loadGitignore(repoPath: String) async {
+	public func loadGitignore(repoPath: String) async {
 		patterns.removeAll()
 		await loadGitignoreRecursive(repoPath: repoPath, currentDir: repoPath)
 	}
@@ -83,7 +83,7 @@ actor IgnoreParser {
 		return result
 	}
 
-	func isIgnored(filePath: String, isDirectory: Bool = false) -> Bool {
+	public func isIgnored(filePath: String, isDirectory: Bool = false) -> Bool {
 		let normalizedPath = filePath.replacingOccurrences(of: "\\", with: "/")
 		let pathParts = normalizedPath.components(separatedBy: "/")
 

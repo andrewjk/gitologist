@@ -24,7 +24,7 @@ enum PullError: Error, LocalizedError, Equatable {
 	}
 }
 
-func pull(at path: String, remote: String? = nil, branch: String? = nil, options: RemoteOptions? = nil) async throws {
+public func pull(at path: String, remote: String? = nil, branch: String? = nil, options: RemoteOptions? = nil) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 	let cache = PackfileCache()
 

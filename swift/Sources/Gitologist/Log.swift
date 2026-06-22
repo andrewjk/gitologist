@@ -14,7 +14,7 @@ enum LogError: Error, LocalizedError {
 	}
 }
 
-func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry] {
+public func log(at path: String, options: LogOptions? = nil) async throws -> [LogEntry] {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 	let cache = PackfileCache()
 

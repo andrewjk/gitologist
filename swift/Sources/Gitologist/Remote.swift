@@ -14,7 +14,7 @@ enum RemoteError: Error, LocalizedError {
 	}
 }
 
-func remoteAdd(at path: String, name: String, url: String) async throws {
+public func remoteAdd(at path: String, name: String, url: String) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -47,7 +47,7 @@ func remoteAdd(at path: String, name: String, url: String) async throws {
 	try configContent.write(to: configPath, atomically: true, encoding: .utf8)
 }
 
-func hasRemote(at path: String, name: String = "origin") -> Bool {
+public func hasRemote(at path: String, name: String = "origin") -> Bool {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -124,7 +124,7 @@ func getRemoteUrl(at gitDir: String, remoteName: String) async -> String? {
 	return nil
 }
 
-func setRemoteUrl(at path: String, name: String, url: String) throws {
+public func setRemoteUrl(at path: String, name: String, url: String) throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 	let configPath = gitDir.appendingPathComponent("config")
 

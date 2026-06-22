@@ -9,7 +9,7 @@ private let CONFIG_FILE = """
 	logallrefupdates = true
 """
 
-func initRepo(at path: String) async throws {
+public func initRepo(at path: String) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	if FileManager.default.fileExists(atPath: gitDir.path) {

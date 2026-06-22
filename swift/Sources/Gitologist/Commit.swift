@@ -17,7 +17,7 @@ enum CommitError: Error, LocalizedError {
 	}
 }
 
-func commit(at path: String, message: String) async throws -> String {
+public func commit(at path: String, message: String) async throws -> String {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {

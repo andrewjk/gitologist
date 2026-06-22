@@ -387,12 +387,12 @@ test "should read loose object" {
     try init(io, allocator, tmp_path);
 
     const content = "hello world";
-    const sha = try @import("gitologist").utils.hashObject(io, allocator, git_dir_path, content, "blob");
+    const sha = try @import("gitologist")._utils.hashObject(io, allocator, git_dir_path, content, "blob");
     defer allocator.free(sha);
 
-    var cache = @import("gitologist").utils.PackfileCache.init(allocator);
+    var cache = @import("gitologist")._utils.PackfileCache.init(allocator);
     defer cache.deinit();
-    const data = try @import("gitologist").utils.readObjectData(io, allocator, git_dir_path, sha, &cache);
+    const data = try @import("gitologist")._utils.readObjectData(io, allocator, git_dir_path, sha, &cache);
     defer allocator.free(data);
 
     const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse return error.TestExpectedEqual;
@@ -454,7 +454,7 @@ test "should read object from packfile" {
 
     try pack_dir.writeFile(io, .{ .sub_path = "test.pack", .data = pack_data });
 
-    const utils = @import("gitologist").utils;
+    const utils = @import("gitologist")._utils;
     var cache = utils.PackfileCache.init(allocator);
     defer cache.deinit();
     const data = try utils.readObjectData(io, allocator, git_dir_path, sha, &cache);
@@ -484,7 +484,7 @@ test "should throw error when object not found" {
     const init = @import("gitologist").init;
     try init(io, allocator, tmp_path);
 
-    const utils = @import("gitologist").utils;
+    const utils = @import("gitologist")._utils;
     var cache = utils.PackfileCache.init(allocator);
     defer cache.deinit();
     const result = utils.readObjectData(io, allocator, git_dir_path, "0000000000000000000000000000000000000000", &cache);
@@ -542,7 +542,7 @@ test "should read object via packfile" {
 
     try pack_dir.writeFile(io, .{ .sub_path = "commits.pack", .data = pack_data });
 
-    const utils = @import("gitologist").utils;
+    const utils = @import("gitologist")._utils;
     var cache = utils.PackfileCache.init(allocator);
     defer cache.deinit();
     const data = try utils.readObject(io, allocator, git_dir_path, sha, &cache);

@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Gitologist;
 
-public static class Objects
+internal static class Objects
 {
     public static async Task<List<PackObject>> EnumerateObjects(string gitDir, string sha, HashSet<string>? visited = null, Utils.PackfileCache? packCache = null)
     {

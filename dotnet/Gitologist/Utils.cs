@@ -7,23 +7,23 @@ using Gitologist.Types;
 
 namespace Gitologist;
 
-public static class Utils
+internal static class Utils
 {
-    public class PackfileCache
+    internal class PackfileCache
     {
         private readonly Dictionary<string, List<PackObject>> _cache = new();
 
-        public bool TryGet(string path, out List<PackObject>? objects) => _cache.TryGetValue(path, out objects);
+        internal bool TryGet(string path, out List<PackObject>? objects) => _cache.TryGetValue(path, out objects);
 
-        public void Set(string path, List<PackObject> objects) => _cache[path] = objects;
+        internal void Set(string path, List<PackObject> objects) => _cache[path] = objects;
     }
-    public static async Task<string> HashFile(string filePath)
+    internal static async Task<string> HashFile(string filePath)
     {
         var content = await File.ReadAllTextAsync(filePath);
         return HashString(content);
     }
 
-    public static async Task<string> HashFileAsBlob(string filePath)
+    internal static async Task<string> HashFileAsBlob(string filePath)
     {
         var content = await File.ReadAllTextAsync(filePath);
         var contentBytes = Encoding.UTF8.GetBytes(content);
@@ -32,7 +32,7 @@ public static class Utils
         return HashBytes(data);
     }
 
-    public static string HashString(string content)
+    internal static string HashString(string content)
     {
         using var sha1 = SHA1.Create();
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -40,7 +40,7 @@ public static class Utils
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
-    public static async Task<Dictionary<string, IndexEntry>> GetIndex(string indexPath)
+    internal static async Task<Dictionary<string, IndexEntry>> GetIndex(string indexPath)
     {
         var index = new Dictionary<string, IndexEntry>();
 
@@ -128,7 +128,7 @@ public static class Utils
         return index;
     }
 
-    public static async Task WriteIndex(string indexPath, Dictionary<string, IndexEntry> index)
+    internal static async Task WriteIndex(string indexPath, Dictionary<string, IndexEntry> index)
     {
         var entries = index.Values.OrderBy(e => e.Path).ToList();
 
@@ -200,7 +200,7 @@ public static class Utils
         await File.WriteAllBytesAsync(indexPath, finalBuffer);
     }
 
-    public static List<string> GetWorkingFiles(string path, IgnoreParser? gitignore = null)
+    internal static List<string> GetWorkingFiles(string path, IgnoreParser? gitignore = null)
     {
         var files = new List<string>();
         ScanDirectory(path, path, files, gitignore);
@@ -238,7 +238,7 @@ public static class Utils
         }
     }
 
-    public static async Task<string> HashObject(string gitDir, string content, string type)
+    internal static async Task<string> HashObject(string gitDir, string content, string type)
     {
         var contentBytes = Encoding.UTF8.GetBytes(content);
         var header = $"{type} {contentBytes.Length}\0{content}";
@@ -258,7 +258,7 @@ public static class Utils
         return sha;
     }
 
-    public static async Task<string> HashObject(string gitDir, byte[] data, string type)
+    internal static async Task<string> HashObject(string gitDir, byte[] data, string type)
     {
         var headerBytes = Encoding.UTF8.GetBytes($"{type} {data.Length}\0");
         var fullData = headerBytes.Concat(data).ToArray();
@@ -278,14 +278,14 @@ public static class Utils
         return sha;
     }
 
-    public static string HashBytes(byte[] data)
+    internal static string HashBytes(byte[] data)
     {
         using var sha1 = SHA1.Create();
         var hashBytes = sha1.ComputeHash(data);
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
-    public static byte[] Compress(string content)
+    internal static byte[] Compress(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
         using var output = new MemoryStream();
@@ -296,7 +296,7 @@ public static class Utils
         return output.ToArray();
     }
 
-    public static byte[] CompressBytes(byte[] data)
+    internal static byte[] CompressBytes(byte[] data)
     {
         using var output = new MemoryStream();
         using (var zlib = new ZLibStream(output, CompressionLevel.Optimal))
@@ -306,7 +306,7 @@ public static class Utils
         return output.ToArray();
     }
 
-    public static async Task<string> GetCurrentBranch(string gitDir)
+    internal static async Task<string> GetCurrentBranch(string gitDir)
     {
         var headPath = Path.Combine(gitDir, "HEAD");
         var headContent = (await File.ReadAllTextAsync(headPath)).Trim();
@@ -320,7 +320,7 @@ public static class Utils
         throw new InvalidOperationException("Not on a branch (detached HEAD)");
     }
 
-    public static async Task<string?> GetCurrentCommit(string gitDir)
+    internal static async Task<string?> GetCurrentCommit(string gitDir)
     {
         try
         {
@@ -340,14 +340,14 @@ public static class Utils
         }
     }
 
-    public static async Task UpdateBranch(string gitDir, string branchName, string commitSha)
+    internal static async Task UpdateBranch(string gitDir, string branchName, string commitSha)
     {
         var branchPath = Path.Combine(gitDir, "refs", "heads", branchName);
         Directory.CreateDirectory(Path.GetDirectoryName(branchPath)!);
         await File.WriteAllTextAsync(branchPath, commitSha + "\n");
     }
 
-    public static async Task<string> ReadObject(string gitDir, string sha, PackfileCache cache)
+    internal static async Task<string> ReadObject(string gitDir, string sha, PackfileCache cache)
     {
         var data = await ReadObjectData(gitDir, sha, cache);
 
@@ -372,7 +372,7 @@ public static class Utils
         return Encoding.UTF8.GetString(data);
     }
 
-    public static async Task<byte[]> ReadObjectData(string gitDir, string sha, PackfileCache cache)
+    internal static async Task<byte[]> ReadObjectData(string gitDir, string sha, PackfileCache cache)
     {
         var objectPath = Path.Combine(gitDir, "objects", sha.Substring(0, 2), sha.Substring(2));
         try
@@ -415,7 +415,7 @@ public static class Utils
         }
     }
 
-    public static byte[] Decompress(byte[] compressed)
+    internal static byte[] Decompress(byte[] compressed)
     {
         using var input = new MemoryStream(compressed);
         using var output = new MemoryStream();
@@ -426,7 +426,7 @@ public static class Utils
         return output.ToArray();
     }
 
-    public static string ExtractTreeFromCommit(string commitData)
+    internal static string ExtractTreeFromCommit(string commitData)
     {
         // Git object format: "commit <size>\0<content>"
         // Find the null terminator after the header
@@ -451,7 +451,7 @@ public static class Utils
         throw new InvalidOperationException("Invalid commit object: no tree line found");
     }
 
-    public static List<TreeEntry> ParseTreeEntries(string treeData)
+    internal static List<TreeEntry> ParseTreeEntries(string treeData)
     {
         var entries = new List<TreeEntry>();
 
@@ -532,7 +532,7 @@ public static class Utils
         return entries;
     }
 
-    public static List<TreeEntry> ParseTreeEntriesFromData(byte[] content)
+    internal static List<TreeEntry> ParseTreeEntriesFromData(byte[] content)
     {
         var entries = new List<TreeEntry>();
         var offset = 0;
@@ -591,7 +591,7 @@ public static class Utils
         return entries;
     }
 
-    public static string ExtractContentFromBlob(string blobData)
+    internal static string ExtractContentFromBlob(string blobData)
     {
         // Git object format: "blob <size>\0<content>"
         var nullIndex = blobData.IndexOf('\0');

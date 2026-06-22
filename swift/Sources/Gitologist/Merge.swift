@@ -23,7 +23,7 @@ enum MergeError: Error, LocalizedError {
 	}
 }
 
-func merge(at path: String, branchName: String, options: MergeOptions? = nil) async throws -> MergeResult {
+public func merge(at path: String, branchName: String, options: MergeOptions? = nil) async throws -> MergeResult {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {

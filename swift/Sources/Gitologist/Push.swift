@@ -23,7 +23,7 @@ enum PushError: Error, LocalizedError {
 	}
 }
 
-func push(at path: String, remote: String? = nil, branch: String? = nil, options: RemoteOptions? = nil) async throws {
+public func push(at path: String, remote: String? = nil, branch: String? = nil, options: RemoteOptions? = nil) async throws {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
@@ -191,7 +191,7 @@ private func sendPush(remoteUrl: String, oldSha: String, newSha: String, branchN
 	}
 }
 
-func setUpstreamBranch(at path: String, remoteName: String, branchName: String) async throws {
+public func setUpstreamBranch(at path: String, remoteName: String, branchName: String) async throws {
 	let configPath = URL(fileURLWithPath: path).appendingPathComponent(".git").appendingPathComponent("config")
 
 	var configContent = ""

@@ -4,7 +4,7 @@ const init = @import("gitologist").init;
 const add = @import("gitologist").add;
 const addAll = @import("gitologist").addAll;
 const status = @import("gitologist").status;
-const utils = @import("gitologist").utils;
+const utils = @import("gitologist")._utils;
 
 fn hashString(allocator: std.mem.Allocator, content: []const u8) ![]const u8 {
     // Git blob hash format: "blob <size>\0<content>"
