@@ -2,7 +2,10 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <PackageId>Gitologist</PackageId>
     <Version>1.0.5</Version>
+    <PackageTags>Git</PackageTags>
+    <Description>A basic Git client.</Description>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
