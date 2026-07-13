@@ -45,6 +45,7 @@ test "should stash a modified file" {
     try std.testing.expectEqual(@as(usize, 40), stash_sha.len);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
 
@@ -52,17 +53,6 @@ test "should stash a modified file" {
     defer allocator.free(file_content);
 
     try std.testing.expectEqualSlices(u8, "initial content", file_content);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
-    for (result.deleted) |item| allocator.free(item);
-    allocator.free(result.deleted);
 }
 
 test "should stash an untracked file" {
@@ -96,35 +86,15 @@ test "should stash an untracked file" {
     try std.testing.expectEqual(@as(usize, 40), stash_sha.len);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 
     _ = cwd.openFile(io, newfile_path, .{}) catch |err| {
         try std.testing.expect(err == error.FileNotFound);
-        allocator.free(result.branch);
-        allocator.free(result.up_to_date);
-        for (result.staged) |item| allocator.free(item);
-        allocator.free(result.staged);
-        for (result.modified) |item| allocator.free(item);
-        allocator.free(result.modified);
-        for (result.untracked) |item| allocator.free(item);
-        allocator.free(result.untracked);
-        for (result.deleted) |item| allocator.free(item);
-        allocator.free(result.deleted);
         return;
     };
     try std.testing.expect(false); // Should not reach here
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
-    for (result.deleted) |item| allocator.free(item);
-    allocator.free(result.deleted);
 }
 
 test "should update stash ref" {
@@ -342,6 +312,7 @@ test "should restore stashed modified file" {
     try std.testing.expectEqualSlices(u8, "modified content", after_unstash_content);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     const has_modified = blk: {
         for (result.modified) |file| {
@@ -352,17 +323,6 @@ test "should restore stashed modified file" {
         break :blk false;
     };
     try std.testing.expect(has_modified);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
-    for (result.deleted) |item| allocator.free(item);
-    allocator.free(result.deleted);
 }
 
 test "should restore stashed untracked file" {
@@ -405,6 +365,7 @@ test "should restore stashed untracked file" {
     try std.testing.expectEqualSlices(u8, "untracked content", content);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     const has_untracked = blk: {
         for (result.untracked) |file| {
@@ -415,17 +376,6 @@ test "should restore stashed untracked file" {
         break :blk false;
     };
     try std.testing.expect(has_untracked);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
-    for (result.deleted) |item| allocator.free(item);
-    allocator.free(result.deleted);
 }
 
 test "should throw error if no stash exists" {
@@ -762,6 +712,7 @@ test "should restore multiple stashed files" {
     try std.testing.expectEqualSlices(u8, "content2", after_unstash_content2);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     const has_modified = blk: {
         for (result.modified) |file| {
@@ -782,17 +733,6 @@ test "should restore multiple stashed files" {
         break :blk false;
     };
     try std.testing.expect(has_untracked);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
-    for (result.deleted) |item| allocator.free(item);
-    allocator.free(result.deleted);
 }
 
 test "should restore stashed deleted file" {

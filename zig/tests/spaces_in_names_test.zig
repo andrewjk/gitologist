@@ -26,19 +26,6 @@ fn cleanupTempDir(io: std.Io, path: []const u8) void {
     cwd.deleteTree(io, path) catch {};
 }
 
-fn cleanupStatus(allocator: std.mem.Allocator, result: StatusInfo) void {
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
-    for (result.deleted) |item| allocator.free(item);
-    allocator.free(result.deleted);
-}
-
 // MARK: - Add Tests
 
 test "should add file with single space in name" {
@@ -60,7 +47,7 @@ test "should add file with single space in name" {
     try add(io, allocator, tmp_path, &[_][]const u8{"test file.txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -84,7 +71,7 @@ test "should add file with multiple spaces in name" {
     try add(io, allocator, tmp_path, &[_][]const u8{"test  multiple  spaces.txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -108,7 +95,7 @@ test "should add file with leading space in name" {
     try add(io, allocator, tmp_path, &[_][]const u8{" leading.txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -132,7 +119,7 @@ test "should add file with trailing space in name" {
     try add(io, allocator, tmp_path, &[_][]const u8{"trailing .txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -160,7 +147,7 @@ test "should add files in folder with space in name" {
     try add(io, allocator, tmp_path, &[_][]const u8{"my folder/file.txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -188,7 +175,7 @@ test "should add files in folder with multiple spaces in name" {
     try add(io, allocator, tmp_path, &[_][]const u8{"my  test  folder/file.txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -216,7 +203,7 @@ test "should add file with space in name in folder with space" {
     try add(io, allocator, tmp_path, &[_][]const u8{"my folder/test file.txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -248,7 +235,7 @@ test "should add multiple files with spaces in names" {
     try add(io, allocator, tmp_path, &[_][]const u8{ "file one.txt", "file two.txt", "file three.txt" });
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -276,7 +263,7 @@ test "should update modified file with space in name" {
     try add(io, allocator, tmp_path, &[_][]const u8{"test file.txt"});
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
 }
@@ -312,7 +299,7 @@ test "should add all files with spaces using addAll" {
     try addAll(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 }
@@ -343,7 +330,7 @@ test "should commit file with space in name" {
     try std.testing.expectEqual(@as(usize, 40), commit_sha.len);
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
@@ -377,7 +364,7 @@ test "should commit multiple files with spaces" {
     try std.testing.expectEqual(@as(usize, 40), commit_sha.len);
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
@@ -411,7 +398,7 @@ test "should commit files in folder with space" {
     try std.testing.expectEqual(@as(usize, 40), commit_sha.len);
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
@@ -447,7 +434,7 @@ test "should handle multiple commits with files with spaces" {
     try std.testing.expect(!std.mem.eql(u8, first_sha, second_sha));
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
 }
@@ -471,7 +458,7 @@ test "should detect untracked file with space in name" {
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     var found = false;
     for (result.untracked) |file| {
@@ -512,7 +499,7 @@ test "should detect multiple untracked files with spaces" {
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "console.log('hello')" });
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     var found_file_one = false;
     var found_file_two = false;
@@ -548,7 +535,7 @@ test "should detect modified file with space in name" {
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     var found = false;
     for (result.modified) |file| {
@@ -584,7 +571,7 @@ test "should detect deleted file with space in name" {
     try cwd.deleteFile(io, test_file_path);
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     var found = false;
     for (result.deleted) |file| {
@@ -768,7 +755,7 @@ test "should update status after restoring file with space" {
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified" });
 
     const result1 = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result1);
+    defer result1.deinit(allocator);
 
     var found = false;
     for (result1.modified) |file| {
@@ -782,7 +769,7 @@ test "should update status after restoring file with space" {
     try restore(io, allocator, tmp_path, &[_][]const u8{"test file.txt"});
 
     const result2 = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result2);
+    defer result2.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result2.modified.len);
 }
@@ -1005,7 +992,7 @@ test "should handle complete workflow with files and folders with spaces" {
     try addAll(io, allocator, tmp_path);
 
     const result1 = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result1);
+    defer result1.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result1.untracked.len);
 
@@ -1013,7 +1000,7 @@ test "should handle complete workflow with files and folders with spaces" {
     defer allocator.free(commit_sha);
 
     const result2 = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result2);
+    defer result2.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result2.modified.len);
 
@@ -1021,7 +1008,7 @@ test "should handle complete workflow with files and folders with spaces" {
     try cwd.writeFile(io, .{ .sub_path = folder_file_path, .data = "console.log('modified')" });
 
     const result3 = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result3);
+    defer result3.deinit(allocator);
 
     var found_file_one = false;
     var found_folder_file = false;
@@ -1089,7 +1076,7 @@ test "should handle files with various space patterns" {
     defer allocator.free(commit_sha);
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
@@ -1154,7 +1141,7 @@ test "should handle nested folders with spaces" {
     defer allocator.free(commit_sha);
 
     const result = try status(io, allocator, tmp_path);
-    defer cleanupStatus(allocator, result);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
 

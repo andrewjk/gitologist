@@ -56,18 +56,10 @@ test "should add a single file to the index" {
     try add(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should add multiple files to the index" {
@@ -97,18 +89,10 @@ test "should add multiple files to the index" {
     try add(io, allocator, tmp_path, &[_][]const u8{ "file1.txt", "file2.txt", "file3.txt" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should update a modified file in the index" {
@@ -132,18 +116,10 @@ test "should update a modified file in the index" {
     try add(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should throw error for non-existent file" {
@@ -203,18 +179,10 @@ test "should add all untracked files with addAll" {
     try addAll(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should add all modified files with addAll" {
@@ -238,18 +206,10 @@ test "should add all modified files with addAll" {
     try addAll(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should add both untracked and modified files with addAll" {
@@ -277,18 +237,10 @@ test "should add both untracked and modified files with addAll" {
     try addAll(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should handle empty repository with addAll" {
@@ -304,18 +256,10 @@ test "should handle empty repository with addAll" {
     try addAll(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should throw error with addAll if not a git repository" {
@@ -395,16 +339,8 @@ test "should preserve existing index entries when adding new files" {
     try add(io, allocator, tmp_path, &[_][]const u8{"file2.txt"});
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }

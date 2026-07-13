@@ -168,6 +168,7 @@ test "should respect gitignore in status command" {
     try cwd.writeFile(io, .{ .sub_path = gitignore_path, .data = "node_modules/\n*.log\n" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     // Should only see main.ts, not debug.log or node_modules/
     var found_main = false;
@@ -183,15 +184,6 @@ test "should respect gitignore in status command" {
     try std.testing.expect(found_main);
     try std.testing.expect(!found_debug);
     try std.testing.expect(!found_node_modules);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should respect gitignore in addAll command" {
@@ -223,6 +215,7 @@ test "should respect gitignore in addAll command" {
     try addAll(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     // Should have staged main.ts but not debug.log
     var found_main = false;
@@ -235,15 +228,6 @@ test "should respect gitignore in addAll command" {
 
     try std.testing.expect(found_main);
     try std.testing.expect(!found_debug);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should respect gitignore in add command for specific files" {
@@ -276,6 +260,7 @@ test "should respect gitignore in add command for specific files" {
     try add(io, allocator, tmp_path, &[_][]const u8{ "main.ts", "debug.log" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     // Should have staged main.ts but not debug.log
     var found_main = false;
@@ -288,13 +273,4 @@ test "should respect gitignore in add command for specific files" {
 
     try std.testing.expect(found_main);
     try std.testing.expect(!found_debug);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }

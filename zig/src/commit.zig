@@ -17,22 +17,13 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
     defer git_dir.close(io);
 
     const current_status = try status_module.status(io, allocator, path);
+    defer current_status.deinit(allocator);
 
     if (current_status.staged.len == 0 and
         current_status.modified.len == 0 and
         current_status.untracked.len == 0 and
         current_status.deleted.len == 0)
     {
-        allocator.free(current_status.branch);
-        allocator.free(current_status.up_to_date);
-        for (current_status.staged) |item| allocator.free(item);
-        allocator.free(current_status.staged);
-        for (current_status.modified) |item| allocator.free(item);
-        allocator.free(current_status.modified);
-        for (current_status.untracked) |item| allocator.free(item);
-        allocator.free(current_status.untracked);
-        for (current_status.deleted) |item| allocator.free(item);
-        allocator.free(current_status.deleted);
         return error.NothingToCommit;
     }
 

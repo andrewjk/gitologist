@@ -166,14 +166,7 @@ test "should update status after restore" {
 
     try std.testing.expect(result.modified.len > 0);
 
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
+    result.deinit(allocator);
 
     try restore(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
 
@@ -181,14 +174,7 @@ test "should update status after restore" {
 
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
 
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
+    result.deinit(allocator);
 }
 
 test "should restore all modified files with restoreAll" {
@@ -261,17 +247,9 @@ test "should do nothing with restoreAll when no modified files" {
     try restoreAll(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should throw error with restoreAll if not a git repository" {

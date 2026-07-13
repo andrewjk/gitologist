@@ -43,18 +43,7 @@ test "should return current branch" {
     const result = try status(io, allocator, tmp_path);
 
     try std.testing.expectEqualStrings("main", result.branch);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
+    result.deinit(allocator);
 }
 
 test "should return up to date message" {
@@ -68,20 +57,9 @@ test "should return up to date message" {
     try init(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(std.mem.indexOf(u8, result.up_to_date, "Your branch is up to date with") != null);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should return empty arrays for changes when no files exist" {
@@ -95,16 +73,11 @@ test "should return empty arrays for changes when no files exist" {
     try init(io, allocator, tmp_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(result.staged.len == 0);
     try std.testing.expect(result.modified.len == 0);
     try std.testing.expect(result.untracked.len == 0);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    allocator.free(result.staged);
-    allocator.free(result.modified);
-    allocator.free(result.untracked);
 }
 
 test "should detect untracked files" {
@@ -125,23 +98,12 @@ test "should detect untracked files" {
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "content" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(result.untracked.len == 1);
     try std.testing.expectEqualStrings("test.txt", result.untracked[0]);
     try std.testing.expect(result.modified.len == 0);
     try std.testing.expect(result.staged.len == 0);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should detect multiple untracked files" {
@@ -177,6 +139,7 @@ test "should detect multiple untracked files" {
     try cwd.writeFile(io, .{ .sub_path = index_file_path, .data = "console.log('hello')" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(result.untracked.len == 3);
 
@@ -196,18 +159,6 @@ test "should detect multiple untracked files" {
 
     try std.testing.expect(result.modified.len == 0);
     try std.testing.expect(result.staged.len == 0);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should detect modified files" {
@@ -233,22 +184,11 @@ test "should detect modified files" {
     try cwd.writeFile(io, .{ .sub_path = test_file_path, .data = "modified content" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(result.modified.len == 1);
     try std.testing.expectEqualStrings("test.txt", result.modified[0]);
     try std.testing.expect(result.untracked.len == 0);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should detect deleted files as deleted" {
@@ -274,24 +214,10 @@ test "should detect deleted files as deleted" {
     try cwd.deleteFile(io, test_file_path);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(result.deleted.len == 1);
     try std.testing.expectEqualStrings("test.txt", result.deleted[0]);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
-
-    for (result.deleted) |item| allocator.free(item);
-    allocator.free(result.deleted);
 }
 
 test "should handle detached HEAD" {
@@ -315,20 +241,9 @@ test "should handle detached HEAD" {
     try git_dir.writeFile(io, .{ .sub_path = "HEAD", .data = "deadbeef\n" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings("(detached HEAD)", result.branch);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should throw error if not a git repository" {
@@ -363,20 +278,9 @@ test "should handle custom branch name" {
     try git_dir.writeFile(io, .{ .sub_path = "HEAD", .data = "ref: refs/heads/main\n" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings("main", result.branch);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should not detect .git directory as untracked" {
@@ -402,20 +306,9 @@ test "should not detect .git directory as untracked" {
     try cwd.writeFile(io, .{ .sub_path = other_file_path, .data = "content" });
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(result.untracked.len == 0);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should correctly identify files matching index" {
@@ -439,19 +332,8 @@ test "should correctly identify files matching index" {
     try add_func(io, allocator, tmp_path, &[_][]const u8{"test.txt"});
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expect(result.modified.len == 0);
     try std.testing.expect(result.untracked.len == 0);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }

@@ -43,18 +43,10 @@ test "should commit staged files" {
     }
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
 
 test "should throw error if nothing to commit" {
@@ -267,16 +259,8 @@ test "should commit multiple files" {
     try std.testing.expectEqual(@as(usize, 40), commit_sha.len);
 
     const result = try status(io, allocator, tmp_path);
+    defer result.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), result.untracked.len);
     try std.testing.expectEqual(@as(usize, 0), result.modified.len);
-
-    allocator.free(result.branch);
-    allocator.free(result.up_to_date);
-    for (result.staged) |item| allocator.free(item);
-    allocator.free(result.staged);
-    for (result.modified) |item| allocator.free(item);
-    allocator.free(result.modified);
-    for (result.untracked) |item| allocator.free(item);
-    allocator.free(result.untracked);
 }
