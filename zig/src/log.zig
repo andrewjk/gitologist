@@ -87,15 +87,15 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
                 allocator.free(s);
             }
 
-        const current_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, entry.tree, file_path, &cache, &pack_cache);
+            const current_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, entry.tree, file_path, &cache, &pack_cache);
 
-        var should_include = false;
+            var should_include = false;
 
-        if (entry.parent) |p| {
-            const parent_entry = try parseCommitEntry(io, allocator, git_dir_path, p, &pack_cache);
-            defer freeLogEntry(allocator, parent_entry);
-            const parent_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, parent_entry.tree, file_path, &cache, &pack_cache);
-            should_include = !blobShaEqual(current_blob_sha, parent_blob_sha);
+            if (entry.parent) |p| {
+                const parent_entry = try parseCommitEntry(io, allocator, git_dir_path, p, &pack_cache);
+                defer freeLogEntry(allocator, parent_entry);
+                const parent_blob_sha = try getFileBlobSha(io, allocator, git_dir_path, parent_entry.tree, file_path, &cache, &pack_cache);
+                should_include = !blobShaEqual(current_blob_sha, parent_blob_sha);
                 current_sha = try allocator.dupe(u8, p);
             } else {
                 should_include = current_blob_sha != null;
@@ -145,7 +145,7 @@ pub fn log(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: 
         allocator.free(s);
     }
 
-    return entries.toOwnedSlice(allocator);
+    return try entries.toOwnedSlice(allocator);
 }
 
 fn parseCommitEntry(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, commit_sha: []const u8, pack_cache: *utils.PackfileCache) !LogEntry {

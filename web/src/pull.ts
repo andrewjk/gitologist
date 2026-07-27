@@ -99,6 +99,36 @@ export async function pull(
 	await updateIndex(gitDir, path, treeSha, cache);
 }
 
+/**
+ * Checks out the tree of `commitSha` into the working directory and index,
+ * guarding against overwriting uncommitted changes. Shared by `pull` and `switchBranch`.
+ */
+export async function checkoutTree(
+	gitDir: string,
+	workingPath: string,
+	commitSha: string,
+	cache: PackfileCache,
+): Promise<void> {
+	const commitData = await readObject(gitDir, commitSha, cache);
+	const treeSha = extractTreeFromCommit(commitData);
+
+	const currentBlobs = new Map<string, string>();
+	const currentCommitSha = await getCurrentCommit(gitDir);
+	if (currentCommitSha) {
+		const currentTreeSha = await getTree(gitDir, currentCommitSha, cache);
+		if (currentTreeSha) {
+			const blobs = await getTreeBlobs(gitDir, currentTreeSha, undefined, cache);
+			for (const [path, sha] of blobs) {
+				currentBlobs.set(path, sha);
+			}
+		}
+	}
+
+	await checkForLocalChanges(gitDir, workingPath, currentBlobs, treeSha, cache);
+	await extractTreeToWorkingDirectory(gitDir, workingPath, treeSha, currentBlobs, cache);
+	await updateIndex(gitDir, workingPath, treeSha, cache);
+}
+
 async function getTreeBlobs(
 	gitDir: string,
 	treeSha: string,

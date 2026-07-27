@@ -173,6 +173,40 @@ pub fn pull(io: std.Io, allocator: std.mem.Allocator, path: []const u8, remote: 
     try updateIndex(io, allocator, git_dir_path, tree_sha, &cache);
 }
 
+/// Checks out the tree of `commit_sha` into the working directory and index,
+/// guarding against overwriting uncommitted changes. Shared by `pull` and `switchBranch`.
+pub fn checkoutTree(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, working_path: []const u8, commit_sha: []const u8, pack_cache: *utils.PackfileCache) !void {
+    const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha, pack_cache);
+    defer allocator.free(commit_data);
+
+    const tree_sha = try utils.extractTreeFromCommit(commit_data);
+
+    var current_blobs = std.StringHashMap([]const u8).init(allocator);
+    defer {
+        var iter = current_blobs.iterator();
+        while (iter.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            allocator.free(entry.value_ptr.*);
+        }
+        current_blobs.deinit();
+    }
+
+    const current_commit_sha_opt = try getCurrentCommit(io, allocator, git_dir_path);
+    if (current_commit_sha_opt) |current_commit_sha| {
+        defer allocator.free(current_commit_sha);
+
+        const current_tree_sha_opt = try getTree(io, allocator, git_dir_path, current_commit_sha, pack_cache);
+        if (current_tree_sha_opt) |current_tree_sha| {
+            defer allocator.free(current_tree_sha);
+            try getTreeBlobs(io, allocator, git_dir_path, current_tree_sha, "", &current_blobs, pack_cache);
+        }
+    }
+
+    try checkForLocalChanges(io, allocator, git_dir_path, working_path, &current_blobs, tree_sha, pack_cache);
+    try extractTreeToWorkingDirectory(io, allocator, git_dir_path, working_path, tree_sha, &current_blobs, pack_cache);
+    try updateIndex(io, allocator, git_dir_path, tree_sha, pack_cache);
+}
+
 fn getTreeBlobs(io: std.Io, allocator: std.mem.Allocator, git_dir_path: []const u8, tree_sha: []const u8, prefix: []const u8, blobs: *std.StringHashMap([]const u8), pack_cache: *utils.PackfileCache) !void {
     const tree_data = try utils.readObject(io, allocator, git_dir_path, tree_sha, pack_cache);
     defer allocator.free(tree_data);

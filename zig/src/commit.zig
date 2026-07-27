@@ -43,16 +43,6 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
     }
 
     if (index.count() == 0) {
-        allocator.free(current_status.branch);
-        allocator.free(current_status.up_to_date);
-        for (current_status.staged) |item| allocator.free(item);
-        allocator.free(current_status.staged);
-        for (current_status.modified) |item| allocator.free(item);
-        allocator.free(current_status.modified);
-        for (current_status.untracked) |item| allocator.free(item);
-        allocator.free(current_status.untracked);
-        for (current_status.deleted) |item| allocator.free(item);
-        allocator.free(current_status.deleted);
         return error.NoFilesStaged;
     }
 
@@ -71,17 +61,6 @@ pub fn commit(io: std.Io, allocator: std.mem.Allocator, path: []const u8, messag
     defer allocator.free(branch_name);
 
     try utils.updateBranch(io, allocator, git_dir_path, branch_name, commit_sha);
-
-    allocator.free(current_status.branch);
-    allocator.free(current_status.up_to_date);
-    for (current_status.staged) |item| allocator.free(item);
-    allocator.free(current_status.staged);
-    for (current_status.modified) |item| allocator.free(item);
-    allocator.free(current_status.modified);
-    for (current_status.untracked) |item| allocator.free(item);
-    allocator.free(current_status.untracked);
-    for (current_status.deleted) |item| allocator.free(item);
-    allocator.free(current_status.deleted);
 
     return commit_sha;
 }

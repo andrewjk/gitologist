@@ -110,6 +110,24 @@ public func pull(at path: String, remote: String? = nil, branch: String? = nil, 
 	try await updateIndex(gitDir: gitDir.path, workingPath: path, treeSha: treeSha)
 }
 
+/// Checks out the tree of `commitSha` into the working directory and index,
+/// guarding against overwriting uncommitted changes. Shared by `pull` and `switchBranch`.
+func checkoutTree(gitDir: String, workingPath: String, commitSha: String, cache: PackfileCache) async throws {
+	let commitData = try await readObject(at: gitDir, sha: commitSha, cache: cache)
+	let treeSha = try extractTreeFromCommit(commitData)
+
+	var currentBlobs: [String: String] = [:]
+	if let currentCommitSha = try await getCurrentCommit(at: gitDir),
+	   let currentTreeSha = try await getTree(gitDir: gitDir, sha: currentCommitSha, cache: cache)
+	{
+		currentBlobs = try await getTreeBlobs(gitDir: gitDir, treeSha: currentTreeSha, cache: cache)
+	}
+
+	try await checkForLocalChanges(gitDir: gitDir, workingPath: workingPath, currentBlobs: currentBlobs, newTreeSha: treeSha, cache: cache)
+	try await extractTreeToWorkingDirectory(gitDir: gitDir, workingPath: workingPath, treeSha: treeSha, currentBlobs: currentBlobs, cache: cache)
+	try await updateIndex(gitDir: gitDir, workingPath: workingPath, treeSha: treeSha)
+}
+
 private func getTreeBlobs(gitDir: String, treeSha: String, prefix: String = "", cache: PackfileCache) async throws -> [String: String] {
 	var blobs: [String: String] = [:]
 	let treeData = try await readObject(at: gitDir, sha: treeSha, cache: cache)

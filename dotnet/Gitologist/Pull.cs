@@ -101,6 +101,35 @@ public static class Pull
         await UpdateIndex(gitDir, path, mergeTreeSha, cache);
     }
 
+    /// <summary>
+    /// Checks out the tree of <paramref name="commitSha"/> into the working directory and index,
+    /// guarding against overwriting uncommitted changes. Shared by <c>Pull</c> and <c>Switch</c>.
+    /// </summary>
+    internal static async Task CheckoutTree(string gitDir, string workingPath, string commitSha, Utils.PackfileCache cache)
+    {
+        var commitData = await Utils.ReadObject(gitDir, commitSha, cache);
+        var treeSha = Utils.ExtractTreeFromCommit(commitData);
+
+        var currentBlobs = new Dictionary<string, string>();
+        var currentCommitSha = await Branch.GetCurrentCommit(gitDir);
+        if (!string.IsNullOrEmpty(currentCommitSha))
+        {
+            var currentTreeSha = await GetTree(gitDir, currentCommitSha, cache);
+            if (currentTreeSha != null)
+            {
+                var blobs = await GetTreeBlobs(gitDir, currentTreeSha, "", cache);
+                foreach (var kvp in blobs)
+                {
+                    currentBlobs[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+
+        await CheckForLocalChanges(gitDir, workingPath, currentBlobs, treeSha, cache);
+        await ExtractTreeToWorkingDirectory(gitDir, workingPath, treeSha, currentBlobs, cache);
+        await UpdateIndex(gitDir, workingPath, treeSha, cache);
+    }
+
     private static async Task<Dictionary<string, string>> GetTreeBlobs(
         string gitDir,
         string treeSha,
