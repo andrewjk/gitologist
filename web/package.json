@@ -1,6 +1,6 @@
 {
 	"name": "gitologist",
-	"version": "1.0.5",
+	"version": "1.0.6",
 	"description": "Git in TypeScript",
 	"homepage": "https://github.com/andrewjk/gitologist#readme",
 	"bugs": {
