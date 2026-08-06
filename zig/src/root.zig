@@ -20,6 +20,7 @@ pub const push = @import("push.zig").push;
 pub const setUpstreamBranch = @import("push.zig").setUpstreamBranch;
 pub const pull = @import("pull.zig").pull;
 pub const log = @import("log.zig").log;
+pub const show = @import("show.zig").show;
 pub const merge = @import("merge.zig").merge;
 pub const getCurrentBranch = @import("branch.zig").getCurrentBranch;
 pub const getCurrentCommit = @import("branch.zig").getCurrentCommit;

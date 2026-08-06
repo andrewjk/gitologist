@@ -11,6 +11,7 @@ import { pull } from "./pull.ts";
 import { push, setUpstreamBranch } from "./push.ts";
 import { getRemoteUrl, hasRemote, remoteAdd, setRemoteUrl } from "./remote.ts";
 import { restore } from "./restore.ts";
+import { show } from "./show.ts";
 import { stash, unstash } from "./stash.ts";
 import { status } from "./status.ts";
 import { switchBranch } from "./switch.ts";
@@ -35,6 +36,7 @@ export {
 	remoteAdd,
 	setRemoteUrl,
 	restore,
+	show,
 	stash,
 	status,
 	switchBranch,
