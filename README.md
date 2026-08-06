@@ -52,7 +52,7 @@ npm install gitologist
 And then call e.g. `clone`, `add`, `commit` and `push`:
 
 ```javascript
-import { clone, add, commit, push, status } from "../src/rulesets/htmlRenderers";
+import { clone, add, commit, push, status } from "gitologist";
 
 const url = "https://github.com/andrewjk/gitologist.git";
 const repoPath = join(".", "gitologist");
