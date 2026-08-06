@@ -73,7 +73,9 @@ public func log(at path: String, options: LogOptions? = nil) async throws -> [Lo
 				}
 			}
 
-			if entries.count >= limit { break }
+			if entries.count >= limit {
+				break
+			}
 			currentSha = entry.parent
 		}
 

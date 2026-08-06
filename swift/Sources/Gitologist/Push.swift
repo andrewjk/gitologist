@@ -125,8 +125,12 @@ private func discoverRefsForPush(remoteUrl: String, options: RemoteOptions? = ni
 			started = true
 			continue
 		}
-		if !started { continue }
-		if line.isEmpty { continue }
+		if !started {
+			continue
+		}
+		if line.isEmpty {
+			continue
+		}
 
 		let parts = line.split(separator: " ", maxSplits: 1)
 		if parts.count >= 2 {

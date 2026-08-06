@@ -138,7 +138,9 @@ private func resetHardRecursive(at path: String, repoPath: String, currentDir: S
 	let entries = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: currentDir), includingPropertiesForKeys: [.isDirectoryKey])
 
 	for entry in entries {
-		if entry.lastPathComponent == ".git" { continue }
+		if entry.lastPathComponent == ".git" {
+			continue
+		}
 
 		let relPath = relativePath(from: repoPath, to: entry.path)
 		let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
@@ -251,7 +253,9 @@ public func unstash(at path: String) async throws {
 
 		// Delete files that exist in HEAD but not in stash
 		for (filePath, _) in currentHeadEntries {
-			if stashEntries[filePath] != nil { continue }
+			if stashEntries[filePath] != nil {
+				continue
+			}
 			let fullPath = URL(fileURLWithPath: path).appendingPathComponent(filePath)
 			try? FileManager.default.removeItem(at: fullPath)
 		}
@@ -284,7 +288,9 @@ public func unstash(at path: String) async throws {
 	}
 
 	for (filePath, sha) in currentHeadEntries {
-		if mergedEntries[filePath] != nil { continue }
+		if mergedEntries[filePath] != nil {
+			continue
+		}
 
 		if let baseSha = mergeBaseEntries[filePath], baseSha != sha {
 			mergedEntries[filePath] = sha
@@ -300,8 +306,12 @@ public func unstash(at path: String) async throws {
 
 	// Delete files that were deleted in stash and not modified in current HEAD
 	for (filePath, baseSha) in mergeBaseEntries {
-		if stashEntries[filePath] != nil { continue }
-		if mergedEntries[filePath] != nil { continue }
+		if stashEntries[filePath] != nil {
+			continue
+		}
+		if mergedEntries[filePath] != nil {
+			continue
+		}
 
 		let currentSha = currentHeadEntries[filePath]
 		if currentSha == nil || currentSha == baseSha {
@@ -355,8 +365,12 @@ private func threeWayMerge(base: String, theirs: String, ours: String) -> String
 	let theirsLines = theirs.components(separatedBy: "\n")
 	let oursLines = ours.components(separatedBy: "\n")
 
-	if base == ours { return theirs }
-	if base == theirs { return ours }
+	if base == ours {
+		return theirs
+	}
+	if base == theirs {
+		return ours
+	}
 
 	let baseToTheirs = diffLines(base: baseLines, modified: theirsLines)
 	let baseToOurs = diffLines(base: baseLines, modified: oursLines)

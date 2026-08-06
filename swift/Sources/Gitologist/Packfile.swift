@@ -132,7 +132,9 @@ func parsePackfile(_ data: Data) throws -> [PackObject] {
 	}
 
 	func resolveEntry(at index: Int, resolved: inout [Int: (content: Data, type: ObjectType)]) -> (content: Data, type: ObjectType) {
-		if let cached = resolved[index] { return cached }
+		if let cached = resolved[index] {
+			return cached
+		}
 		let entry = rawEntries[index]
 		let content: Data
 		let objType: ObjectType
@@ -335,7 +337,9 @@ private func applyDelta(base: Data, delta: Data) -> Data {
 			deltaOffset += 1
 			size |= (byte & 0x7F) << shift
 			shift += 7
-			if (byte & 0x80) == 0 { break }
+			if (byte & 0x80) == 0 {
+				break
+			}
 		}
 		return size
 	}
@@ -353,16 +357,32 @@ private func applyDelta(base: Data, delta: Data) -> Data {
 			var copyOffset = 0
 			var copySize = 0
 
-			if (cmd & 0x01) != 0 { copyOffset = Int(delta[deltaOffset]); deltaOffset += 1 }
-			if (cmd & 0x02) != 0 { copyOffset |= Int(delta[deltaOffset]) << 8; deltaOffset += 1 }
-			if (cmd & 0x04) != 0 { copyOffset |= Int(delta[deltaOffset]) << 16; deltaOffset += 1 }
-			if (cmd & 0x08) != 0 { copyOffset |= Int(delta[deltaOffset]) << 24; deltaOffset += 1 }
+			if (cmd & 0x01) != 0 {
+				copyOffset = Int(delta[deltaOffset]); deltaOffset += 1
+			}
+			if (cmd & 0x02) != 0 {
+				copyOffset |= Int(delta[deltaOffset]) << 8; deltaOffset += 1
+			}
+			if (cmd & 0x04) != 0 {
+				copyOffset |= Int(delta[deltaOffset]) << 16; deltaOffset += 1
+			}
+			if (cmd & 0x08) != 0 {
+				copyOffset |= Int(delta[deltaOffset]) << 24; deltaOffset += 1
+			}
 
-			if (cmd & 0x10) != 0 { copySize = Int(delta[deltaOffset]); deltaOffset += 1 }
-			if (cmd & 0x20) != 0 { copySize |= Int(delta[deltaOffset]) << 8; deltaOffset += 1 }
-			if (cmd & 0x40) != 0 { copySize |= Int(delta[deltaOffset]) << 16; deltaOffset += 1 }
+			if (cmd & 0x10) != 0 {
+				copySize = Int(delta[deltaOffset]); deltaOffset += 1
+			}
+			if (cmd & 0x20) != 0 {
+				copySize |= Int(delta[deltaOffset]) << 8; deltaOffset += 1
+			}
+			if (cmd & 0x40) != 0 {
+				copySize |= Int(delta[deltaOffset]) << 16; deltaOffset += 1
+			}
 
-			if copySize == 0 { copySize = 0x10000 }
+			if copySize == 0 {
+				copySize = 0x10000
+			}
 
 			result.append(base[copyOffset ..< (copyOffset + copySize)])
 		} else if cmd > 0 {

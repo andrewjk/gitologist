@@ -105,7 +105,9 @@ private func getWorkingFiles(at path: String, gitignore: IgnoreParser) async -> 
 		}
 
 		for entry in entries {
-			if entry.lastPathComponent == ".git" { continue }
+			if entry.lastPathComponent == ".git" {
+				continue
+			}
 
 			guard let resourceValues = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]),
 			      let isDirectory = resourceValues.isDirectory,

@@ -33,7 +33,9 @@ public actor IgnoreParser {
 		do {
 			let entries = try FileManager.default.contentsOfDirectory(atPath: currentDir)
 			for entry in entries {
-				if entry == ".git" { continue }
+				if entry == ".git" {
+					continue
+				}
 				let fullPath = (currentDir as NSString).appendingPathComponent(entry)
 				var isDirectory: ObjCBool = false
 				if FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDirectory) {
@@ -55,7 +57,9 @@ public actor IgnoreParser {
 			line = line.trimmingCharacters(in: .whitespacesAndNewlines)
 
 			// Skip empty lines and comments
-			if line.isEmpty || line.hasPrefix("#") { continue }
+			if line.isEmpty || line.hasPrefix("#") {
+				continue
+			}
 
 			// Handle negation (!)
 			let isNegated = line.hasPrefix("!")
@@ -70,7 +74,9 @@ public actor IgnoreParser {
 			}
 
 			// Skip empty pattern after processing
-			if line.isEmpty { continue }
+			if line.isEmpty {
+				continue
+			}
 
 			result.append(IgnorePattern(
 				pattern: line,
