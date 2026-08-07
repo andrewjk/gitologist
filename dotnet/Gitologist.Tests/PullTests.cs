@@ -408,6 +408,143 @@ public class PullTests
     }
 
     [TestMethod]
+    public async Task ShouldDeleteFilesRemovedOnRemote()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file1.txt"),
+            "content1"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "content2"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file3.txt"),
+            "content3"
+        );
+        await Add.AddFiles(
+            _testDir,
+            new[] { "file1.txt", "file2.txt", "file3.txt" }
+        );
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Remove file2 on the remote
+        File.Delete(Path.Combine(_testDir, "file2.txt"));
+        await Add.AddAll(_testDir);
+        await Commit.CreateCommit(_testDir, "Remove file2");
+
+        await Push.PushToRemote(_testDir);
+
+        // Reset local branch back to first commit to simulate another clone
+        var localBranchPath = Path.Combine(
+            _testDir,
+            ".git",
+            "refs",
+            "heads",
+            "main"
+        );
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file1.txt"),
+            "content1"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "content2"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file3.txt"),
+            "content3"
+        );
+        await Add.AddFiles(
+            _testDir,
+            new[] { "file1.txt", "file2.txt", "file3.txt" }
+        );
+
+        await Pull.PullFromRemote(_testDir);
+
+        // file2 should be deleted from the working tree
+        Assert.IsFalse(File.Exists(Path.Combine(_testDir, "file2.txt")));
+
+        // surviving files should be untouched
+        var content1 = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "file1.txt")
+        );
+        var content3 = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "file3.txt")
+        );
+        Assert.AreEqual("content1", content1);
+        Assert.AreEqual("content3", content3);
+    }
+
+    [TestMethod]
+    public async Task ShouldPreserveLocallyModifiedFileDeletedOnRemote()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file1.txt"),
+            "content1"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "content2"
+        );
+        await Add.AddFiles(_testDir, new[] { "file1.txt", "file2.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Remove file2 on the remote
+        File.Delete(Path.Combine(_testDir, "file2.txt"));
+        await Add.AddAll(_testDir);
+        await Commit.CreateCommit(_testDir, "Remove file2");
+
+        await Push.PushToRemote(_testDir);
+
+        // Reset local branch back to first commit to simulate another clone
+        var localBranchPath = Path.Combine(
+            _testDir,
+            ".git",
+            "refs",
+            "heads",
+            "main"
+        );
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file1.txt"),
+            "content1"
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "content2"
+        );
+        await Add.AddFiles(_testDir, new[] { "file1.txt", "file2.txt" });
+
+        // Make uncommitted local edits to file2, which was deleted on the remote
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "file2.txt"),
+            "local changes"
+        );
+
+        await Pull.PullFromRemote(_testDir);
+
+        // file2 should be preserved because it has uncommitted local edits
+        var content2 = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "file2.txt")
+        );
+        Assert.AreEqual("local changes", content2);
+
+        // file1 should be untouched
+        var content1 = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "file1.txt")
+        );
+        Assert.AreEqual("content1", content1);
+    }
+
+    [TestMethod]
     public async Task ShouldNotOverwriteUnchangedFilesWithLocalModifications()
     {
         await Init.InitRepo(_testDir);

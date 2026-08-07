@@ -5,9 +5,11 @@ import { join } from "node:path";
 
 import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 
-import { add } from "../src/add";
+import { add, addAll } from "../src/add";
 import { commit } from "../src/commit";
 import { init } from "../src/init";
+import { pull } from "../src/pull";
+import { push } from "../src/push";
 import { stash, unstash } from "../src/stash";
 import { status } from "../src/status";
 
@@ -381,5 +383,40 @@ describe("stash", () => {
 
 		const aContent = await readFile(join(testDir, "a.txt"), "utf-8");
 		expect(aContent).toBe("a-remote");
+	});
+
+	it("should not restore a file deleted on the remote after stash, pull, unstash", async () => {
+		await writeFile(join(testDir, "fileA.txt"), "a");
+		await writeFile(join(testDir, "fileB.txt"), "b");
+		await add(testDir, ["fileA.txt", "fileB.txt"]);
+		const firstSha = await commit(testDir, "Initial commit");
+
+		await push(testDir);
+
+		// Delete fileB on the remote and push.
+		await rm(join(testDir, "fileB.txt"));
+		await addAll(testDir);
+		await commit(testDir, "Delete fileB");
+		await push(testDir);
+
+		// Simulate a second clone at the first commit with an uncommitted
+		// local edit to fileA, then refresh like RefreshManager does:
+		// stash -> pull -> unstash.
+		await writeFile(join(testDir, ".git", "refs", "heads", "main"), firstSha + "\n");
+		await writeFile(join(testDir, "fileA.txt"), "a");
+		await writeFile(join(testDir, "fileB.txt"), "b");
+		await add(testDir, ["fileA.txt", "fileB.txt"]);
+		await writeFile(join(testDir, "fileA.txt"), "a-modified");
+
+		await stash(testDir, "WIP");
+		await pull(testDir);
+		await unstash(testDir);
+
+		// fileA's local edit must be restored...
+		const contentA = await readFile(join(testDir, "fileA.txt"), "utf-8");
+		expect(contentA).toBe("a-modified");
+
+		// ...but fileB was deleted on the remote and must NOT come back.
+		expect(existsSync(join(testDir, "fileB.txt"))).toBe(false);
 	});
 });

@@ -2,8 +2,11 @@ const std = @import("std");
 
 const init = @import("gitologist").init;
 const add = @import("gitologist").add;
+const addAll = @import("gitologist").addAll;
 const commit = @import("gitologist").commit;
 const status = @import("gitologist").status;
+const push = @import("gitologist").push;
+const pull = @import("gitologist").pull;
 const stash = @import("gitologist").stash;
 const unstash = @import("gitologist").unstash;
 
@@ -866,6 +869,70 @@ test "should delete files that were deleted in stash and not modified in current
     try std.testing.expectEqualSlices(u8, "a-remote", a_content);
 
     _ = cwd.openFile(io, b_path, .{}) catch |err| {
+        try std.testing.expect(err == error.FileNotFound);
+        return;
+    };
+    try std.testing.expect(false);
+}
+
+test "should not restore a file deleted on the remote after stash pull unstash" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try createTempDir(allocator, "gitologist-stash-remote-deleted");
+    defer allocator.free(tmp_path);
+    defer cleanupTempDir(io, tmp_path);
+
+    try init(io, allocator, tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    const file_a_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "fileA.txt" });
+    const file_b_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "fileB.txt" });
+    defer allocator.free(file_a_path);
+    defer allocator.free(file_b_path);
+
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "a" });
+    try cwd.writeFile(io, .{ .sub_path = file_b_path, .data = "b" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ "fileA.txt", "fileB.txt" });
+
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+    defer allocator.free(first_sha);
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Delete fileB on the remote and push.
+    try cwd.deleteFile(io, file_b_path);
+    try addAll(io, allocator, tmp_path);
+    const second_sha = try commit(io, allocator, tmp_path, "Delete fileB");
+    allocator.free(second_sha);
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Simulate a second clone at the first commit with an uncommitted
+    // local edit to fileA, then refresh like RefreshManager does:
+    // stash -> pull -> unstash.
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "a" });
+    try cwd.writeFile(io, .{ .sub_path = file_b_path, .data = "b" });
+    try add(io, allocator, tmp_path, &[_][]const u8{ "fileA.txt", "fileB.txt" });
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "a-modified" });
+
+    const stash_sha = try stash(io, allocator, tmp_path, "WIP");
+    defer allocator.free(stash_sha);
+
+    try pull(io, allocator, tmp_path, null, null, null);
+    try unstash(io, allocator, tmp_path);
+
+    // fileA's local edit must be restored...
+    const content_a = try cwd.readFileAlloc(io, file_a_path, allocator, .unlimited);
+    defer allocator.free(content_a);
+    try std.testing.expectEqualSlices(u8, "a-modified", content_a);
+
+    // ...but fileB was deleted on the remote and must NOT come back.
+    _ = cwd.openFile(io, file_b_path, .{}) catch |err| {
         try std.testing.expect(err == error.FileNotFound);
         return;
     };

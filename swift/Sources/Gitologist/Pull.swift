@@ -309,6 +309,28 @@ private func createMergeCommit(gitDir: String, parent1: String, parent2: String,
 
 private func extractTreeToWorkingDirectory(gitDir: String, workingPath: String, treeSha: String, currentBlobs: [String: String], cache: PackfileCache) async throws {
 	try await extractTreeRecursive(gitDir: gitDir, workingPath: workingPath, treeSha: treeSha, prefix: "", currentBlobs: currentBlobs, cache: cache)
+
+	// Delete working-tree files tracked before but absent from the new tree,
+	// unless they carry uncommitted local edits.
+	let newBlobs = try await getTreeBlobs(gitDir: gitDir, treeSha: treeSha, cache: cache)
+
+	for (path, oldSha) in currentBlobs {
+		if newBlobs[path] != nil {
+			continue
+		}
+
+		let fullPath = URL(fileURLWithPath: workingPath).appendingPathComponent(path).path
+		guard FileManager.default.fileExists(atPath: fullPath) else {
+			continue
+		}
+
+		let currentHash = try await hashFileAsBlob(at: fullPath)
+		guard currentHash == oldSha else {
+			continue
+		}
+
+		try FileManager.default.removeItem(atPath: fullPath)
+	}
 }
 
 private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: String, prefix: String, currentBlobs: [String: String], cache: PackfileCache) async throws {

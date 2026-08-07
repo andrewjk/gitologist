@@ -268,8 +268,18 @@ public func unstash(at path: String) async throws {
 		let baseSha = mergeBaseEntries[filePath]
 		let currentSha = currentHeadEntries[filePath]
 
-		if currentSha == nil || currentSha == baseSha {
+		if currentSha == baseSha {
 			mergedEntries[filePath] = sha
+			continue
+		}
+
+		if currentSha == nil {
+			// The file was deleted on the current side (e.g. pulled from a
+			// remote that removed it). Only restore it if the stash itself
+			// modified the file; otherwise the deletion must stand.
+			if sha != baseSha {
+				mergedEntries[filePath] = sha
+			}
 			continue
 		}
 

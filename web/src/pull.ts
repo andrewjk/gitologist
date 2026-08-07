@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { getCurrentBranch, getCurrentCommit } from "./branch.ts";
@@ -200,6 +200,28 @@ async function extractTreeToWorkingDirectory(
 	cache: PackfileCache,
 ): Promise<void> {
 	await extractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs, cache);
+
+	// Delete working-tree files tracked before but absent from the new tree,
+	// unless they carry uncommitted local edits.
+	const newBlobs = await getTreeBlobs(gitDir, treeSha, undefined, cache);
+
+	for (const [path, oldSha] of currentBlobs) {
+		if (newBlobs.has(path)) {
+			continue;
+		}
+
+		const fullPath = join(workingPath, path);
+		if (!existsSync(fullPath)) {
+			continue;
+		}
+
+		const currentHash = await hashFileAsBlob(fullPath);
+		if (currentHash !== oldSha) {
+			continue;
+		}
+
+		await rm(fullPath);
+	}
 }
 
 async function extractTreeRecursive(

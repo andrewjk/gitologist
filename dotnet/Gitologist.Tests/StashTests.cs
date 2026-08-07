@@ -495,4 +495,43 @@ public class StashTests
         var aContent = await File.ReadAllTextAsync(Path.Combine(_testDir, "a.txt"));
         Assert.AreEqual("a-remote", aContent);
     }
+
+    [TestMethod]
+    public async Task ShouldNotRestoreFileDeletedOnRemoteAfterStashPullUnstash()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "fileA.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "fileB.txt"), "b");
+        await Add.AddFiles(_testDir, new[] { "fileA.txt", "fileB.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Delete fileB on the remote and push.
+        File.Delete(Path.Combine(_testDir, "fileB.txt"));
+        await Add.AddAll(_testDir);
+        await Commit.CreateCommit(_testDir, "Delete fileB");
+        await Push.PushToRemote(_testDir);
+
+        // Simulate a second clone at the first commit with an uncommitted
+        // local edit to fileA, then refresh like RefreshManager does:
+        // stash -> pull -> unstash.
+        var localBranchPath = Path.Combine(_testDir, ".git", "refs", "heads", "main");
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "fileA.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "fileB.txt"), "b");
+        await Add.AddFiles(_testDir, new[] { "fileA.txt", "fileB.txt" });
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "fileA.txt"), "a-modified");
+
+        await Stash.CreateStash(_testDir, "WIP");
+        await Pull.PullFromRemote(_testDir);
+        await Stash.Unstash(_testDir);
+
+        // fileA's local edit must be restored...
+        var contentA = await File.ReadAllTextAsync(Path.Combine(_testDir, "fileA.txt"));
+        Assert.AreEqual("a-modified", contentA);
+
+        // ...but fileB was deleted on the remote and must NOT come back.
+        Assert.IsFalse(File.Exists(Path.Combine(_testDir, "fileB.txt")));
+    }
 }

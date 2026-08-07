@@ -307,6 +307,48 @@ fn extractTreeToWorkingDirectory(
     pack_cache: *utils.PackfileCache,
 ) !void {
     try extractTreeRecursive(io, allocator, git_dir_path, working_path, tree_sha, "", current_blobs, pack_cache);
+
+    // Delete working-tree files tracked before but absent from the new tree,
+    // unless they carry uncommitted local edits.
+    var new_blobs = std.StringHashMap([]const u8).init(allocator);
+    defer {
+        var iter = new_blobs.iterator();
+        while (iter.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            allocator.free(entry.value_ptr.*);
+        }
+        new_blobs.deinit();
+    }
+
+    try getTreeBlobs(io, allocator, git_dir_path, tree_sha, "", &new_blobs, pack_cache);
+
+    const cwd = std.Io.Dir.cwd();
+
+    var iter = current_blobs.iterator();
+    while (iter.next()) |entry| {
+        const path = entry.key_ptr.*;
+        const old_sha = entry.value_ptr.*;
+
+        if (new_blobs.contains(path)) {
+            continue;
+        }
+
+        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ working_path, path });
+        defer allocator.free(full_path);
+
+        if (cwd.access(io, full_path, .{})) |_| {} else |_| {
+            continue;
+        }
+
+        const current_hash = try utils.hashFileAsBlob(io, allocator, full_path);
+        defer allocator.free(current_hash);
+
+        if (!std.mem.eql(u8, current_hash, old_sha)) {
+            continue;
+        }
+
+        try cwd.deleteFile(io, full_path);
+    }
 }
 
 fn extractTreeRecursive(

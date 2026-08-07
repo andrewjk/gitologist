@@ -291,6 +291,90 @@ struct PullTests {
 		try? fileManager.removeItem(at: testDirPath)
 	}
 
+	@Test func shouldDeleteFilesRemovedOnRemote() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "content1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
+		try "content2".write(to: testDirPath.appendingPathComponent("file2.txt"), atomically: true, encoding: .utf8)
+		try "content3".write(to: testDirPath.appendingPathComponent("file3.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file1.txt", "file2.txt", "file3.txt"])
+		let firstSha = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try await push(at: testDirPath.path)
+
+		// Remove file2 on the remote
+		try fileManager.removeItem(at: testDirPath.appendingPathComponent("file2.txt"))
+		try await addAll(at: testDirPath.path)
+		_ = try await commit(at: testDirPath.path, message: "Remove file2")
+
+		try await push(at: testDirPath.path)
+
+		// Reset local branch back to first commit to simulate another clone
+		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
+		try firstSha.write(to: localBranchPath, atomically: true, encoding: .utf8)
+		try "content1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
+		try "content2".write(to: testDirPath.appendingPathComponent("file2.txt"), atomically: true, encoding: .utf8)
+		try "content3".write(to: testDirPath.appendingPathComponent("file3.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file1.txt", "file2.txt", "file3.txt"])
+
+		try await pull(at: testDirPath.path)
+
+		// file2 should be deleted from the working tree
+		#expect(!fileManager.fileExists(atPath: testDirPath.appendingPathComponent("file2.txt").path))
+
+		// surviving files should be untouched
+		let content1 = try String(contentsOf: testDirPath.appendingPathComponent("file1.txt"), encoding: .utf8)
+		let content3 = try String(contentsOf: testDirPath.appendingPathComponent("file3.txt"), encoding: .utf8)
+		#expect(content1 == "content1")
+		#expect(content3 == "content3")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldPreserveLocallyModifiedFileDeletedOnRemote() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "content1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
+		try "content2".write(to: testDirPath.appendingPathComponent("file2.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file1.txt", "file2.txt"])
+		let firstSha = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try await push(at: testDirPath.path)
+
+		// Remove file2 on the remote
+		try fileManager.removeItem(at: testDirPath.appendingPathComponent("file2.txt"))
+		try await addAll(at: testDirPath.path)
+		_ = try await commit(at: testDirPath.path, message: "Remove file2")
+
+		try await push(at: testDirPath.path)
+
+		// Reset local branch back to first commit to simulate another clone
+		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
+		try firstSha.write(to: localBranchPath, atomically: true, encoding: .utf8)
+		try "content1".write(to: testDirPath.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
+		try "content2".write(to: testDirPath.appendingPathComponent("file2.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["file1.txt", "file2.txt"])
+
+		// Make uncommitted local edits to file2, which was deleted on the remote
+		try "local changes".write(to: testDirPath.appendingPathComponent("file2.txt"), atomically: true, encoding: .utf8)
+
+		try await pull(at: testDirPath.path)
+
+		// file2 should be preserved because it has uncommitted local edits
+		let content2 = try String(contentsOf: testDirPath.appendingPathComponent("file2.txt"), encoding: .utf8)
+		#expect(content2 == "local changes")
+
+		// file1 should be untouched
+		let content1 = try String(contentsOf: testDirPath.appendingPathComponent("file1.txt"), encoding: .utf8)
+		#expect(content1 == "content1")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
 	@Test func shouldNotOverwriteUnchangedFilesWithLocalModifications() async throws {
 		let testDirPath = testDir
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
@@ -330,6 +414,49 @@ struct PullTests {
 		// file2 local changes should be preserved since it wasn't changed in the pull
 		let content2 = try String(contentsOf: testDirPath.appendingPathComponent("file2.txt"), encoding: .utf8)
 		#expect(content2 == "local changes to file2")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func unstashDoesNotRestoreFileDeletedOnRemote() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "a".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try "b".write(to: testDirPath.appendingPathComponent("fileB.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["fileA.txt", "fileB.txt"])
+		let firstSha = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try await push(at: testDirPath.path)
+
+		// Delete fileB on the remote and push.
+		try fileManager.removeItem(at: testDirPath.appendingPathComponent("fileB.txt"))
+		try await addAll(at: testDirPath.path)
+		_ = try await commit(at: testDirPath.path, message: "Delete fileB")
+		try await push(at: testDirPath.path)
+
+		// Simulate a second clone at the first commit with an uncommitted
+		// local edit to fileA, then refresh like RefreshManager does:
+		// stash -> pull -> unstash.
+		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
+		try firstSha.write(to: localBranchPath, atomically: true, encoding: .utf8)
+		try "a".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try "b".write(to: testDirPath.appendingPathComponent("fileB.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["fileA.txt", "fileB.txt"])
+		try "a-modified".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+
+		_ = try await stash(at: testDirPath.path)
+		try await pull(at: testDirPath.path)
+		try await unstash(at: testDirPath.path)
+
+		// fileA's local edit must be restored...
+		let contentA = try String(contentsOf: testDirPath.appendingPathComponent("fileA.txt"), encoding: .utf8)
+		#expect(contentA == "a-modified")
+
+		// ...but fileB was deleted on the remote and must NOT come back.
+		#expect(!fileManager.fileExists(atPath: testDirPath.appendingPathComponent("fileB.txt").path),
+		        "fileB deleted on remote was restored by unstash")
 
 		try? fileManager.removeItem(at: testDirPath)
 	}

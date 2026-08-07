@@ -209,6 +209,32 @@ public static class Pull
     )
     {
         await ExtractTreeRecursive(gitDir, workingPath, treeSha, "", currentBlobs, cache);
+
+        // Delete working-tree files tracked before but absent from the new tree,
+        // unless they carry uncommitted local edits.
+        var newBlobs = await GetTreeBlobs(gitDir, treeSha, "", cache);
+
+        foreach (var (path, oldSha) in currentBlobs)
+        {
+            if (newBlobs.ContainsKey(path))
+            {
+                continue;
+            }
+
+            var fullPath = Path.Combine(workingPath, path);
+            if (!File.Exists(fullPath))
+            {
+                continue;
+            }
+
+            var currentHash = await Utils.HashFileAsBlob(fullPath);
+            if (currentHash != oldSha)
+            {
+                continue;
+            }
+
+            File.Delete(fullPath);
+        }
     }
 
     private static async Task ExtractTreeRecursive(

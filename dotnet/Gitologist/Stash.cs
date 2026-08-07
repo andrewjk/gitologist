@@ -398,9 +398,21 @@ public static class Stash
             mergeBaseEntries.TryGetValue(filePath, out var baseSha);
             var currentSha = currentHeadEntries.TryGetValue(filePath, out var cs) ? cs : null;
 
-            if (currentSha == null || currentSha == baseSha)
+            if (currentSha == baseSha)
             {
                 mergedEntries[filePath] = sha;
+                continue;
+            }
+
+            if (currentSha == null)
+            {
+                // The file was deleted on the current side (e.g. pulled from a
+                // remote that removed it). Only restore it if the stash itself
+                // modified the file; otherwise the deletion must stand.
+                if (sha != baseSha)
+                {
+                    mergedEntries[filePath] = sha;
+                }
                 continue;
             }
 

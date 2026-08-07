@@ -2,6 +2,7 @@ const std = @import("std");
 
 const init = @import("gitologist").init;
 const add = @import("gitologist").add;
+const addAll = @import("gitologist").addAll;
 const commit = @import("gitologist").commit;
 const push = @import("gitologist").push;
 const pull = @import("gitologist").pull;
@@ -533,6 +534,166 @@ test "should throw error when local changes would be overwritten" {
     defer allocator.free(content);
 
     try std.testing.expectEqualStrings("local changes", content);
+
+    allocator.free(first_sha);
+}
+
+test "should delete files removed on remote" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-13" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const file1_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file1.txt" });
+    const file2_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file2.txt" });
+    const file3_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file3.txt" });
+    defer allocator.free(file1_path);
+    defer allocator.free(file2_path);
+    defer allocator.free(file3_path);
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "content1" });
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "content2" });
+    try cwd.writeFile(io, .{ .sub_path = file3_path, .data = "content3" });
+
+    const paths = try allocator.alloc([]const u8, 3);
+    defer allocator.free(paths);
+    paths[0] = try allocator.dupe(u8, "file1.txt");
+    paths[1] = try allocator.dupe(u8, "file2.txt");
+    paths[2] = try allocator.dupe(u8, "file3.txt");
+    defer allocator.free(paths[0]);
+    defer allocator.free(paths[1]);
+    defer allocator.free(paths[2]);
+
+    try add(io, allocator, tmp_path, paths);
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Remove file2 on the remote
+    try cwd.deleteFile(io, file2_path);
+    try addAll(io, allocator, tmp_path);
+    const second_sha = try commit(io, allocator, tmp_path, "Remove file2");
+    allocator.free(second_sha);
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Reset local branch back to first commit to simulate another clone
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "content1" });
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "content2" });
+    try cwd.writeFile(io, .{ .sub_path = file3_path, .data = "content3" });
+
+    const paths2 = try allocator.alloc([]const u8, 3);
+    defer allocator.free(paths2);
+    paths2[0] = try allocator.dupe(u8, "file1.txt");
+    paths2[1] = try allocator.dupe(u8, "file2.txt");
+    paths2[2] = try allocator.dupe(u8, "file3.txt");
+    defer allocator.free(paths2[0]);
+    defer allocator.free(paths2[1]);
+    defer allocator.free(paths2[2]);
+    try add(io, allocator, tmp_path, paths2);
+
+    try pull(io, allocator, tmp_path, null, null, null);
+
+    // file2 should be deleted from the working tree
+    const file2_exists = if (cwd.access(io, file2_path, .{})) |_| true else |_| false;
+    try std.testing.expect(!file2_exists);
+
+    // surviving files should be untouched
+    const content1 = try cwd.readFileAlloc(io, file1_path, allocator, .unlimited);
+    const content3 = try cwd.readFileAlloc(io, file3_path, allocator, .unlimited);
+    defer allocator.free(content1);
+    defer allocator.free(content3);
+
+    try std.testing.expectEqualStrings("content1", content1);
+    try std.testing.expectEqualStrings("content3", content3);
+
+    allocator.free(first_sha);
+}
+
+test "should preserve locally modified file deleted on remote" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-14" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const file1_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file1.txt" });
+    const file2_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "file2.txt" });
+    defer allocator.free(file1_path);
+    defer allocator.free(file2_path);
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "content1" });
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "content2" });
+
+    const paths = try allocator.alloc([]const u8, 2);
+    defer allocator.free(paths);
+    paths[0] = try allocator.dupe(u8, "file1.txt");
+    paths[1] = try allocator.dupe(u8, "file2.txt");
+    defer allocator.free(paths[0]);
+    defer allocator.free(paths[1]);
+
+    try add(io, allocator, tmp_path, paths);
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Remove file2 on the remote
+    try cwd.deleteFile(io, file2_path);
+    try addAll(io, allocator, tmp_path);
+    const second_sha = try commit(io, allocator, tmp_path, "Remove file2");
+    allocator.free(second_sha);
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Reset local branch back to first commit to simulate another clone
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = file1_path, .data = "content1" });
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "content2" });
+
+    const paths2 = try allocator.alloc([]const u8, 2);
+    defer allocator.free(paths2);
+    paths2[0] = try allocator.dupe(u8, "file1.txt");
+    paths2[1] = try allocator.dupe(u8, "file2.txt");
+    defer allocator.free(paths2[0]);
+    defer allocator.free(paths2[1]);
+    try add(io, allocator, tmp_path, paths2);
+
+    // Make uncommitted local edits to file2, which was deleted on the remote
+    try cwd.writeFile(io, .{ .sub_path = file2_path, .data = "local changes" });
+
+    try pull(io, allocator, tmp_path, null, null, null);
+
+    // file2 should be preserved because it has uncommitted local edits
+    const content2 = try cwd.readFileAlloc(io, file2_path, allocator, .unlimited);
+    defer allocator.free(content2);
+
+    try std.testing.expectEqualStrings("local changes", content2);
+
+    // file1 should be untouched
+    const content1 = try cwd.readFileAlloc(io, file1_path, allocator, .unlimited);
+    defer allocator.free(content1);
+
+    try std.testing.expectEqualStrings("content1", content1);
 
     allocator.free(first_sha);
 }

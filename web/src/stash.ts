@@ -420,8 +420,18 @@ export async function unstash(path: string): Promise<void> {
 		const baseSha = mergeBaseEntries.get(filePath);
 		const currentSha = currentHeadEntries.get(filePath);
 
-		if (!currentSha || currentSha === baseSha) {
+		if (currentSha === baseSha) {
 			mergedEntries.set(filePath, sha);
+			continue;
+		}
+
+		if (!currentSha) {
+			// The file was deleted on the current side (e.g. pulled from a
+			// remote that removed it). Only restore it if the stash itself
+			// modified the file; otherwise the deletion must stand.
+			if (sha !== baseSha) {
+				mergedEntries.set(filePath, sha);
+			}
 			continue;
 		}
 

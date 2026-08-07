@@ -700,10 +700,22 @@ pub fn unstash(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !void
             const base_sha = merge_base_entries.get(file_path);
             const current_sha = current_head_entries.get(file_path);
 
-            if (current_sha == null or (base_sha != null and std.mem.eql(u8, current_sha.?, base_sha.?))) {
+            if (current_sha != null and base_sha != null and std.mem.eql(u8, current_sha.?, base_sha.?)) {
                 const key_copy = try allocator.dupe(u8, file_path);
                 const val_copy = try allocator.dupe(u8, sha);
                 try merged_entries.put(key_copy, val_copy);
+                continue;
+            }
+
+            if (current_sha == null) {
+                // The file was deleted on the current side (e.g. pulled from a
+                // remote that removed it). Only restore it if the stash itself
+                // modified the file; otherwise the deletion must stand.
+                if (base_sha == null or !std.mem.eql(u8, sha, base_sha.?)) {
+                    const key_copy = try allocator.dupe(u8, file_path);
+                    const val_copy = try allocator.dupe(u8, sha);
+                    try merged_entries.put(key_copy, val_copy);
+                }
                 continue;
             }
 
