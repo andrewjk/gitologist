@@ -129,7 +129,7 @@ internal static class Utils
 
     internal static async Task WriteIndex(string indexPath, Dictionary<string, IndexEntry> index)
     {
-        var entries = index.Values.OrderBy(e => e.Path).ToList();
+        var entries = index.Values.OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
 
         var header = new List<byte>();
         header.AddRange(Encoding.ASCII.GetBytes("DIRC"));
@@ -217,7 +217,7 @@ internal static class Utils
             if (entryName == ".git")
                 continue;
 
-            var relativePath = Path.GetRelativePath(basePath, entry);
+            var relativePath = Path.GetRelativePath(basePath, entry).Replace('\\', '/');
             var isDirectory = Directory.Exists(entry);
 
             // Check if this path is ignored
@@ -287,6 +287,11 @@ internal static class Utils
     internal static byte[] Compress(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
+        if (bytes.Length == 0)
+        {
+            return Convert.FromHexString("789C010000FFFF00000001");
+        }
+
         using var output = new MemoryStream();
         using (var zlib = new ZLibStream(output, CompressionLevel.Optimal))
         {
@@ -297,6 +302,14 @@ internal static class Utils
 
     internal static byte[] CompressBytes(byte[] data)
     {
+        if (data.Length == 0)
+        {
+            // .NET's ZLibStream emits no bytes for an empty buffer, which git
+            // cannot inflate (breaks the whole pack). Emit the canonical empty
+            // zlib stream instead: header + empty stored deflate block + adler32.
+            return Convert.FromHexString("789C010000FFFF00000001");
+        }
+
         using var output = new MemoryStream();
         using (var zlib = new ZLibStream(output, CompressionLevel.Optimal))
         {

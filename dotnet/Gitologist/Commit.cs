@@ -140,14 +140,17 @@ public static class Commit
                 {
                     Path = dir,
                     Sha = dirSha,
-                    Mode = "040000",
+                    Mode = "40000",
                     Type = "tree",
                 }
             );
         }
 
-        // Sort entries by path (Git requires this)
-        treeEntries = treeEntries.OrderBy(e => e.Path).ToList();
+        // Sort entries by path (Git requires this). Git orders entries by raw
+        // byte value, and directories sort as if their name had a trailing '/'.
+        treeEntries = treeEntries
+            .OrderBy(e => e.Type == "tree" ? e.Path + "/" : e.Path, StringComparer.Ordinal)
+            .ToList();
 
         // Build tree content as binary data
         // Format: <mode> <name>\0<20-byte SHA> for each entry

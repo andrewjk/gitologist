@@ -143,9 +143,10 @@ public static class Packfile
             offset = entryTypeResult.DataOffset + bytesConsumed;
         }
 
-        var resolved = new Dictionary<int, (byte[] Content, string Type)>();
+        var resolved = new Dictionary<int, (byte[] Content, string Type, string Sha)>();
+        var shaToIndex = new Dictionary<string, int>();
 
-        (byte[] Content, string Type) ResolveEntry(int index)
+        (byte[] Content, string Type, string Sha) ResolveEntry(int index)
         {
             if (resolved.TryGetValue(index, out var cached)) return cached;
             var entry = rawEntries[index];
@@ -169,24 +170,26 @@ public static class Packfile
                     }
                 case PackEntryKind.RefDelta:
                     {
-                        int? baseIndex = null;
-                        for (var j = 0; j < rawEntries.Count; j++)
+                        if (!shaToIndex.TryGetValue(entry.EntryType.RefDeltaBaseSha, out var baseIndex))
                         {
-                            var raw = rawEntries[j];
-                            if (raw.EntryType.Kind != PackEntryKind.Object) continue;
-                            var header = $"{raw.EntryType.ObjectType} {raw.Content.Length}\0";
-                            var headerBytes = Encoding.UTF8.GetBytes(header);
-                            var fullData = headerBytes.Concat(raw.Content).ToArray();
-                            using var sha1 = SHA1.Create();
-                            var hashBytes = sha1.ComputeHash(fullData);
-                            var sha = Convert.ToHexString(hashBytes).ToLowerInvariant();
-                            if (sha == entry.EntryType.RefDeltaBaseSha)
+                            // Bases always precede deltas in a valid pack; resolve earlier
+                            // entries to register their SHAs, then look up the base.
+                            for (var j = 0; j < index; j++)
                             {
-                                baseIndex = j;
-                                break;
+                                ResolveEntry(j);
+                                if (shaToIndex.TryGetValue(entry.EntryType.RefDeltaBaseSha, out baseIndex))
+                                {
+                                    break;
+                                }
+                            }
+
+                            if (!shaToIndex.TryGetValue(entry.EntryType.RefDeltaBaseSha, out baseIndex))
+                            {
+                                throw new InvalidOperationException($"Delta base not found in pack: {entry.EntryType.RefDeltaBaseSha}");
                             }
                         }
-                        var base_ = ResolveEntry(baseIndex!.Value);
+
+                        var base_ = ResolveEntry(baseIndex);
                         content = ApplyDelta(base_.Content, entry.Content);
                         objType = base_.Type;
                         break;
@@ -195,7 +198,16 @@ public static class Packfile
                     throw new InvalidOperationException("Unknown entry kind");
             }
 
-            var result = (content, objType);
+            var objectHeader = $"{objType} {content.Length}\0";
+            var headerBytes = Encoding.UTF8.GetBytes(objectHeader);
+            var fullData = headerBytes.Concat(content).ToArray();
+
+            using var sha1 = SHA1.Create();
+            var sha = Convert.ToHexString(sha1.ComputeHash(fullData)).ToLowerInvariant();
+
+            shaToIndex[sha] = index;
+
+            var result = (content, objType, sha);
             resolved[index] = result;
             return result;
         }
@@ -204,35 +216,12 @@ public static class Packfile
 
         for (var i = 0; i < rawEntries.Count; i++)
         {
-            var entry = rawEntries[i];
-            byte[] content;
-            string objectType;
-
-            if (entry.EntryType.Kind == PackEntryKind.Object)
-            {
-                objectType = entry.EntryType.ObjectType!;
-                content = entry.Content;
-            }
-            else
-            {
-                var resolvedResult = ResolveEntry(i);
-                content = resolvedResult.Content;
-                objectType = resolvedResult.Type;
-            }
-
-            var objectHeader = $"{objectType} {content.Length}\0";
-            var headerBytes = Encoding.UTF8.GetBytes(objectHeader);
-            var fullData = headerBytes.Concat(content).ToArray();
-
-            using var sha1_ = SHA1.Create();
-            var hashBytes = sha1_.ComputeHash(fullData);
-            var sha = Convert.ToHexString(hashBytes).ToLowerInvariant();
-
+            var resolvedResult = ResolveEntry(i);
             objects.Add(new PackObject
             {
-                Type = objectType,
-                Sha = sha,
-                Content = content
+                Type = resolvedResult.Type,
+                Sha = resolvedResult.Sha,
+                Content = resolvedResult.Content
             });
         }
 

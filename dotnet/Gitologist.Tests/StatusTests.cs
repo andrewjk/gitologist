@@ -88,7 +88,7 @@ public class StatusTests
         var result = await Status.GetStatus(_testDir);
         CollectionAssert.Contains(result.Untracked, "test.txt");
         CollectionAssert.Contains(result.Untracked, "README.md");
-        CollectionAssert.Contains(result.Untracked, Path.Combine("src", "index.ts"));
+        CollectionAssert.Contains(result.Untracked, "src/index.ts");
     }
 
     [TestMethod]

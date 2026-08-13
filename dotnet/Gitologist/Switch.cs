@@ -34,10 +34,15 @@ public static class Switch
         {
             var (remoteName, commitSha) = dwim.Value;
 
+            // Check out the tree FIRST, before the branch ref is updated, so the
+            // checkout uses the actual current HEAD (or nothing for a fresh repo)
+            // as its change-detection baseline. If we updated the ref first, the
+            // checkout would think the target is already checked out and skip
+            // extracting any files.
+            await Pull.CheckoutTree(gitDir, path, commitSha, cache);
+
             await Utils.UpdateBranch(gitDir, branchName, commitSha);
             await Push.SetUpstreamBranch(path, remoteName, branchName);
-
-            await Pull.CheckoutTree(gitDir, path, commitSha, cache);
 
             var headPath = Path.Combine(gitDir, "HEAD");
             await File.WriteAllTextAsync(headPath, $"ref: refs/heads/{branchName}\n");

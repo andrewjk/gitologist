@@ -265,6 +265,20 @@ public static class Pull
                     continue;
                 }
 
+                if (File.Exists(entryPath))
+                {
+                    var onDisk = await Utils.HashFileAsBlob(entryPath);
+
+                    // Preserve files that aren't a clean checkout of the current
+                    // commit: untracked files in a fresh repo, or uncommitted local
+                    // modifications. (This mirrors `git checkout`, which refuses to
+                    // overwrite them.)
+                    if (currentSha == null || onDisk != currentSha)
+                    {
+                        continue;
+                    }
+                }
+
                 var blobData = await Utils.ReadObject(gitDir, entry.Sha, cache);
                 var content = Utils.ExtractContentFromBlob(blobData);
                 await File.WriteAllTextAsync(entryPath, content);
@@ -301,63 +315,58 @@ public static class Pull
     {
         var indexPath = Path.Combine(gitDir, "index");
 
-        var indexContent = "";
-        indexContent = await UpdateIndexRecursive(
-            gitDir,
-            treeSha,
-            "",
-            indexContent,
-            cache
-        );
+        var index = new Dictionary<string, IndexEntry>();
+        index = await UpdateIndexRecursive(gitDir, treeSha, "", index, cache);
 
-        await File.WriteAllTextAsync(indexPath, indexContent + "\n");
+        await Utils.WriteIndex(indexPath, index);
     }
 
-    private static async Task<string> UpdateIndexRecursive(
+    private static async Task<Dictionary<string, IndexEntry>> UpdateIndexRecursive(
         string gitDir,
         string treeSha,
         string prefix,
-        string indexContent,
+        Dictionary<string, IndexEntry> index,
         Utils.PackfileCache cache
     )
     {
         var treeData = await Utils.ReadObject(gitDir, treeSha, cache);
         var entries = Utils.ParseTreeEntries(treeData);
-        var content = indexContent;
 
         foreach (var entry in entries)
         {
             if (entry.Type == "blob")
             {
-                var blobData = await Utils.ReadObject(gitDir, entry.Sha, cache);
-                var fileContent = Utils.ExtractContentFromBlob(blobData);
-                // Use git blob hash format (with "blob <size>\0" header)
-                var blobHeader = $"blob {fileContent.Length}\0{fileContent}";
-                var hash = Utils.HashString(blobHeader);
-
-                var entryPath = string.IsNullOrEmpty(prefix)
+                var path = string.IsNullOrEmpty(prefix)
                     ? entry.Path
-                    : Path.Combine(prefix, entry.Path).Replace("\\", "/");
+                    : $"{prefix}/{entry.Path}";
 
-                content += $"{entryPath} {hash}\n";
+                index[path] = new IndexEntry
+                {
+                    Path = path,
+                    Sha = entry.Sha,
+                    Mode = entry.Mode,
+                    Size = 0,
+                    CtimeSeconds = 0,
+                    CtimeNanos = 0,
+                    MtimeSeconds = 0,
+                    MtimeNanos = 0,
+                    Dev = 0,
+                    Ino = 0,
+                    Uid = 0,
+                    Gid = 0
+                };
             }
             else if (entry.Type == "tree")
             {
                 var newPrefix = string.IsNullOrEmpty(prefix)
                     ? entry.Path
-                    : Path.Combine(prefix, entry.Path).Replace("\\", "/");
+                    : $"{prefix}/{entry.Path}";
 
-                content = await UpdateIndexRecursive(
-                    gitDir,
-                    entry.Sha,
-                    newPrefix,
-                    content,
-                    cache
-                );
+                index = await UpdateIndexRecursive(gitDir, entry.Sha, newPrefix, index, cache);
             }
         }
 
-        return content;
+        return index;
     }
 
     private static async Task<bool> IsAncestorOf(

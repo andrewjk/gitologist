@@ -99,11 +99,10 @@ public static class Push
 
     private static async Task<List<DiscoveredRef>> DiscoverRefsForPush(string remoteUrl, RemoteOptions? options = null)
     {
-        var url = new Uri(new Uri(remoteUrl), "info/refs?service=git-receive-pack");
+        var url = new Uri($"{remoteUrl.TrimEnd('/')}/info/refs?service=git-receive-pack");
 
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("Accept", "application/x-git-receive-pack-advertisement");
-        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         if (options?.Credentials != null)
         {
@@ -160,7 +159,7 @@ public static class Push
         RemoteOptions? options = null
     )
     {
-        var url = new Uri(new Uri(remoteUrl), "git-receive-pack");
+        var url = new Uri($"{remoteUrl.TrimEnd('/')}/git-receive-pack");
 
         var requestBody = BuildPushRequest(oldSha, newSha, branchName, packfile);
 
@@ -168,7 +167,6 @@ public static class Push
         using var content = new ByteArrayContent(requestBody);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-git-receive-pack-request");
         client.DefaultRequestHeaders.Add("Accept", "application/x-git-receive-pack-result");
-        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         if (options?.Credentials != null)
         {
@@ -188,12 +186,18 @@ public static class Push
         var data = await response.Content.ReadAsByteArrayAsync();
         var lines = Packfile.DecodePktLines(data);
 
-        foreach (var line in lines)
+        var statusLines = lines
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .ToList();
+
+        foreach (var line in statusLines)
         {
             if (line.StartsWith("ng "))
             {
                 var reason = line.Substring(3);
-                throw new InvalidOperationException($"Push rejected: {reason}");
+                throw new InvalidOperationException(
+                    $"Push rejected: {reason} | server response: {string.Join(" / ", statusLines)}"
+                );
             }
         }
     }
@@ -202,7 +206,7 @@ public static class Push
     {
         var lines = new List<byte[]>();
 
-        lines.Add(Packfile.EncodePktLine($"{oldSha} {newSha} refs/heads/{branchName}\0report-status agent=gitologist/1.0"));
+        lines.Add(Packfile.EncodePktLine($"{oldSha} {newSha} refs/heads/{branchName}\0report-status agent=gitologist/1.0\n"));
         lines.Add(Packfile.EncodePktLine(null));
         lines.Add(packfile);
 

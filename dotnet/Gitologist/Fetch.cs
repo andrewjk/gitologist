@@ -91,10 +91,14 @@ public static class Fetch
 
     private static async Task<List<DiscoveredRef>> DiscoverRefs(string remoteUrl, RemoteOptions? options = null)
     {
-        var url = new Uri(new Uri(remoteUrl), "info/refs?service=git-upload-pack");
+        var url = new Uri($"{remoteUrl.TrimEnd('/')}/git-upload-pack");
+
+        var requestBody = BuildLsRefsRequest();
 
         using var client = new HttpClient();
-        client.DefaultRequestHeaders.Add("Accept", "application/x-git-upload-pack-advertisement");
+        using var content = new ByteArrayContent(requestBody);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-git-upload-pack-request");
+        client.DefaultRequestHeaders.Add("Accept", "application/x-git-upload-pack-result");
         client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         if (options?.Credentials != null)
@@ -105,7 +109,7 @@ public static class Fetch
             client.DefaultRequestHeaders.Add("Authorization", $"Basic {base64Auth}");
         }
 
-        var response = await client.GetAsync(url);
+        var response = await client.PostAsync(url, content);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException($"Failed to discover refs: {(int)response.StatusCode} {response.ReasonPhrase}");
@@ -115,19 +119,9 @@ public static class Fetch
         var lines = Packfile.DecodePktLines(data);
 
         var refs = new List<DiscoveredRef>();
-        var started = false;
 
         foreach (var line in lines)
         {
-            if (line.Contains("# service=git-upload-pack"))
-            {
-                started = true;
-                continue;
-            }
-
-            if (!started) continue;
-            if (string.IsNullOrEmpty(line)) continue;
-
             var trimmed = line.Trim();
             if (string.IsNullOrEmpty(trimmed)) continue;
 
@@ -221,7 +215,7 @@ public static class Fetch
 
     private static async Task<List<PackObject>> FetchPackfile(string remoteUrl, List<string> wants, List<string> haves, RemoteOptions? options = null)
     {
-        var url = new Uri(new Uri(remoteUrl), "git-upload-pack");
+        var url = new Uri($"{remoteUrl.TrimEnd('/')}/git-upload-pack");
 
         var requestBody = BuildFetchRequest(wants, haves);
 

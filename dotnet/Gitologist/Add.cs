@@ -44,9 +44,10 @@ public static class Add
             var mtimeSeconds = (uint)fileInfo.LastWriteTime.ToUniversalTime().Subtract(DateTime.UnixEpoch).TotalSeconds;
             var mtimeNanos = (uint)((fileInfo.LastWriteTime.ToUniversalTime().Subtract(DateTime.UnixEpoch).TotalSeconds % 1) * 1_000_000_000);
 
-            index[file] = new IndexEntry
+            var normalizedFile = file.Replace('\\', '/');
+            index[normalizedFile] = new IndexEntry
             {
-                Path = file,
+                Path = normalizedFile,
                 Sha = hash,
                 Mode = "100644",
                 Size = (uint)fileInfo.Length,
