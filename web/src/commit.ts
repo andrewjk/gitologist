@@ -110,7 +110,7 @@ async function createTreeRecursive(
 		treeEntries.push({
 			path: dir,
 			sha: dirSha,
-			mode: "040000",
+			mode: "40000",
 			type: "tree",
 		});
 	}

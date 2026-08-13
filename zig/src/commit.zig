@@ -168,7 +168,7 @@ fn createTreeRecursive(
         try tree_entries.append(allocator, .{
             .path = try allocator.dupe(u8, dir_name),
             .sha = dir_sha,
-            .mode = try allocator.dupe(u8, "040000"),
+            .mode = try allocator.dupe(u8, "40000"),
             .entry_type = try allocator.dupe(u8, "tree"),
         });
     }

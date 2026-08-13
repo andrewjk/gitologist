@@ -103,6 +103,7 @@ public static class Push
 
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("Accept", "application/x-git-receive-pack-advertisement");
+        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         if (options?.Credentials != null)
         {
@@ -167,6 +168,7 @@ public static class Push
         using var content = new ByteArrayContent(requestBody);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-git-receive-pack-request");
         client.DefaultRequestHeaders.Add("Accept", "application/x-git-receive-pack-result");
+        client.DefaultRequestHeaders.Add("Git-Protocol", "version=2");
 
         if (options?.Credentials != null)
         {

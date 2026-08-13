@@ -95,7 +95,7 @@ private func createTreeRecursive(at rootPath: String, gitDir: String, index: [St
 	for dir in subdirs.sorted() {
 		let dirPrefix = prefix.isEmpty ? dir : "\(prefix)/\(dir)"
 		let dirSha = try await createTreeRecursive(at: rootPath, gitDir: gitDir, index: index, prefix: dirPrefix)
-		treeEntries.append((path: dir, sha: dirSha, mode: "040000", type: .tree))
+		treeEntries.append((path: dir, sha: dirSha, mode: "40000", type: .tree))
 	}
 
 	// Sort entries by path (Git requires this)
