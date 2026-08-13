@@ -610,4 +610,118 @@ public class PullTests
         );
         Assert.AreEqual("local changes to file2", content2);
     }
+
+    [TestMethod]
+    public async Task CheckoutPreservesUntrackedLocalFiles()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt"),
+            "contentA"
+        );
+        await Add.AddFiles(_testDir, new[] { "fileA.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Remote adds fileB
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileB.txt"),
+            "remoteB"
+        );
+        await Add.AddFiles(_testDir, new[] { "fileB.txt" });
+        await Commit.CreateCommit(_testDir, "Add fileB");
+        await Push.PushToRemote(_testDir);
+
+        // Reset local branch back to first commit and rebuild the index
+        var localBranchPath = Path.Combine(
+            _testDir,
+            ".git",
+            "refs",
+            "heads",
+            "main"
+        );
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt"),
+            "contentA"
+        );
+        File.Delete(Path.Combine(_testDir, "fileB.txt"));
+        await Add.AddAll(_testDir);
+
+        // Create an untracked local fileB with local content
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileB.txt"),
+            "localB"
+        );
+
+        await Pull.PullFromRemote(_testDir);
+
+        // fileB must be preserved (not overwritten by the remote's "remoteB")
+        var fileB = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "fileB.txt")
+        );
+        Assert.AreEqual("localB", fileB);
+
+        // fileA should be untouched
+        var fileA = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt")
+        );
+        Assert.AreEqual("contentA", fileA);
+    }
+
+    [TestMethod]
+    public async Task CheckoutPreservesModifiedTrackedFiles()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt"),
+            "contentA"
+        );
+        await Add.AddFiles(_testDir, new[] { "fileA.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "Initial commit");
+
+        await Push.PushToRemote(_testDir);
+
+        // Remote modifies fileA
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt"),
+            "remoteUpdated"
+        );
+        await Add.AddFiles(_testDir, new[] { "fileA.txt" });
+        await Commit.CreateCommit(_testDir, "Modify fileA");
+        await Push.PushToRemote(_testDir);
+
+        // Reset local branch back to first commit and rebuild the index
+        var localBranchPath = Path.Combine(
+            _testDir,
+            ".git",
+            "refs",
+            "heads",
+            "main"
+        );
+        await File.WriteAllTextAsync(localBranchPath, firstSha);
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt"),
+            "contentA"
+        );
+        await Add.AddAll(_testDir);
+
+        // Make a local modification to the tracked fileA. Unlike an unstaged
+        // edit (which throws "would be overwritten by merge"), a staged change
+        // passes the pre-flight check and is preserved by the checkout logic.
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt"),
+            "localModified"
+        );
+        await Add.AddFiles(_testDir, new[] { "fileA.txt" });
+
+        await Pull.PullFromRemote(_testDir);
+
+        // fileA must be preserved (not overwritten by the remote's "remoteUpdated")
+        var fileAModified = await File.ReadAllTextAsync(
+            Path.Combine(_testDir, "fileA.txt")
+        );
+        Assert.AreEqual("localModified", fileAModified);
+    }
 }

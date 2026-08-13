@@ -353,6 +353,20 @@ private func extractTreeRecursive(gitDir: String, workingPath: String, treeSha: 
 			if currentBlobs[path] == entry.sha {
 				continue
 			}
+
+			// Preserve files that aren't a clean checkout of the current commit:
+			// untracked files, or uncommitted local modifications. (This mirrors
+			// `git checkout`, which refuses to overwrite them.)
+			if FileManager.default.fileExists(atPath: entryPath) {
+				guard let currentSha = currentBlobs[path] else {
+					continue
+				}
+				let onDisk = try await hashFileAsBlob(at: entryPath)
+				if onDisk != currentSha {
+					continue
+				}
+			}
+
 			let blobData = try await readObject(at: gitDir, sha: entry.sha, cache: cache)
 			let content = try extractContentFromBlob(blobData)
 			try content.write(toFile: entryPath, atomically: true, encoding: .utf8)

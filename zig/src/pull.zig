@@ -395,6 +395,21 @@ fn extractTreeRecursive(
                 continue;
             }
 
+            // Preserve files that aren't a clean checkout of the current commit:
+            // untracked files, or uncommitted local modifications. (This mirrors
+            // `git checkout`, which refuses to overwrite them.)
+            if (cwd.access(io, entry_path, .{})) |_| {
+                const on_disk = try utils.hashFileAsBlob(io, allocator, entry_path);
+                defer allocator.free(on_disk);
+                if (current_sha == null or !std.mem.eql(u8, on_disk, current_sha.?)) {
+                    continue;
+                }
+            } else |err| {
+                if (err != error.FileNotFound) {
+                    return err;
+                }
+            }
+
             const blob_data = try utils.readObject(io, allocator, git_dir_path, entry.sha, pack_cache);
             defer allocator.free(blob_data);
 

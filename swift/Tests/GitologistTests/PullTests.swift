@@ -460,4 +460,84 @@ struct PullTests {
 
 		try? fileManager.removeItem(at: testDirPath)
 	}
+
+	@Test func checkoutPreservesUntrackedLocalFiles() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "contentA".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["fileA.txt"])
+		let firstSha = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try await push(at: testDirPath.path)
+
+		// Remote adds fileB
+		try "remoteB".write(to: testDirPath.appendingPathComponent("fileB.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["fileB.txt"])
+		let secondSha = try await commit(at: testDirPath.path, message: "Add fileB")
+		_ = secondSha
+		try await push(at: testDirPath.path)
+
+		// Reset local branch back to first commit and rebuild the index
+		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
+		try firstSha.write(to: localBranchPath, atomically: true, encoding: .utf8)
+		try "contentA".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try fileManager.removeItem(at: testDirPath.appendingPathComponent("fileB.txt"))
+		try await addAll(at: testDirPath.path)
+
+		// Create an untracked local fileB with local content
+		try "localB".write(to: testDirPath.appendingPathComponent("fileB.txt"), atomically: true, encoding: .utf8)
+
+		try await pull(at: testDirPath.path)
+
+		// fileB must be preserved (not overwritten by the remote's "remoteB")
+		let fileB = try String(contentsOf: testDirPath.appendingPathComponent("fileB.txt"), encoding: .utf8)
+		#expect(fileB == "localB")
+
+		// fileA should be untouched
+		let fileA = try String(contentsOf: testDirPath.appendingPathComponent("fileA.txt"), encoding: .utf8)
+		#expect(fileA == "contentA")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func checkoutPreservesModifiedTrackedFiles() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "contentA".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["fileA.txt"])
+		let firstSha = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		try await push(at: testDirPath.path)
+
+		// Remote modifies fileA
+		try "remoteUpdated".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["fileA.txt"])
+		let secondSha = try await commit(at: testDirPath.path, message: "Modify fileA")
+		_ = secondSha
+		try await push(at: testDirPath.path)
+
+		// Reset local branch back to first commit and rebuild the index
+		let localBranchPath = testDirPath.appendingPathComponent(".git").appendingPathComponent("refs").appendingPathComponent("heads").appendingPathComponent("main")
+		try firstSha.write(to: localBranchPath, atomically: true, encoding: .utf8)
+		try "contentA".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try await addAll(at: testDirPath.path)
+
+		// Make a local modification to the tracked fileA. Unlike an unstaged
+		// edit (which throws "would be overwritten by merge"), a staged change
+		// passes the pre-flight check and is preserved by the checkout logic.
+		try "localModified".write(to: testDirPath.appendingPathComponent("fileA.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["fileA.txt"])
+
+		try await pull(at: testDirPath.path)
+
+		// fileA must be preserved (not overwritten by the remote's "remoteUpdated")
+		let fileAModified = try String(contentsOf: testDirPath.appendingPathComponent("fileA.txt"), encoding: .utf8)
+		#expect(fileAModified == "localModified")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
 }

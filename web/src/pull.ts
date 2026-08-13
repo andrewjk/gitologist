@@ -244,6 +244,17 @@ async function extractTreeRecursive(
 			if (currentSha === entry.sha) {
 				continue;
 			}
+
+			// Preserve files that aren't a clean checkout of the current commit:
+			// untracked files, or uncommitted local modifications. (This mirrors
+			// `git checkout`, which refuses to overwrite them.)
+			if (existsSync(entryPath)) {
+				const onDisk = await hashFileAsBlob(entryPath);
+				if (currentSha === undefined || onDisk !== currentSha) {
+					continue;
+				}
+			}
+
 			const blobData = await readObject(gitDir, entry.sha, cache);
 			const content = extractContentFromBlob(blobData);
 			await writeFile(entryPath, content, "utf-8");

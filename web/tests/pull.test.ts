@@ -332,4 +332,68 @@ describe("pull", () => {
 		const content2 = await readFile(join(testDir, "file2.txt"), "utf-8");
 		expect(content2).toBe("local changes to file2");
 	});
+
+	it("should preserve untracked local file when pull would overwrite it", async () => {
+		await writeFile(join(testDir, "fileA.txt"), "contentA");
+		await add(testDir, ["fileA.txt"]);
+		const firstSha = await commit(testDir, "Initial commit");
+
+		await push(testDir);
+
+		// Remote adds fileB
+		await writeFile(join(testDir, "fileB.txt"), "remoteB");
+		await add(testDir, ["fileB.txt"]);
+		await commit(testDir, "Add fileB");
+		await push(testDir);
+
+		// Reset local branch back to first commit and rebuild the index
+		await writeFile(join(testDir, ".git", "refs", "heads", "main"), firstSha + "\n");
+		await writeFile(join(testDir, "fileA.txt"), "contentA");
+		await rm(join(testDir, "fileB.txt"));
+		await addAll(testDir);
+
+		// Create an untracked local fileB with local content
+		await writeFile(join(testDir, "fileB.txt"), "localB");
+
+		await pull(testDir);
+
+		// fileB must be preserved (not overwritten by the remote's "remoteB")
+		const fileB = await readFile(join(testDir, "fileB.txt"), "utf-8");
+		expect(fileB).toBe("localB");
+
+		// fileA should be untouched
+		const fileA = await readFile(join(testDir, "fileA.txt"), "utf-8");
+		expect(fileA).toBe("contentA");
+	});
+
+	it("should preserve modified tracked file when pull would overwrite it", async () => {
+		await writeFile(join(testDir, "fileA.txt"), "contentA");
+		await add(testDir, ["fileA.txt"]);
+		const firstSha = await commit(testDir, "Initial commit");
+
+		await push(testDir);
+
+		// Remote modifies fileA
+		await writeFile(join(testDir, "fileA.txt"), "remoteUpdated");
+		await add(testDir, ["fileA.txt"]);
+		await commit(testDir, "Modify fileA");
+		await push(testDir);
+
+		// Reset local branch back to first commit and rebuild the index
+		await writeFile(join(testDir, ".git", "refs", "heads", "main"), firstSha + "\n");
+		await writeFile(join(testDir, "fileA.txt"), "contentA");
+		await addAll(testDir);
+
+		// Stage a local modification to the tracked fileA. Unlike an unstaged
+		// edit (which throws "would be overwritten by merge"), a staged change
+		// passes the pre-flight check and is preserved by the checkout logic.
+		await writeFile(join(testDir, "fileA.txt"), "localModified");
+		await add(testDir, ["fileA.txt"]);
+
+		await pull(testDir);
+
+		// fileA must be preserved (not overwritten by the remote's "remoteUpdated")
+		const fileA = await readFile(join(testDir, "fileA.txt"), "utf-8");
+		expect(fileA).toBe("localModified");
+	});
 });

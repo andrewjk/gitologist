@@ -774,3 +774,138 @@ test "should not overwrite unchanged files with local modifications" {
 
     allocator.free(first_sha);
 }
+
+test "should preserve untracked local file when pull would overwrite it" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-13" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const file_a_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "fileA.txt" });
+    const file_b_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "fileB.txt" });
+    defer allocator.free(file_a_path);
+    defer allocator.free(file_b_path);
+
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "contentA" });
+
+    const paths = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths);
+    paths[0] = try allocator.dupe(u8, "fileA.txt");
+    defer allocator.free(paths[0]);
+
+    try add(io, allocator, tmp_path, paths);
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Remote adds fileB
+    try cwd.writeFile(io, .{ .sub_path = file_b_path, .data = "remoteB" });
+
+    const paths2 = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths2);
+    paths2[0] = try allocator.dupe(u8, "fileB.txt");
+    defer allocator.free(paths2[0]);
+    try add(io, allocator, tmp_path, paths2);
+    const second_sha = try commit(io, allocator, tmp_path, "Add fileB");
+    defer allocator.free(second_sha);
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Reset local branch back to first commit and rebuild the index
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "contentA" });
+    try cwd.deleteFile(io, file_b_path);
+    try addAll(io, allocator, tmp_path);
+
+    // Create an untracked local fileB with local content
+    try cwd.writeFile(io, .{ .sub_path = file_b_path, .data = "localB" });
+
+    try pull(io, allocator, tmp_path, null, null, null);
+
+    // fileB must be preserved (not overwritten by the remote's "remoteB")
+    const file_b_content = try cwd.readFileAlloc(io, file_b_path, allocator, .unlimited);
+    defer allocator.free(file_b_content);
+    try std.testing.expectEqualStrings("localB", file_b_content);
+
+    // fileA should be untouched
+    const file_a_content = try cwd.readFileAlloc(io, file_a_path, allocator, .unlimited);
+    defer allocator.free(file_a_content);
+    try std.testing.expectEqualStrings("contentA", file_a_content);
+
+    allocator.free(first_sha);
+}
+
+test "should preserve modified tracked file when pull would overwrite it" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    const tmp_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp", "gitologist-pull-test-14" });
+    defer allocator.free(tmp_path);
+
+    const cwd = std.Io.Dir.cwd();
+
+    try cwd.createDirPath(io, tmp_path);
+    defer cwd.deleteTree(io, tmp_path) catch {};
+
+    try init(io, allocator, tmp_path);
+
+    const file_a_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, "fileA.txt" });
+    defer allocator.free(file_a_path);
+
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "contentA" });
+
+    const paths = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths);
+    paths[0] = try allocator.dupe(u8, "fileA.txt");
+    defer allocator.free(paths[0]);
+
+    try add(io, allocator, tmp_path, paths);
+    const first_sha = try commit(io, allocator, tmp_path, "Initial commit");
+
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Remote modifies fileA
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "remoteUpdated" });
+
+    const paths2 = try allocator.alloc([]const u8, 1);
+    defer allocator.free(paths2);
+    paths2[0] = try allocator.dupe(u8, "fileA.txt");
+    defer allocator.free(paths2[0]);
+    try add(io, allocator, tmp_path, paths2);
+    const second_sha = try commit(io, allocator, tmp_path, "Modify fileA");
+    defer allocator.free(second_sha);
+    try push(io, allocator, tmp_path, null, null, null);
+
+    // Reset local branch back to first commit and rebuild the index
+    const local_branch_path = try std.fs.path.join(allocator, &[_][]const u8{ tmp_path, ".git", "refs", "heads", "main" });
+    defer allocator.free(local_branch_path);
+    try cwd.writeFile(io, .{ .sub_path = local_branch_path, .data = first_sha });
+
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "contentA" });
+    try addAll(io, allocator, tmp_path);
+
+    // Make a local modification to the tracked fileA. Unlike an unstaged
+    // edit (which throws "would be overwritten by merge"), a staged change
+    // passes the pre-flight check and is preserved by the checkout logic.
+    try cwd.writeFile(io, .{ .sub_path = file_a_path, .data = "localModified" });
+    try add(io, allocator, tmp_path, paths);
+
+    try pull(io, allocator, tmp_path, null, null, null);
+
+    // fileA must be preserved (not overwritten by the remote's "remoteUpdated")
+    const file_a_modified = try cwd.readFileAlloc(io, file_a_path, allocator, .unlimited);
+    defer allocator.free(file_a_modified);
+    try std.testing.expectEqualStrings("localModified", file_a_modified);
+
+    allocator.free(first_sha);
+}
