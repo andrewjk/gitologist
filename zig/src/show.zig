@@ -3,7 +3,13 @@ const std = @import("std");
 const utils = @import("utils.zig");
 const getCurrentCommit = @import("branch.zig").getCurrentCommit;
 
-pub fn show(io: std.Io, allocator: std.mem.Allocator, path: []const u8, file_path: []const u8) ![]const u8 {
+pub fn show(
+	io: std.Io,
+	allocator: std.mem.Allocator,
+	path: []const u8,
+	file_path: []const u8,
+	commit: ?[]const u8,
+) ![]const u8 {
 	const git_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ path, ".git" });
 	defer allocator.free(git_dir_path);
 
@@ -16,12 +22,27 @@ pub fn show(io: std.Io, allocator: std.mem.Allocator, path: []const u8, file_pat
 	var pack_cache = utils.PackfileCache.init(allocator);
 	defer pack_cache.deinit();
 
-	const commit_sha = try getCurrentCommit(io, allocator, git_dir_path) orelse {
-		return error.PathNotFound;
-	};
-	defer allocator.free(commit_sha);
+	var head_sha: ?[]const u8 = null;
+	defer if (head_sha) |h| allocator.free(h);
 
-	const commit_data = try utils.readObject(io, allocator, git_dir_path, commit_sha, &pack_cache);
+	if (commit == null) {
+		head_sha = try getCurrentCommit(io, allocator, git_dir_path) orelse {
+			return error.PathNotFound;
+		};
+	}
+
+	const commit_sha = commit orelse head_sha.?;
+
+	const commit_data = if (commit != null) blk: {
+		const data = utils.readObject(io, allocator, git_dir_path, commit_sha, &pack_cache) catch {
+			return error.CommitNotFound;
+		};
+		if (!std.mem.startsWith(u8, data, "commit ")) {
+			allocator.free(data);
+			return error.CommitNotFound;
+		}
+		break :blk data;
+	} else try utils.readObject(io, allocator, git_dir_path, commit_sha, &pack_cache);
 	defer allocator.free(commit_data);
 
 	const tree_sha = try utils.extractTreeFromCommit(commit_data);

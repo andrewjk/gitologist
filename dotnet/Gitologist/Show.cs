@@ -2,7 +2,7 @@ namespace Gitologist;
 
 public static class Show
 {
-    public static async Task<string> ShowFile(string path, string filePath)
+    public static async Task<string> ShowFile(string path, string filePath, string? commit = null)
     {
         var gitDir = Path.Combine(path, ".git");
 
@@ -11,15 +11,46 @@ public static class Show
             throw new InvalidOperationException("Not a git repository");
         }
 
-        var cache = new Utils.PackfileCache();
-
-        var commitSha = await Branch.GetCurrentCommit(gitDir);
-        if (commitSha == null)
+        string commitSha;
+        if (commit != null)
         {
-            throw new InvalidOperationException($"Path '{filePath}' does not exist in 'HEAD'");
+            commitSha = commit;
+        }
+        else
+        {
+            var headSha = await Branch.GetCurrentCommit(gitDir);
+            if (headSha == null)
+            {
+                throw new InvalidOperationException($"Path '{filePath}' does not exist in 'HEAD'");
+            }
+            commitSha = headSha;
         }
 
-        var commitData = await Utils.ReadObject(gitDir, commitSha, cache);
+        var cache = new Utils.PackfileCache();
+
+        string commitData;
+        if (commit != null)
+        {
+            string data;
+            try
+            {
+                data = await Utils.ReadObject(gitDir, commitSha, cache);
+            }
+            catch
+            {
+                throw new InvalidOperationException($"Commit '{commitSha}' not found");
+            }
+            if (!data.StartsWith("commit "))
+            {
+                throw new InvalidOperationException($"Commit '{commitSha}' not found");
+            }
+            commitData = data;
+        }
+        else
+        {
+            commitData = await Utils.ReadObject(gitDir, commitSha, cache);
+        }
+
         var treeSha = Utils.ExtractTreeFromCommit(commitData);
 
         var blobSha = await ResolveBlobSha(gitDir, treeSha, filePath, cache);

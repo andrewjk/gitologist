@@ -132,6 +132,55 @@ public class ShowTests
     }
 
     [TestMethod]
+    public async Task ShouldReadFileContentAtSpecificCommit()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "v1");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "First");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "v2");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        var secondSha = await Commit.CreateCommit(_testDir, "Second");
+
+        Assert.AreEqual("v1", await Show.ShowFile(_testDir, "test.txt", firstSha));
+        Assert.AreEqual("v2", await Show.ShowFile(_testDir, "test.txt", secondSha));
+        Assert.AreEqual("v2", await Show.ShowFile(_testDir, "test.txt"));
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowPathNotFoundAtOlderCommitForFileAddedLater()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "first.txt"), "first");
+        await Add.AddFiles(_testDir, new[] { "first.txt" });
+        var firstSha = await Commit.CreateCommit(_testDir, "First");
+
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "later.txt"), "later");
+        await Add.AddFiles(_testDir, new[] { "later.txt" });
+        await Commit.CreateCommit(_testDir, "Add later file");
+
+        var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => Show.ShowFile(_testDir, "later.txt", firstSha)
+        );
+        StringAssert.Contains(ex.Message, "does not exist in 'HEAD'");
+    }
+
+    [TestMethod]
+    public async Task ShouldThrowErrorIfCommitDoesNotExist()
+    {
+        await Init.InitRepo(_testDir);
+        await File.WriteAllTextAsync(Path.Combine(_testDir, "test.txt"), "content");
+        await Add.AddFiles(_testDir, new[] { "test.txt" });
+        await Commit.CreateCommit(_testDir, "Initial commit");
+
+        var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => Show.ShowFile(_testDir, "test.txt", "0000000000000000000000000000000000000000")
+        );
+        StringAssert.Contains(ex.Message, "not found");
+    }
+
+    [TestMethod]
     public async Task ShouldThrowErrorIfPathPointsToADirectory()
     {
         await Init.InitRepo(_testDir);

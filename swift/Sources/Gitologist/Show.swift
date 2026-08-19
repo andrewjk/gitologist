@@ -1,8 +1,9 @@
 import Foundation
 
-public enum ShowError: Error, LocalizedError {
+public enum ShowError: Error, LocalizedError, Equatable {
 	case notAGitRepository
 	case pathNotFound(String)
+	case commitNotFound(String)
 
 	public var errorDescription: String? {
 		switch self {
@@ -10,23 +11,43 @@ public enum ShowError: Error, LocalizedError {
 			return "Not a git repository"
 		case let .pathNotFound(path):
 			return "Path '\(path)' does not exist in 'HEAD'"
+		case let .commitNotFound(commit):
+			return "Commit '\(commit)' not found"
 		}
 	}
 }
 
-public func show(at path: String, filePath: String) async throws -> String {
+public func show(at path: String, filePath: String, commit: String? = nil) async throws -> String {
 	let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
 
 	guard FileManager.default.fileExists(atPath: gitDir.path) else {
 		throw ShowError.notAGitRepository
 	}
 
-	guard let commitSha = try await getCurrentCommit(at: gitDir.path) else {
-		throw ShowError.pathNotFound(filePath)
+	let commitSha: String
+	if let commit {
+		commitSha = commit
+	} else {
+		guard let headSha = try await getCurrentCommit(at: gitDir.path) else {
+			throw ShowError.pathNotFound(filePath)
+		}
+		commitSha = headSha
 	}
 
 	let cache = PackfileCache()
-	let commitData = try await readObject(at: gitDir.path, sha: commitSha, cache: cache)
+
+	let commitData: String
+	if commit != nil {
+		guard let data = try? await readObject(at: gitDir.path, sha: commitSha, cache: cache),
+		      data.hasPrefix("commit ")
+		else {
+			throw ShowError.commitNotFound(commitSha)
+		}
+		commitData = data
+	} else {
+		commitData = try await readObject(at: gitDir.path, sha: commitSha, cache: cache)
+	}
+
 	let treeSha = try extractTreeFromCommit(commitData)
 
 	guard let blobSha = try await resolveBlobSha(

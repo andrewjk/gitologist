@@ -113,6 +113,66 @@ struct ShowTests {
 		try? fileManager.removeItem(at: testDirPath)
 	}
 
+	@Test func shouldReadFileContentAtSpecificCommit() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "v1".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
+		let firstSha = try await commit(at: testDirPath.path, message: "First")
+
+		try "v2".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
+		let secondSha = try await commit(at: testDirPath.path, message: "Second")
+
+		try #expect(await show(at: testDirPath.path, filePath: "test.txt", commit: firstSha) == "v1")
+		try #expect(await show(at: testDirPath.path, filePath: "test.txt", commit: secondSha) == "v2")
+		try #expect(await show(at: testDirPath.path, filePath: "test.txt") == "v2")
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldThrowPathNotFoundAtOlderCommitForFileAddedLater() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "first".write(to: testDirPath.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["first.txt"])
+		let firstSha = try await commit(at: testDirPath.path, message: "First")
+
+		try "later".write(to: testDirPath.appendingPathComponent("later.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["later.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Add later file")
+
+		await #expect(throws: ShowError.pathNotFound("later.txt")) {
+			try await show(at: testDirPath.path, filePath: "later.txt", commit: firstSha)
+		}
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
+	@Test func shouldThrowErrorIfCommitNotFound() async throws {
+		let testDirPath = testDir
+		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)
+		try await initRepo(at: testDirPath.path)
+
+		try "content".write(to: testDirPath.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+		try await add(at: testDirPath.path, files: ["test.txt"])
+		_ = try await commit(at: testDirPath.path, message: "Initial commit")
+
+		await #expect(throws: ShowError.commitNotFound("0000000000000000000000000000000000000000")) {
+			try await show(
+				at: testDirPath.path,
+				filePath: "test.txt",
+				commit: "0000000000000000000000000000000000000000"
+			)
+		}
+
+		try? fileManager.removeItem(at: testDirPath)
+	}
+
 	@Test func shouldThrowErrorIfPathPointsToADirectory() async throws {
 		let testDirPath = testDir
 		try fileManager.createDirectory(at: testDirPath, withIntermediateDirectories: true)

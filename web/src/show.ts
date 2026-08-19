@@ -10,20 +10,42 @@ import {
 	type PackfileCache,
 } from "./utils.ts";
 
-export async function show(path: string, filePath: string): Promise<string> {
+export async function show(path: string, filePath: string, commit?: string): Promise<string> {
 	const gitDir = join(path, ".git");
 
 	if (!existsSync(gitDir)) {
 		throw new Error("Not a git repository");
 	}
 
-	const commitSha = await getCurrentCommit(gitDir);
-	if (commitSha === null) {
-		throw new Error(`Path '${filePath}' does not exist in 'HEAD'`);
+	let commitSha: string;
+	if (commit !== undefined) {
+		commitSha = commit;
+	} else {
+		const headSha = await getCurrentCommit(gitDir);
+		if (headSha === null) {
+			throw new Error(`Path '${filePath}' does not exist in 'HEAD'`);
+		}
+		commitSha = headSha;
 	}
 
 	const cache: PackfileCache = new Map();
-	const commitData = await readObject(gitDir, commitSha, cache);
+
+	let commitData: string;
+	if (commit !== undefined) {
+		let data: string;
+		try {
+			data = await readObject(gitDir, commitSha, cache);
+		} catch {
+			throw new Error(`Commit '${commitSha}' not found`);
+		}
+		if (!data.startsWith("commit ")) {
+			throw new Error(`Commit '${commitSha}' not found`);
+		}
+		commitData = data;
+	} else {
+		commitData = await readObject(gitDir, commitSha, cache);
+	}
+
 	const treeSha = extractTreeFromCommit(commitData);
 
 	const blobSha = await resolveBlobSha(gitDir, treeSha, filePath, cache);
