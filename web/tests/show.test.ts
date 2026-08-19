@@ -89,6 +89,42 @@ describe("show", () => {
 		await expect(show(testDir, "nonexistent.txt")).rejects.toThrow("does not exist in 'HEAD'");
 	});
 
+	it("should read file content at a specific commit", async () => {
+		await writeFile(join(testDir, "test.txt"), "v1");
+		await add(testDir, ["test.txt"]);
+		const firstSha = await commit(testDir, "First");
+
+		await writeFile(join(testDir, "test.txt"), "v2");
+		await add(testDir, ["test.txt"]);
+		const secondSha = await commit(testDir, "Second");
+
+		expect(await show(testDir, "test.txt", firstSha)).toBe("v1");
+		expect(await show(testDir, "test.txt", secondSha)).toBe("v2");
+		expect(await show(testDir, "test.txt")).toBe("v2");
+	});
+
+	it("should throw pathNotFound at older commit for file added later", async () => {
+		await writeFile(join(testDir, "first.txt"), "first");
+		await add(testDir, ["first.txt"]);
+		const firstSha = await commit(testDir, "First");
+
+		await writeFile(join(testDir, "later.txt"), "later");
+		await add(testDir, ["later.txt"]);
+		await commit(testDir, "Add later file");
+
+		await expect(show(testDir, "later.txt", firstSha)).rejects.toThrow("does not exist in 'HEAD'");
+	});
+
+	it("should throw error if commit does not exist", async () => {
+		await writeFile(join(testDir, "test.txt"), "content");
+		await add(testDir, ["test.txt"]);
+		await commit(testDir, "Initial commit");
+
+		await expect(
+			show(testDir, "test.txt", "0000000000000000000000000000000000000000"),
+		).rejects.toThrow("Commit '0000000000000000000000000000000000000000' not found");
+	});
+
 	it("should throw error if path points to a directory", async () => {
 		await mkdir(join(testDir, "sub"), { recursive: true });
 		await writeFile(join(testDir, "sub", "inner.txt"), "inner");
